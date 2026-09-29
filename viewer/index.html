@@ -227,7 +227,7 @@
       getJSON(base + 'recordings.json').catch(function () { return []; })
     ]).then(function (res) {
       var apps = res[0], recs = res[1];
-      document.getElementById('bench').innerHTML = '<div id="picker"><h3>Bench</h3>' +
+      document.getElementById('bench').innerHTML = '<div id="picker"><p><a href="../">↑ Up</a></p><h3>Bench</h3>' +
         (apps ? '<p class="muted">Live, per registered app (add &amp;session=&lt;id&gt; to filter):</p>' +
           (apps.length ? apps.map(function (a) { return '<div><a href="?app=' + encodeURIComponent(a.id) + '">' + a.name + '</a>' + (a.story ? ' <span class="muted">· story</span>' : '') + '</div>'; }).join('')
                        : '<div class="muted">none yet: an app registers with PUT /apps/&lt;id&gt;</div>') : '') +

@@ -97,6 +97,11 @@
     benchUrl = withParam(withParam(benchBase, 'app', q.get('appid') || ''), 'session', session);
   }
   document.getElementById('benchFrame').src = benchUrl;
+  // Opened with nothing to show (no app, no recording): say so, and point somewhere useful.
+  if (!appUrl && !q.get('replay')) {
+    document.querySelector('.split').innerHTML = '<div class="missing"><b>Nothing on the bench yet.</b><span>Open a scenario to see an app and its bench side by side.</span>' +
+      '<a href="' + (q.get('back') || q.get('home') || '../../') + '">← Choose a scenario</a></div>';
+  }
   document.getElementById('what').textContent = q.get('title') || '';
   // Optional, for a lab that sends visitors here: where "back" goes, and what to do first.
   if (q.get('back')) { var bk = document.getElementById('back'); bk.href = q.get('back'); bk.hidden = false; }
