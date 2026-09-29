@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>Bench</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #171d2c; --panel-2: #1e2740; --border: #2a3350; --text: #e6ebff; --muted: #8a93b8;
+    --accent: #5eead4; --accent-2: #a78bfa; --warn: #fbbf24; --bad: #fb7185; --good: #34d399;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .muted { color: var(--muted); }
+  #bench { display: flex; flex-direction: column; height: 100vh; }
+
+  .bh { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .bh .app { font-weight: 600; font-size: 13.5px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .badge.ok { color: var(--good); border-color: var(--good); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); }
+  .badge.rep { color: var(--accent-2); border-color: var(--accent-2); }
+  .bh select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 11.5px; padding: 2px 4px; max-width: 260px; }
+  .bh-spacer { flex: 1; }
+  .viewtoggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .viewtoggle button { background: none; border: none; color: var(--muted); font: 600 11.5px -apple-system, sans-serif; padding: 4px 11px; cursor: pointer; }
+  .viewtoggle button + button { border-left: 1px solid var(--border); }
+  .viewtoggle button.on { background: rgba(94,234,212,.12); color: var(--accent); }
+  .meterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 11.5px; color: var(--muted); }
+  .meterbar b { color: var(--accent); font-weight: 600; }
+  .meterbar .status { margin-left: auto; }
+  .view-overview .detail-only { display: none !important; }
+  .stitle b { color: var(--text); font-weight: 600; letter-spacing: .08em; }
+  .stitle span { text-transform: none; letter-spacing: 0; font-size: 11px; margin-left: 6px; }
+  .stephead { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 2px; }
+  .stephead .tag { margin-left: auto; }
+  .stepstats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--muted); margin: 6px 0; }
+  .stepstats b { color: var(--text); font-weight: 600; }
+  .stepresult { font-size: 12.5px; color: var(--accent); margin: 4px 0 2px; }
+  .status { padding: 0 6px; border-radius: 8px; border: 1px solid currentColor; }
+  .st-ok { color: var(--good); } .st-error { color: var(--bad); } .st-aborted { color: var(--warn); } .st-running { color: var(--accent); } .st-waiting { color: var(--warn); }
+
+  #controls { display: none; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 12px; }
+  #controls.on { display: flex; }
+  #controls button, #controls select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+  #controls button:hover { border-color: var(--accent); }
+
+  .bgrid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(300px, 1fr); }
+  .col { overflow: auto; padding: 10px 12px; border-right: 1px solid var(--border); }
+  .col:last-child { border-right: none; }
+  .stitle { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 4px 0 6px; }
+  .stitle + * { margin-bottom: 12px; }
+
+  .graphwrap { overflow-x: auto; }
+  .graph { position: relative; margin: 0 auto; }
+  .graph svg.edges { position: absolute; left: 0; top: 0; color: var(--border); overflow: visible; }
+  .edge path { fill: none; stroke: currentColor; stroke-width: 1.4; }
+  .edge text { fill: var(--muted); font: 9.5px ui-monospace, monospace; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+  .edge.taken { color: var(--accent); } .edge.taken path { stroke-width: 2.2; } .edge.taken text { fill: var(--accent); }
+  .edge.flowing path { stroke-dasharray: 6 5; animation: flow .6s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -11; } }
+  .edge.untaken { opacity: .45; } .edge.untaken path { stroke-dasharray: 3 3; }
+  .gnode { position: absolute; border: 1px solid var(--border); background: #1e2740; border-radius: 7px; padding: 4px 8px; cursor: pointer; transition: all .25s ease; color: var(--muted); overflow: hidden; }
+  .gnode .gl { font: 12px ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gnode .gm { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gnode .gp { font-size: 10.5px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .gnode.kind-llm .gl::before { content: "◆ "; color: var(--accent-2); }
+  .gnode.kind-gate .gl::before { content: "⏸ "; color: var(--warn); }
+  .gnode.kind-tool .gl::before { content: "⚙ "; }
+  .gnode.kind-retrieval .gl::before { content: "⌕ "; }
+  .gnode.idle { opacity: .55; }
+  .gnode.done { color: var(--text); border-color: var(--accent-2); background: #2a2550; }
+  .gnode.done .gm { color: var(--text); }
+  .gnode.active { color: #06201c; background: #5eead4; border-color: var(--accent); box-shadow: 0 0 14px rgba(94,234,212,.5); }
+  .gnode.active .gm, .gnode.active .gl::before { color: #06201c; }
+  .gnode.gatewait { color: var(--text); border-color: var(--warn); background: #3a3524; box-shadow: 0 0 14px rgba(251,191,36,.35); animation: pulse 1.4s ease-in-out infinite; }
+  .gnode.error { color: var(--text); border-color: var(--bad); background: #3a2230; }
+  .gnode.untaken { border-style: dashed; opacity: .5; }
+  .gnode.skipped { border-style: dotted; opacity: .6; color: var(--muted); }
+  .gnode.skipped .gl::after { content: "  · skipped"; font-size: 10px; }
+  .gnode.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+  @keyframes pulse { 50% { box-shadow: 0 0 4px rgba(251,191,36,.2); } }
+  .unmapped { margin-top: 6px; font-size: 11.5px; }
+
+  .wrow { display: grid; grid-template-columns: 118px 1fr 62px; gap: 6px; align-items: center; font-size: 11px; height: 17px; }
+  .wrow.child .wl { padding-left: 10px; }
+  .wl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  .wtrack { position: relative; height: 9px; background: rgba(42,51,80,.45); border-radius: 3px; }
+  .wbar { position: absolute; top: 0; bottom: 0; background: var(--accent-2); border-radius: 3px; min-width: 2px; }
+  .wbar.inferred { opacity: .55; }
+  .wbar.gate { background: var(--warn); }
+  .wbar.error { background: var(--bad); }
+  .wbar.skipped { background: transparent; border: 1px dotted var(--muted); }
+  .wbar.open { background: var(--accent); animation: pulse 1.2s infinite; }
+  .wv { text-align: right; color: var(--text); }
+  .legend { font-size: 10.5px; margin-top: 4px; }
+
+  .panel { background: rgba(30,39,64,.68); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .panel.empty { opacity: .55; }
+  .ptitle { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 5px; display: flex; justify-content: space-between; }
+  .pcount { color: var(--accent); }
+  .pright { display: flex; gap: 6px; align-items: center; }
+  .rawbtn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; font: 9.5px ui-monospace, monospace; padding: 0 5px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .rawbtn:hover { border-color: var(--accent); color: var(--text); }
+  .rawbtn.on { color: var(--accent); border-color: var(--accent); }
+  .panel.storied { border-color: rgba(167,139,250,.45); }
+  .iolabel { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); margin: 8px 0 3px; }
+  pre.io { margin: 0; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 11px/1.45 ui-monospace, monospace; background: #111726; border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; color: var(--text); }
+  pre.io.out { border-color: var(--accent); }
+  details.hit > summary { cursor: pointer; list-style: none; }
+  details.hit > summary::-webkit-details-marker { display: none; }
+  details.hit > summary::before { content: '▸'; color: var(--muted); margin-right: 2px; }
+  details.hit[open] > summary::before { content: '▾'; color: var(--accent); }
+  .iotabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+  .iotab { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; font: 10.5px ui-monospace, monospace; padding: 1px 7px; cursor: pointer; }
+  .iotab.on { color: var(--accent); border-color: var(--accent); }
+  .pev + .pev { border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 4px; }
+  .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 11.5px; padding: 2px 0; border-bottom: 1px dashed rgba(42,51,80,.7); }
+  .kv .k { color: var(--muted); white-space: nowrap; }
+  .kv .v { text-align: right; overflow-wrap: anywhere; font-family: ui-monospace, monospace; font-size: 11px; }
+  .kv.hi .v { color: var(--accent); font-weight: 600; }
+  .row { font-size: 11.5px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; padding: 2px 0; }
+  .row .right { margin-left: auto; color: var(--muted); }
+  .tag { font-size: 10px; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border); color: var(--accent-2); font-family: ui-monospace, monospace; }
+  .src { font-size: 9.5px; padding: 0 4px; border-radius: 6px; border: 1px solid currentColor; }
+  .src-actual { color: var(--good); } .src-estimated { color: var(--warn); }
+  .note { margin-top: 4px; color: var(--muted); font-size: 11.5px; }
+  .note.quote { color: var(--text); border-left: 2px solid var(--border); padding-left: 6px; white-space: pre-wrap; }
+  .note.out { border-left-color: var(--accent); }
+  .gate { font-size: 12px; padding: 4px 6px; border-radius: 6px; margin-bottom: 4px; }
+  .gate.waiting { background: rgba(251,191,36,.16); border: 1px solid var(--warn); }
+  .gate.ok { color: var(--good); } .gate.bad { color: var(--bad); }
+  .err { color: var(--bad); font-size: 12px; }
+
+  .logcol { flex: 0 0 26%; min-height: 110px; border-top: 1px solid var(--border); padding: 6px 12px; overflow: auto; background: var(--panel); }
+  .log { font-size: 10.5px; }
+  .lrow { display: grid; grid-template-columns: 28px 64px 120px 128px 1fr; gap: 6px; padding: 1px 0; border-bottom: 1px solid rgba(42,51,80,.5); }
+  .lrow span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lrow .ls, .lrow .lt { color: var(--muted); text-align: right; }
+  .lrow .le { color: var(--accent-2); }
+  .lrow .ld { color: var(--muted); }
+  .lrow.t-llm_call .le { color: var(--accent); } .lrow.t-error .le { color: var(--bad); } .lrow.t-gate_waiting .le, .lrow.t-gate_resolved .le { color: var(--warn); }
+
+  #picker { padding: 24px; max-width: 640px; }
+  #picker a { color: var(--accent); }
+
+  /* Narrow (a phone, or the bench beside an app in the shell): one scrolling page, not
+     three scroll boxes, so the graph and panels keep their natural height. */
+  @media (max-width: 820px) {
+    #bench { height: auto; min-height: 100vh; }
+    .bgrid { display: block; }
+    .col { overflow: visible; border-right: none; border-bottom: 1px solid var(--border); }
+    .logcol { flex: none; max-height: none; overflow: visible; }
+    .lrow { grid-template-columns: 24px 52px 90px 1fr; } .lrow .ld { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="controls">
+  <button id="cPlay">Pause</button>
+  <button id="cRestart">Restart</button>
+  <button id="cEnd">Skip to end</button>
+  <label class="muted">speed <select id="cSpeed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label>
+  <span class="muted" id="cSrc"></span>
+</div>
+<div id="bench"></div>
+<script src="viewer/bench.js"></script>
+<script src="viewer/sources.js"></script>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var base = document.baseURI.replace(/[^/]*$/, '');
+  var bench = new Bench(document.getElementById('bench'));
+
+  function getJSON(url) { return fetch(url).then(function (r) { if (!r.ok) throw new Error(url + ': ' + r.status); return r.json(); }); }
+  function getText(url) { return fetch(url).then(function (r) { if (!r.ok) throw new Error(url + ': ' + r.status); return r.text(); }); }
+  function fail(msg) { document.getElementById('bench').innerHTML = '<div id="picker"><p style="color:var(--bad)">' + msg + '</p></div>'; }
+
+  var replay = q.get('replay');
+  var topoUrl = q.get('topology') || (q.get('app') ? base + 'topology/' + encodeURIComponent(q.get('app')) : null);
+
+  if (q.get('source') === 'parent') {
+    // Embedded sync: the map, story and events all arrive from the app via the shell.
+    document.getElementById('bench').querySelector('[data-f=meters]').textContent = 'waiting for the app…';
+    new BenchSources.ParentSource(bench).start();
+  } else if (replay) {
+    // A recording carries its app's map and story in its first line (SPEC section 3), so a
+    // replay needs no receiver and no registration: it works from a static export.
+    var ctl = document.getElementById('controls');
+    ctl.classList.add('on');
+    document.getElementById('cSrc').textContent = replay.split('/').pop();
+    getText(replay).then(function (text) {
+      var rec = BenchSources.parseRecording(text);
+      var topo = rec.header && rec.header.topology;
+      return (topo ? Promise.resolve(topo) : getJSON(topoUrl)).then(function (t) {
+        bench.setTopology(t);
+        if (rec.header && rec.header.story) bench.loadStory(t.app.id, rec.header.story);
+        return rec.events;
+      });
+    }).then(function (events) {
+      var btn = document.getElementById('cPlay');
+      var src = new BenchSources.ReplaySource(bench, events, {
+        speed: Number(q.get('speed') || 1),
+        onstate: function (s) { btn.textContent = s === 'playing' ? 'Pause' : s === 'done' ? 'Replay' : 'Play'; }
+      });
+      btn.onclick = function () { if (src.playing) src.pause(); else if (src.i >= src.events.length) src.start(); else src.play(); };
+      document.getElementById('cRestart').onclick = function () { src.start(); };
+      document.getElementById('cEnd').onclick = function () { src.finish(); };
+      document.getElementById('cSpeed').value = String(src.speed);
+      document.getElementById('cSpeed').onchange = function (e) { src.speed = Number(e.target.value); };
+      src.start();
+    }).catch(function (e) { fail('Could not load the recording: ' + e.message); });
+  } else if (topoUrl) {
+    getJSON(topoUrl).then(function (t) {
+      bench.setTopology(t);
+      if (t.story) bench.loadStory(t.app.id, null, base);
+      new BenchSources.LiveSource(bench, base, q.get('session')).start();
+    }).catch(function (e) { fail('Could not load the map for this app: ' + e.message + '. Has the app registered with the bench?'); });
+  } else {
+    // No app named: list the apps that registered, plus recordings listed in recordings.json
+    // (a static export has no receiver, so a failed /topologies just means "recordings only").
+    Promise.all([
+      getJSON(base + 'topologies').catch(function () { return null; }),
+      getJSON(base + 'recordings.json').catch(function () { return []; })
+    ]).then(function (res) {
+      var apps = res[0], recs = res[1];
+      document.getElementById('bench').innerHTML = '<div id="picker"><h3>Bench</h3>' +
+        (apps ? '<p class="muted">Live, per registered app (add &amp;session=&lt;id&gt; to filter):</p>' +
+          (apps.length ? apps.map(function (a) { return '<div><a href="?app=' + encodeURIComponent(a.id) + '">' + a.name + '</a>' + (a.story ? ' <span class="muted">· story</span>' : '') + '</div>'; }).join('')
+                       : '<div class="muted">none yet: an app registers with PUT /apps/&lt;id&gt;</div>') : '') +
+        '<p class="muted" style="margin-top:16px">Recordings:</p>' +
+        recs.map(function (r) { return '<div><a href="?replay=' + encodeURIComponent(r.path) + '">' + r.title + '</a></div>'; }).join('') + '</div>';
+    });
+  }
+})();
+</script>
+</body>
+</html>

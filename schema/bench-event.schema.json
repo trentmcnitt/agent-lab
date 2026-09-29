@@ -1,0 +1,514 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bench.local/schema/bench-event/0",
+  "title": "Bench event, v0",
+  "description": "One observability event. See SPEC.md. Unknown event_type values are valid; known ones constrain data.",
+  "type": "object",
+  "required": [
+    "v",
+    "run_id",
+    "node",
+    "event_type",
+    "ts"
+  ],
+  "properties": {
+    "v": {
+      "const": "bench/0"
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Unix seconds when the event happened."
+    },
+    "node": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Topology node id, or \"_run\" for run-level events."
+    },
+    "event_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "step_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "parent_step_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "content_mode": {
+      "enum": [
+        "full",
+        "redacted"
+      ]
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "run_started",
+              "run_finished"
+            ]
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "node": {
+            "const": "_run"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "run_finished"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok",
+                  "error",
+                  "aborted"
+                ]
+              },
+              "latency_ms": {
+                "$ref": "#/$defs/nonneg"
+              },
+              "outcome": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "step_finished"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok",
+                  "error",
+                  "skipped",
+                  "aborted"
+                ]
+              },
+              "latency_ms": {
+                "$ref": "#/$defs/nonneg"
+              },
+              "timings": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/$defs/nonneg"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "llm_call"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "model",
+              "input_tokens",
+              "output_tokens"
+            ],
+            "properties": {
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "provider": {
+                "type": "string"
+              },
+              "input_tokens": {
+                "$ref": "#/$defs/count",
+                "description": "TOTAL input, including cache reads and writes."
+              },
+              "cache_read_tokens": {
+                "$ref": "#/$defs/count"
+              },
+              "cache_write_tokens": {
+                "$ref": "#/$defs/count"
+              },
+              "output_tokens": {
+                "$ref": "#/$defs/count"
+              },
+              "cost_usd": {
+                "$ref": "#/$defs/nonneg"
+              },
+              "cost_source": {
+                "enum": [
+                  "actual",
+                  "estimated"
+                ]
+              },
+              "cost_basis": {
+                "type": "string"
+              },
+              "latency_ms": {
+                "$ref": "#/$defs/nonneg"
+              },
+              "time_to_first_chunk_ms": {
+                "$ref": "#/$defs/nonneg"
+              },
+              "finish_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stream": {
+                "type": "boolean"
+              },
+              "system": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "System instructions as sent (OTel gen_ai.system_instructions). Subject to content_mode."
+              },
+              "messages": {
+                "type": "array",
+                "description": "The input messages as sent, in order (OTel gen_ai.input.messages).",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "role"
+                  ],
+                  "properties": {
+                    "role": {
+                      "type": "string"
+                    },
+                    "content": {}
+                  }
+                }
+              },
+              "output": {
+                "description": "The raw model output as returned: text, or the tool call / structured object (OTel gen_ai.output.messages)."
+              },
+              "params": {
+                "type": "object",
+                "description": "Request parameters that shaped the output: max_tokens, temperature, tools offered, ..."
+              }
+            },
+            "dependentRequired": {
+              "cost_usd": [
+                "cost_source"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "chunk"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "index": {
+                "$ref": "#/$defs/count"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "retrieval"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "hits"
+            ],
+            "properties": {
+              "hits": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "score": {
+                      "type": "number"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "tool_call"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "tool"
+            ],
+            "properties": {
+              "tool": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "error"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "message"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "gate_resolved"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "approved"
+            ],
+            "properties": {
+              "approved": {
+                "type": "boolean"
+              },
+              "by": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "via": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "digest_match": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "decision"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "properties": {
+              "branch": {
+                "type": "string",
+                "description": "The branch taken out of this node (Agent Spec branch_selected); matched against the map's edges[].from_branch."
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nonneg": {
+      "type": "number",
+      "minimum": 0
+    }
+  }
+}

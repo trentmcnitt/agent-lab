@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bench.local/schema/bench-topology/0",
+  "title": "Bench topology manifest, v0",
+  "description": "One app's map: every step and every possible branch, so untaken branches render. Registered by the app; the bench stores nothing app-specific. Edge vocabulary follows Open Agent Spec (ControlFlowEdge: from_node, from_branch, to_node). See SPEC.md section 4.",
+  "type": "object",
+  "required": [
+    "v",
+    "app",
+    "nodes",
+    "edges"
+  ],
+  "properties": {
+    "v": {
+      "const": "bench-topology/0"
+    },
+    "app": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "const": "_run"
+            }
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "step",
+              "llm",
+              "tool",
+              "retrieval",
+              "gate",
+              "terminal"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "from_branch": {
+            "type": "string",
+            "description": "The branch of `from` that selects this edge (Agent Spec from_branch). Matched against a decision event's data.branch; also drawn as the edge label."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "panels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "event_types"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "event_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "enum": [
+              "latest",
+              "append"
+            ],
+            "description": "latest: show the most recent matching event; append: list every matching event. Default latest."
+          },
+          "fields": {
+            "type": "array",
+            "description": "Declared panel: show only these data keys, in order, from the matching events. The raw view stays one click away.",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "key"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "format": {
+                      "enum": [
+                        "text",
+                        "number",
+                        "number:1",
+                        "number:2",
+                        "number:4",
+                        "usd",
+                        "ms",
+                        "tokens",
+                        "percent",
+                        "json",
+                        "quote"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "story": {
+            "type": "boolean",
+            "description": "Rendered by the app's story script (its panels[<id>] function). Falls back to fields, then the generic view, if the story has none."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "node_from": {
+      "description": "OTLP apps only: how a span maps to a node.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "attribute"
+          ],
+          "properties": {
+            "attribute": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "span_name"
+          ],
+          "properties": {
+            "span_name": {
+              "const": true
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "story": {
+      "type": "boolean",
+      "description": "The app registers a story script with its map (custom panels and renderers). See SPEC.md section 5."
+    }
+  },
+  "additionalProperties": false
+}

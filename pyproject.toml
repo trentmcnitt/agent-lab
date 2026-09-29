@@ -1,0 +1,21 @@
+[project]
+name = "agent-lab-bench"
+version = "0.0.1"
+description = "Agent Lab Bench: see inside any AI app while you use it."
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.21",
+    "starlette>=1.7.0",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
