@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="docs/images/agentlab-mark.svg" alt="Agent Lab" width="112">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/agentlab-mark.svg">
+    <img src="docs/images/agentlab-mark-light.svg" alt="Agent Lab" width="112">
+  </picture>
 </p>
 
 <h1 align="center">Agent Lab</h1>

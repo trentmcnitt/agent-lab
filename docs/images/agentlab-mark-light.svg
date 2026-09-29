@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agent Lab">
+  <!-- Agent Lab mark for light backgrounds (chosen 09-29): the glowing A on a small dark rounded tile. -->
+  <defs><filter id="al-glow" filterUnits="userSpaceOnUse" x="-8" y="-8" width="80" height="80"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+  <rect x="0" y="0" width="64" height="64" rx="15" fill="#0b0f19"/>
+  <g transform="translate(32 33) scale(.72) translate(-32 -32)"><path d="M32 10 L54 54 L40 54 L32 36 L24 54 L10 54 Z" fill="#5eead4" stroke="#5eead4" stroke-width="5" stroke-linejoin="round" filter="url(#al-glow)"/></g>
+</svg>
