@@ -33,6 +33,8 @@
   .meterbar b { color: var(--accent); font-weight: 600; }
   .meterbar .status { margin-left: auto; }
   .view-overview .detail-only { display: none !important; }
+  /* Overview: branch names only on the path this run took, so labels never pile up at busy junctions. Detailed shows them all. */
+  .view-overview .edge:not(.taken) text { display: none; }
   .stitle b { color: var(--text); font-weight: 600; letter-spacing: .08em; }
   .stitle span { text-transform: none; letter-spacing: 0; font-size: 11px; margin-left: 6px; }
   .stephead { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 2px; }
