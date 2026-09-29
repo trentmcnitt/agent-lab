@@ -2,7 +2,7 @@
 name = "agent-lab-bench"
 version = "0.0.1"
 description = "Agent Lab Bench: see inside any AI app while you use it."
-license = "Apache-2.0"
+license = "FSL-1.1-ALv2"
 requires-python = ">=3.11"
 dependencies = [
     "jsonschema>=4.21",

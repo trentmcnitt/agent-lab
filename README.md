@@ -28,4 +28,4 @@ Status: v0, local only.
 
 ## License
 
-Apache License 2.0. See `LICENSE` and `NOTICE`.
+Functional Source License 1.1 with an Apache 2.0 future license (FSL-1.1-ALv2); see `LICENSE`. Free to use, modify and share for any purpose except a competing commercial product or service; each version becomes Apache 2.0 two years after its release.

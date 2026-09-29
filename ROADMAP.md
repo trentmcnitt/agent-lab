@@ -16,7 +16,7 @@ The idea it grows from: the bench is to an AI app what comments are to code. Com
 - [ ] Plain-language labels that keep the engineering look: tokens called tokens, "Recording · finished", a labelled final output, no session name on recordings.
 - [ ] Node detail: clicking a node opens its header (full name, time, tokens, cost, what it produced), then its input and output. Long labels wrap.
 - [ ] Deploy at agentlab.trentmcnitt.com.
-- [x] License: Apache 2.0.
+- [x] License: FSL-1.1-ALv2 (Functional Source License; each version becomes Apache 2.0 after two years).
 
 ## Next
 
