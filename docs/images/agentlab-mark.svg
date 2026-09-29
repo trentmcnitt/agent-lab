@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agent Lab">
+  <!-- Agent Lab mark (chosen 09-29): a solid glowing A, legs implied by a deep notch. For Agent Lab's own dark UI. -->
+  <defs>
+    <linearGradient id="al-gv" gradientUnits="userSpaceOnUse" x1="32" y1="8" x2="32" y2="56"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#8fb8f0"/></linearGradient>
+    <filter id="al-glow" filterUnits="userSpaceOnUse" x="-8" y="-8" width="80" height="80"><feGaussianBlur stdDeviation="2.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <path d="M32 10 L54 54 L40 54 L32 36 L24 54 L10 54 Z" fill="#5eead4" fill-rule="evenodd" stroke="#5eead4" stroke-width="5" stroke-linejoin="round" filter="url(#al-glow)"/>
+</svg>
