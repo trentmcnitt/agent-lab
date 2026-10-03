@@ -377,7 +377,11 @@ export function preview(steps, mode, sourceCount, isCheck, topo) {
       if (e.event_type === 'decision' && d.branch != null) { if (!(pres && isCheck && checked)) out = '→ ' + branchWords(e.node, d.branch); }
       else if (e.event_type === 'gate_resolved') out = d.approved ? '✓ approved' : '✕ denied';
       else if (e.event_type === 'gate_waiting') out = out || (pres ? '⏸ waiting for a person' : '⏸ waiting for a human');
-      else if (e.event_type === 'check_result' && ((pres && isCheck) || !out)) { var st = checkEventState(e); checked = true; out = st === 'passed' ? '✓ passed' : st === 'failed' ? '✕ didn’t pass' : '– not needed'; }
+      else if (e.event_type === 'check_result' && ((pres && isCheck) || !out)) {
+        var st = checkEventState(e), w = checkWord(topo, isCheck ? e.node : d.name, st);
+        checked = true;
+        out = w ? CHECK_SYM[st] + ' ' + w : st === 'passed' ? '✓ passed' : st === 'failed' ? '✕ didn’t pass' : '– not needed';
+      }
       else if (e.event_type === 'error') out = '✕ ' + (pres ? 'something went wrong' : (d.message || 'error'));
       else if (e.event_type === 'retrieval' && d.hits) out = out || (pres
         ? (sourceCount ? d.hits.length + ' of ' + sourceCount : d.hits.length + ' found')
@@ -400,6 +404,18 @@ var CHECK_WORDS = {
   passed: '✓ Passed.', failed: '✕ Didn’t pass.', not_on_path: '– Not needed this time.', running: 'Checking…',
   ran: 'Ran.', pending: 'Not reached yet.'
 };
+var CHECK_SYM = { passed: '✓', failed: '✕', not_on_path: '–' };
+/* A check's own words for its states, from the map's `check_words` (keyed by the check's name, or
+   a check node's id): {"passed": "Didn't trigger", "failed": "Triggered: sent to a person"}.
+   Missing states fall back to Passed / Didn't pass / Not needed this time. */
+export function checkWord(topo, key, state) {
+  var w = topo && topo.check_words && topo.check_words[key];
+  return w && typeof w[state] === 'string' && w[state] ? w[state] : null;
+}
+function stateHead(topo, key, state) {
+  var w = checkWord(topo, key, state);
+  return w ? CHECK_SYM[state] + ' ' + w.replace(/[.\s]+$/, '') + '.' : CHECK_WORDS[state];
+}
 function fillCopy(s, d) {
   return String(s).replace(/\{(\w+)\}/g, function (_, k) { return d && d[k] != null ? String(d[k]) : ''; });
 }
@@ -429,7 +445,7 @@ export function checkStates(topo, events, finished) {
       var done = nodeEvents(events, n.id).some(function (e) { return e.event_type === 'step_finished'; });
       state = errored ? 'failed' : done || finished ? 'ran' : 'running';
     } else state = finished ? 'not_on_path' : 'pending';
-    rows.push(checkRow(n.id, plainLabel(n), n.description || '', state, detail, evidence, stateCopy(n)));
+    rows.push(checkRow(n.id, plainLabel(n), n.description || '', state, detail, evidence, stateCopy(n), topo));
     evs.forEach(function (e) { byName[(e.data || {}).name] = true; });
   });
   var named = {};
@@ -444,12 +460,12 @@ export function checkStates(topo, events, finished) {
     var evs = named[name], states = evs.map(checkEventState);
     var state = states.indexOf('failed') >= 0 ? 'failed' : states.every(function (s) { return s === 'not_on_path'; }) ? 'not_on_path' : 'passed';
     var d = evs[evs.length - 1].data || {};
-    rows.push(checkRow(name, d.label || human(name), d.description || '', state, d.detail || null, d.evidence || [], null));
+    rows.push(checkRow(name, d.label || human(name), d.description || '', state, d.detail || null, d.evidence || [], null, topo));
   });
   return rows;
 }
-function checkRow(id, label, description, state, detail, evidence, copy) {
-  var line = copy && copy[state] ? fillCopy(copy[state], { detail: detail }) : CHECK_WORDS[state] + (detail && state !== 'passed' ? ' ' + detail : '');
+function checkRow(id, label, description, state, detail, evidence, copy, topo) {
+  var line = copy && copy[state] ? fillCopy(copy[state], { detail: detail }) : stateHead(topo, id, state) + (detail && state !== 'passed' ? ' ' + detail : '');
   return { id: id, label: label, description: description, state: state, detail: detail, evidence: evidence, line: line.trim() };
 }
 
@@ -716,7 +732,11 @@ export function narrate(topo, events, id, opts) {
     } else if (t === 'check_result') {
       var st = checkEventState(e), copy = node && stateCopy(node);
       var who = node && node.kind === 'check' ? '' : (d.label || human(d.name)) + ': ';
-      var said = d.detail ? CHECK_WORDS[st].split(' ')[0] + ' ' + d.detail : CHECK_WORDS[st];
+      // With the map's own words for this state: those words, then the detail. Without: the
+      // symbol and the detail (an app's detail says the verdict itself), else Passed / Didn't pass.
+      var key = node && node.kind === 'check' ? id : d.name;
+      var said = checkWord(topo, key, st) ? stateHead(topo, key, st) + (d.detail ? ' ' + d.detail : '')
+        : d.detail ? CHECK_WORDS[st].split(' ')[0] + ' ' + d.detail : CHECK_WORDS[st];
       lines.push({ kind: 'state', cls: st, text: copy && copy[st] ? who + fillCopy(copy[st], d) : who + said });
     } else if (t === 'gate_waiting') {
       if (evs.some(function (x) { return x.event_type === 'gate_resolved'; })) return;   // decided: the waiting line is history
@@ -752,7 +772,12 @@ export function narrate(topo, events, id, opts) {
     });
   }
   // The last step of a finished run: what the person was finally told, word for word.
-  if (opts.finished && opts.reply && opts.last === id) lines.push({ kind: 'reply', text: opts.reply });
+  // A line the reply already says word for word (a hand-off's reason quoted in it) isn't said twice.
+  if (opts.finished && opts.reply && opts.last === id) {
+    var rep = String(opts.reply);
+    lines = lines.filter(function (l) { return !((l.kind === 'why' || l.kind === 'state') && l.text && rep.indexOf(String(l.text).trim()) >= 0); });
+    lines.push({ kind: 'reply', text: opts.reply });
+  }
   // A step visited twice (a model called again after a tool) says each generic line once.
   out.lines = lines.filter(function (l, i) { return !lines.slice(0, i).some(function (m) { return m.kind === l.kind && m.text === l.text; }); });
   return out;
@@ -876,6 +901,18 @@ export function canonicalNode(name) {
   return m && MODEL_NAME.test(m[2]) ? m[1] : name;
 }
 var KIND_BY_EVENT = { llm_call: 'llm', retrieval: 'retrieval', tool_call: 'tool', gate_waiting: 'gate', gate_resolved: 'gate', check_result: 'check' };
+/* Presentation's name for an inferred node, from the OpenTelemetry GenAI operation that starts
+   its id ("execute_tool search_handbook" -> "Tool: search handbook"); the raw id stays the
+   node's label, shown small beneath. Unknown shapes are just put in plain words. */
+var OP_WORDS = { execute_tool: 'Tool', retrieval: 'Search', retrieve: 'Search', chat: 'AI', text_completion: 'AI',
+                 generate_content: 'AI', embeddings: 'AI', invoke_agent: 'Agent', create_agent: 'Agent setup' };
+export function inferredLabel(id, kind) {
+  var s = String(id == null ? '' : id).trim(), m = /^(\S+)\s+(.+)$/.exec(s);
+  var op = m ? m[1] : s, rest = m ? m[2] : '';
+  if (OP_WORDS[op]) return OP_WORDS[op] + ': ' + human(rest || op);
+  var h = human(s);
+  return h ? h.charAt(0).toUpperCase() + h.slice(1) : s;
+}
 /* Nodes in order of first start; edges from sibling order (same parent step) by start time,
    plus parent → first child; de-duplicated. Labelled "map inferred from the trace". */
 export function inferMap(events, appId, appName) {
@@ -905,7 +942,7 @@ export function inferMap(events, appId, appName) {
   return {
     v: 'bench-topology/0', inferred: true,
     app: { id: appId || 'app', name: appName || appId || 'app', description: 'map inferred from the trace' },
-    nodes: nodes.map(function (n) { return { id: n, label: n, kind: kinds[n] || 'step' }; }),
+    nodes: nodes.map(function (n) { return { id: n, label: n, plain_label: inferredLabel(n, kinds[n]), kind: kinds[n] || 'step' }; }),
     edges: edges, panels: []
   };
 }

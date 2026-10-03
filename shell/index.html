@@ -33,6 +33,9 @@
   .pane iframe { border: 0; width: 100%; height: 100%; display: block; background: #fff; }
   #benchPane iframe { background: var(--bg); }
   .pane .label { position: absolute; top: 6px; left: 8px; z-index: 2; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding: 2px 6px; border-radius: 10px; background: rgba(15,20,32,.75); color: var(--muted); pointer-events: none; }
+  /* Pill text centered in its border (cap height to baseline), line-height 1 as the fallback. */
+  .pane .label, .bar .hint { line-height: 1; }
+  @supports (text-box: trim-both cap alphabetic) { .pane .label { text-box: trim-both cap alphabetic; padding-top: 4px; padding-bottom: 4px; } .bar .hint { text-box: trim-both cap alphabetic; padding-top: 5px; padding-bottom: 5px; } }
   #divider { width: 6px; cursor: col-resize; background: var(--border); flex: 0 0 auto; }
   #divider:hover, #divider.drag { background: var(--accent); }
   .dragshield { position: fixed; inset: 0; z-index: 9; cursor: col-resize; display: none; }

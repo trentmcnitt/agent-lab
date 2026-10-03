@@ -399,3 +399,52 @@ test('the overlay: the answer form from params.json_schema, and a JSON answer as
   assert.equal(L.answerFields('plain text'), null);
   assert.equal(L.answerFields('{"a": {"b": 1}}'), null);
 });
+
+// ---- polish (10-03): check words, the reply said once, inferred names ----------------------------
+test('check_words: a check\'s own state words show in the Checks row, the NOW card and the node box', () => {
+  const topo = { nodes: [{ id: 'classify', kind: 'llm' }], edges: [],
+                 check_words: { unsure: { passed: 'Didn\'t trigger', failed: 'Triggered: sent to a person' } } };
+  const ev = (passed, detail) => L.normalizeEvent({ v: 'bench/0', run_id: 'r', seq: 1, ts: 1, node: 'classify', event_type: 'check_result',
+    data: { name: 'unsure', label: 'Low-confidence check', passed, detail } });
+  const ok = [ev(true, 'The AI was sure enough of its choice.')], bad = [ev(false, 'The AI wasn\'t confident enough in its choice.')];
+  assert.equal(L.checkStates(topo, ok, true)[0].line, '✓ Didn\'t trigger.');
+  assert.equal(L.checkStates(topo, bad, true)[0].line, '✕ Triggered: sent to a person. The AI wasn\'t confident enough in its choice.');
+  const n = L.narrate(topo, ok, 'classify', { finished: true });
+  assert.ok(n.lines.some((l) => l.text === 'Low-confidence check: ✓ Didn\'t trigger. The AI was sure enough of its choice.'), JSON.stringify(n.lines));
+  // No words declared: the old fallbacks.
+  const plain = { nodes: topo.nodes, edges: [] };
+  assert.equal(L.checkStates(plain, ok, true)[0].line, '✓ Passed.');
+  assert.equal(L.checkStates(plain, bad, true)[0].line, '✕ Didn’t pass. The AI wasn\'t confident enough in its choice.');
+});
+test('helpdesk: the low-confidence check never says "Passed" anywhere', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
+  for (const name of ['req-020', 'req-012-approved', 'req-005']) {
+    const r = desk(name);
+    const row = L.checkStates(r.topo, r.events, true).find((c) => c.id === 'unsure');
+    assert.ok(row, name);
+    assert.doesNotMatch(row.line, /Passed/);
+    assert.match(row.line, /Didn't trigger|Triggered: sent to a person/);
+    const n = L.narrate(r.topo, r.events, 'classify', { finished: true });
+    const line = n.lines.find((l) => /Low-confidence check/.test(l.text));
+    assert.ok(line && /Didn't trigger|Triggered/.test(line.text) && !/Passed/.test(line.text), JSON.stringify(n.lines));
+  }
+});
+test('NOW card: a line the reply already quotes isn\'t said twice (req-020\'s hand-off)', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
+  const h = desk('req-020');
+  const fin = h.events.find((e) => e.event_type === 'run_finished');
+  const reply = fin && fin.data && fin.data.output;
+  assert.ok(reply, 'req-020 has a reply');
+  const n = L.narrate(h.topo, h.events, 'handoff', { finished: true, reply, last: 'handoff' });
+  const count = n.lines.filter((l) => /Escalated for human review/.test(l.text)).length;
+  assert.equal(count, 1, JSON.stringify(n.lines));
+  assert.equal(n.lines[n.lines.length - 1].kind, 'reply');
+});
+test('inferred maps: Presentation names from the operation, the raw id stays the label', () => {
+  assert.equal(L.inferredLabel('execute_tool search_handbook'), 'Tool: search handbook');
+  assert.equal(L.inferredLabel('retrieval handbook'), 'Search: handbook');
+  assert.equal(L.inferredLabel('chat'), 'AI: chat');
+  assert.equal(L.inferredLabel('invoke_agent refund_triage'), 'Agent: refund triage');
+  assert.equal(L.inferredLabel('my_step'), 'My step');
+  const m = L.inferMap([{ v: 'bench/0', run_id: 'r', seq: 1, ts: 1, node: 'execute_tool search_handbook', event_type: 'tool_call', data: {} }], 'x');
+  assert.equal(m.nodes[0].label, 'execute_tool search_handbook');
+  assert.equal(m.nodes[0].plain_label, 'Tool: search handbook');
+});

@@ -2,15 +2,11 @@
    No framework, no build. Sources feed events in with bench.push(ev); see sources.js.
    The pure logic (narration, source and check states, the cursor, the inferred map, the
    helpers a story gets as ctx.h) lives in logic.js, which index.html loads as
-   window.BenchLogic before this file runs. This file stays a classic script so a page that
-   only wants BenchLayout (the lab's front door) can load it alone. */
+   window.BenchLogic before this file runs. The map's layout and edge routing live in
+   layout.js (window.BenchLayout), which the lab's front door loads on its own. */
 (function (global) {
   'use strict';
 
-  var GEOM = { w: 184, h: 54, gx: 18, gy: 30, pad: 10 };
-  // Presentation: same boxes, tighter rows, so an 8-layer map fits a ~640 px pane with no scrolling.
-  // Boxes a little wider than Engineering's, so plain labels like "Decide what kind of request" fit.
-  var PRES_GEOM = { w: 212, h: 50, gx: 12, gy: 16, pad: 8 };
 
   var BL = null;
   function lg() {
@@ -35,55 +31,10 @@
   // Rewrites an element only when its HTML changed, so a 100 ms redraw keeps scroll and focus.
   function setHTML(e, html) { if (e && e._h !== html) { e._h = html; e.innerHTML = html; } }
 
-  // ---- layout: layered DAG, top to bottom ------------------------------------------------
+  // ---- layout: viewer/layout.js (BenchLayout), shared with the lab's front door ---------------
   function layout(topo, geom) {
-    var G = geom || GEOM;
-    var ids = topo.nodes.map(function (n) { return n.id; });
-    var preds = {}, succs = {};
-    ids.forEach(function (id) { preds[id] = []; succs[id] = []; });
-    topo.edges.forEach(function (e) {
-      if (preds[e.to] && succs[e.from]) { preds[e.to].push(e.from); succs[e.from].push(e.to); }
-    });
-    // Longest-path depth; the iteration cap keeps a cyclic manifest from hanging the page.
-    var depth = {};
-    ids.forEach(function (id) { depth[id] = 0; });
-    for (var it = 0; it < ids.length + 1; it++) {
-      var changed = false;
-      topo.edges.forEach(function (e) {
-        if (depth[e.to] != null && depth[e.from] != null && depth[e.to] < depth[e.from] + 1 && depth[e.from] + 1 < ids.length) {
-          depth[e.to] = depth[e.from] + 1; changed = true;
-        }
-      });
-      if (!changed) break;
-    }
-    var layers = [];
-    ids.forEach(function (id) { (layers[depth[id]] = layers[depth[id]] || []).push(id); });
-    layers = layers.filter(Boolean);
-    // Barycenter ordering, two sweeps, so branches sit under the node they leave.
-    var order = {};
-    layers.forEach(function (L) { L.forEach(function (id, i) { order[id] = i; }); });
-    for (var sweep = 0; sweep < 3; sweep++) {
-      layers.forEach(function (L, li) {
-        if (li === 0) return;
-        L.sort(function (a, b) {
-          function bc(x) {
-            var p = preds[x]; if (!p.length) return order[x];
-            return p.reduce(function (s, q) { return s + order[q]; }, 0) / p.length;
-          }
-          return bc(a) - bc(b);
-        });
-        L.forEach(function (id, i) { order[id] = i; });
-      });
-    }
-    var widest = Math.max.apply(null, layers.map(function (L) { return L.length; }).concat([1]));
-    var W = G.pad * 2 + widest * G.w + (widest - 1) * G.gx;
-    var pos = {};
-    layers.forEach(function (L, li) {
-      var rowW = L.length * G.w + (L.length - 1) * G.gx;
-      var x0 = (W - rowW) / 2;
-      L.forEach(function (id, i) { pos[id] = { x: x0 + i * (G.w + G.gx), y: G.pad + li * (G.h + G.gy) }; });
-    });
-    return { pos: pos, W: W, H: G.pad * 2 + Math.max(0, layers.length * G.h + (layers.length - 1) * G.gy), g: G };
+    if (!global.BenchLayout) throw new Error('viewer/layout.js is not loaded (window.BenchLayout)');
+    return global.BenchLayout(topo, geom);
   }
 
   /* Presentation pacing. Some steps finish in well under a millisecond, so on screen they'd go
@@ -398,38 +349,27 @@
     this._raf = (global.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(function () { self._raf = null; self.render(); });
   };
 
-  // Adjacent-layer branches are labelled near their target, where they have fanned apart;
-  // long edges near their source, before they pass behind other nodes.
-  function labelAt(x1, y1, x2, y2, dy, text, t) {
-    var u = 1 - t;
-    var x = u * u * u * x1 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x2;
-    var y = u * u * u * y1 + 3 * u * u * t * (y1 + dy) + 3 * u * t * t * (y2 - dy) + t * t * t * y2;
-    return '<text x="' + (x + 4) + '" y="' + (y - 2) + '">' + esc(text) + '</text>';
-  }
-
   Bench.prototype._graphEl = function () { return this.mode === 'presentation' ? this.p.graph : this.f.graph; };
 
   Bench.prototype._drawGraph = function () {
     var pres = this.mode === 'presentation', L = lg();
-    var G = pres ? PRES_GEOM : GEOM;
+    var G = pres ? global.BenchLayout.PRES_GEOM : global.BenchLayout.GEOM;
     var Lay = this.layout = layout(this.topo, G), topo = this.topo, self = this;
     var g = this._graphEl(), other = pres ? this.f.graph : this.p.graph;
     other.innerHTML = '';
     var svg = '<svg class="edges" width="' + Lay.W + '" height="' + Lay.H + '" viewBox="0 0 ' + Lay.W + ' ' + Lay.H + '">' +
       '<defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>';
+    // Every edge comes routed from the layout: short ones curve through the gap between rows,
+    // long ones run down a channel clear of every box (layout.js).
     topo.edges.forEach(function (e, i) {
-      var a = Lay.pos[e.from], b = Lay.pos[e.to];
-      if (!a || !b) return;
-      var x1 = a.x + G.w / 2, y1 = a.y + G.h, x2 = b.x + G.w / 2, y2 = b.y;
-      var dy = Math.max(pres ? 12 : 18, (y2 - y1) / 2);
-      var d = 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + (y1 + dy) + ' ' + x2 + ',' + (y2 - dy) + ' ' + x2 + ',' + y2;
-      // A long edge's label would sit over the boxes it passes; in Presentation the source box's
-      // own "→ branch" line already says it, so that label is dropped.
-      var long = (y2 - y1) > G.h + G.gy * 1.5;
-      if (pres && long) e = Object.assign({}, e, { from_branch: null, when: null });
-      svg += '<g class="edge" data-edge="' + i + '"><path d="' + d + '" marker-end="url(#arr)"/>' +
-        (pres && e.description ? '<path class="hit" d="' + d + '"/>' : '') +
-        ((e.from_branch || e.when) ? labelAt(x1, y1, x2, y2, dy, (pres && e.plain_label) || (e.from_branch || e.when).replace(/_/g, ' '), long ? 0.22 : 0.78) : '') + '</g>';
+      var r = Lay.edges[i];
+      if (!r) return;
+      var name = (pres && e.plain_label) || (e.from_branch || e.when || '').replace(/_/g, ' ');
+      // A routed edge's label in Presentation is dropped: the source box's own "→ branch" line says it.
+      if (pres && r.routed) name = '';
+      svg += '<g class="edge' + (r.routed ? ' routed' : '') + '" data-edge="' + i + '"><path d="' + r.d + '" marker-end="url(#arr)"/>' +
+        (pres && e.description ? '<path class="hit" d="' + r.d + '"/>' : '') +
+        (name && r.label ? '<text x="' + r.label.x + '" y="' + r.label.y + '"' + (r.label.anchor === 'end' ? ' text-anchor="end"' : '') + '>' + esc(name) + '</text>' : '') + '</g>';
     });
     svg += '</svg>';
     var boxes = topo.nodes.map(function (n) {
@@ -996,7 +936,9 @@
         else if (pn.fields) html = list.map(function (e) { return L.renderFields(e, pn.fields); }).join('');
         else html = list.map(function (e) { return L.renderGeneric(e, { mode: 'presentation' }); }).join('');
       } catch (err) { html = '<div class="err">This step’s story panel failed: ' + esc(err.message) + '</div>'; }
-      if (html) panels += '<div class="p-story"><div class="p-storyt">' + esc(pn.title) + '</div>' + html + '</div>';
+      // Presentation's heading is the panel's plain_title; a panel without one shows no heading
+      // here (its title is Engineering's name for it).
+      if (html) panels += '<div class="p-story">' + (pn.plain_title ? '<div class="p-storyt">' + esc(pn.plain_title) + '</div>' : '') + html + '</div>';
     });
     var acts = '';
     // Only on a step where the AI was asked something, and only when the app sent the text.
@@ -1110,5 +1052,4 @@
   };
 
   global.Bench = Bench;
-  global.BenchLayout = layout;
 })(typeof window !== 'undefined' ? window : this);

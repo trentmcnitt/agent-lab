@@ -240,6 +240,15 @@
   .pnode .gp { font-size: 10.5px; }
   .actor { font: 600 9px/1.3 -apple-system, sans-serif; text-transform: uppercase; letter-spacing: .05em; padding: 1px 5px; border-radius: 8px; border: 1px solid currentColor; white-space: nowrap; }
   .pnode .actor { position: absolute; top: 21px; right: 6px; }
+  /* Pills and chips: center the text inside the border. A font's line box leaves room for
+     descenders, so capitals sat high; trimming the box to cap height and baseline centers them,
+     with line-height 1 as the fallback where text-box isn't supported. */
+  .actor, .tag, .badge, .p-label, .src, .p-inferred, .status, .rawbtn, .iotab { display: inline-flex; align-items: center; line-height: 1; vertical-align: middle; }
+  .actor[hidden], .tag[hidden], .badge[hidden], .p-label[hidden], .src[hidden], .p-inferred[hidden], .status[hidden], .rawbtn[hidden], .iotab[hidden] { display: none; }
+  @supports (text-box: trim-both cap alphabetic) {
+    .actor, .tag, .badge, .p-label, .src, .p-inferred, .status { text-box: trim-both cap alphabetic; padding-top: 3px; padding-bottom: 3px; }
+    .actor, .p-label { padding-top: 3.5px; padding-bottom: 3.5px; }
+  }
   .actor-ai { color: var(--accent-2); } .actor-rule { color: #93c5fd; } .actor-person { color: var(--warn); } .actor-app { color: var(--muted); }
   .pnode.active .actor { color: #06201c; }
   .gnode.now { box-shadow: 0 0 0 2px rgba(94,234,212,.45); }
@@ -317,8 +326,10 @@
   <span class="muted" id="cSrc"></span>
 </div>
 <div id="bench"></div>
-<!-- logic.js is an ES module (node --test imports it too); bench.js and sources.js stay classic
-     scripts for pages that only want BenchLayout. Module scripts run in document order. -->
+<!-- logic.js is an ES module (node --test imports it too); layout.js, bench.js and sources.js stay
+     classic scripts, so a page that only wants BenchLayout loads layout.js alone. Module scripts run
+     in document order, after the classic layout.js. -->
+<script src="viewer/layout.js"></script>
 <script type="module">
   import * as BenchLogic from './viewer/logic.js';
   window.BenchLogic = BenchLogic;

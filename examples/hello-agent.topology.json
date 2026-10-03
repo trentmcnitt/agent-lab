@@ -184,6 +184,7 @@
     {
       "id": "triage",
       "title": "Triage (story panel)",
+      "plain_title": "Who it went to",
       "event_types": [
         "decision"
       ],

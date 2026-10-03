@@ -29,7 +29,7 @@ def main() -> None:
         shutil.rmtree(out)
     (out / "viewer").mkdir(parents=True)
     shutil.copy(ROOT / "viewer/index.html", out / "index.html")
-    for f in ("logic.js", "bench.js", "sources.js"):
+    for f in ("layout.js", "logic.js", "bench.js", "sources.js"):
         shutil.copy(ROOT / "viewer" / f, out / "viewer" / f)
     shutil.copytree(ROOT / "shell", out / "shell")
     listing = []

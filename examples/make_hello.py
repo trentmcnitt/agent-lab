@@ -56,7 +56,7 @@ TOPOLOGY = {
     "actions": [{"id": "route_to_security", "title": "Hand it to security on-call", "description": "Only after a person confirms."}],
     "never": ["Change a password or email itself", "Read anything beyond the message and the help docs"],
     "panels": [
-        {"id": "triage", "title": "Triage (story panel)", "event_types": ["decision"], "nodes": ["triage"], "story": True},
+        {"id": "triage", "title": "Triage (story panel)", "plain_title": "Who it went to", "event_types": ["decision"], "nodes": ["triage"], "story": True},
         {"id": "docs", "title": "Docs found (declared fields)", "event_types": ["retrieval"], "audience": "engineering",
          "fields": [{"key": "query", "label": "query"}, {"key": "hits", "label": "hits", "format": "json"}]},
         {"id": "gate", "title": "Escalation", "event_types": ["gate_waiting", "gate_resolved"], "mode": "append", "audience": "engineering"},

@@ -157,6 +157,10 @@
           "title": {
             "type": "string"
           },
+          "plain_title": {
+            "type": "string",
+            "description": "Optional. The panel's heading in Presentation, in plain words (shown in the NOW card). Without it, Presentation shows the panel with no heading; title stays Engineering's name."
+          },
           "event_types": {
             "type": "array",
             "items": {
@@ -369,6 +373,25 @@
     "story": {
       "type": "boolean",
       "description": "The app registers a story script with its map (custom panels and renderers). See SPEC.md section 5."
+    },
+    "check_words": {
+      "type": "object",
+      "description": "Optional. A check's own words for its states, keyed by the check's name (check_result data.name) or a check node's id: {\"passed\": \"Didn't trigger\", \"failed\": \"Triggered: sent to a person\"}. Shown everywhere that check's state is (the Checks row, the NOW card, the node box). A state left out falls back to Passed / Didn't pass / Not needed this time.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "passed": {
+            "type": "string"
+          },
+          "failed": {
+            "type": "string"
+          },
+          "not_on_path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "patternProperties": {
