@@ -71,7 +71,7 @@ export var RENDER = {
   },
   gate_waiting: function (ev, ctx) {
     var d = ev.data || {}, pres = ctx && ctx.mode === 'presentation';
-    return '<div class="gate waiting">⏸ ' + (pres ? 'waiting for a person to approve, in the app' : 'waiting at <b>' + esc(ev.node) + '</b>, decided in the app') + '</div>' +
+    return '<div class="gate waiting">⏸ ' + (pres ? 'waiting for a person to approve' : 'waiting at <b>' + esc(ev.node) + '</b>, decided in the app') + '</div>' +
       (d.proposed ? flatKV(d.proposed, null, ctx && ctx.mode) : '') + (d.digest && !pres ? kv('digest', String(d.digest).slice(0, 16) + '…') : '');
   },
   gate_resolved: function (ev, ctx) {
@@ -202,19 +202,22 @@ export function reduce(run, ev, now) {
   if (ev.node === '_run') return;
 
   var sid = t === 'step_started' ? (ev.step_id || run.id + ':' + ev.node + ':' + ((run.nodeSteps[ev.node] || []).length + 1)) : stepFor(run, ev);
+  // A parent nests a step only when it is itself a step of this run. OTLP children name the
+  // root agent span as their parent, and that span is the run, not a step (SPEC section 6b).
+  var par = ev.parent_step_id && run.steps[ev.parent_step_id] ? ev.parent_step_id : null;
   if (!sid || !run.steps[sid]) {
     if (!sid) sid = run.id + ':' + ev.node + ':' + ((run.nodeSteps[ev.node] || []).length + 1);
     // Implicit boundary (SPEC section 2): the previous step ends at its own last event, and
     // this node's work began then. Skipped for runs that send explicit step boundaries (OTLP,
     // which also arrive out of order, so arrival order means nothing there).
     var start = ev.ts;
-    if (!ev.parent_step_id && t !== 'step_started' && !run.explicit) {
+    if (!par && t !== 'step_started' && !run.explicit) {
       Object.keys(run.open).forEach(function (o) {
         var s = run.steps[o];
         if (!s.parent && s.node !== ev.node) { s.end = s.last; s.inferred = true; s.status = s.status || 'ok'; s.arrEnd = now; start = Math.min(start, s.last); delete run.open[o]; }
       });
     }
-    run.steps[sid] = { id: sid, node: ev.node, parent: ev.parent_step_id || null, start: start, last: ev.ts, end: null, status: null,
+    run.steps[sid] = { id: sid, node: ev.node, parent: par, start: start, last: ev.ts, end: null, status: null,
                        events: [], latency: null, inferred: t !== 'step_started', timings: null, arr: now, arrEnd: null };
     run.stepOrder.push(sid);
     (run.nodeSteps[ev.node] = run.nodeSteps[ev.node] || []).push(sid);
@@ -235,7 +238,7 @@ export function reduce(run, ev, now) {
     run.tok.input += d.input_tokens || 0; run.tok.output += d.output_tokens || 0;
     run.tok.cache_read += d.cache_read_tokens || 0; run.tok.cache_write += d.cache_write_tokens || 0;
   } else if (t === 'gate_waiting') {
-    run.gate = { node: ev.node, state: 'waiting', since: ev.ts, data: d };
+    run.gate = { node: ev.node, state: 'waiting', since: ev.ts, seenAt: now, data: d };
   } else if (t === 'gate_resolved') {
     run.gate = { node: ev.node, state: d.approved ? 'approved' : 'denied', since: ev.ts, data: d };
   } else if (t === 'error') {
@@ -285,14 +288,24 @@ export function momentNodes(topo) {
   return out;
 }
 
+// ---- nesting ----------------------------------------------------------------------------------
+/* The step ids the events themselves open. A parent_step_id outside this set (an OTLP root
+   agent span, which is the run itself) doesn't nest anything: its children are top-level steps. */
+export function stepIds(events) {
+  var s = {};
+  events.forEach(function (e) { if (e.step_id && e.node !== '_run') s[e.step_id] = true; });
+  return s;
+}
+export function nested(ev, steps) { return !!(ev.parent_step_id && steps[ev.parent_step_id]); }
+
 // ---- the step cursor (replay pacing) ------------------------------------------------------
 /* A step is a node visit: consecutive top-level events on one node, a new step_started after
    that node finished counting as a new visit. Child steps belong to the visit they ran in. */
 export function visits(events) {
-  var out = [], cur = null;
+  var out = [], cur = null, steps = stepIds(events);
   events.forEach(function (ev, i) {
     if (ev.node === '_run') return;
-    if (ev.parent_step_id) { if (cur) cur.last = i; return; }
+    if (nested(ev, steps)) { if (cur) cur.last = i; return; }
     var fresh = !cur || cur.node !== ev.node || (ev.event_type === 'step_started' && cur.finished);
     if (fresh) { cur = { node: ev.node, first: i, last: i, finished: false, gateAt: null }; out.push(cur); }
     cur.last = i;
@@ -323,8 +336,8 @@ export function prevStop(stops, i) { for (var k = stops.length - 1; k >= 0; k--)
 
 // ---- what happened, in plain words ---------------------------------------------------------
 function nodeEvents(events, id) { return events.filter(function (e) { return e.node === id; }); }
-function visited(events, id) { return events.some(function (e) { return e.node === id && !e.parent_step_id; }); }
-function topLevel(events) { return events.filter(function (e) { return e.node !== '_run' && !e.parent_step_id; }); }
+function visited(events, id) { var s = stepIds(events); return events.some(function (e) { return e.node === id && !nested(e, s); }); }
+function topLevel(events) { var s = stepIds(events); return events.filter(function (e) { return e.node !== '_run' && !nested(e, s); }); }
 
 /* The edges this run took: a decision's branch names its edge exactly; otherwise two nodes
    that ran one after the other. `seq` is the node order (skipped steps left out by the caller). */
@@ -349,13 +362,19 @@ export function takenOut(topo, events, id) {
 /* One line on a node box saying what it produced (extracted from bench.js's node preview).
    Engineering may quote the output; Presentation keeps to the branch, the check, the gate,
    an error or a count. */
-export function preview(steps, mode, sourceCount, isCheck) {
+export function preview(steps, mode, sourceCount, isCheck, topo) {
   var out = null, pres = mode === 'presentation', checked = false;
+  // Presentation names a branch the way the map does: the edge's plain_label, else where it goes.
+  function branchWords(node, branch) {
+    if (!pres) return human(branch);
+    var ed = ((topo && topo.edges) || []).filter(function (x) { return x.from === node && x.from_branch === branch; })[0];
+    return ed ? (ed.plain_label || plainLabel(nodeOf(topo, ed.to), ed.to)) : human(branch);
+  }
   steps.forEach(function (s) {
     s.events.forEach(function (e) {
       var d = e.data || {};
       // On a check node, Presentation shows the verdict over the branch name it also reports.
-      if (e.event_type === 'decision' && d.branch != null) { if (!(pres && isCheck && checked)) out = '→ ' + human(d.branch); }
+      if (e.event_type === 'decision' && d.branch != null) { if (!(pres && isCheck && checked)) out = '→ ' + branchWords(e.node, d.branch); }
       else if (e.event_type === 'gate_resolved') out = d.approved ? '✓ approved' : '✕ denied';
       else if (e.event_type === 'gate_waiting') out = out || (pres ? '⏸ waiting for a person' : '⏸ waiting for a human');
       else if (e.event_type === 'check_result' && ((pres && isCheck) || !out)) { var st = checkEventState(e); checked = true; out = st === 'passed' ? '✓ passed' : st === 'failed' ? '✕ didn’t pass' : '– not needed'; }
@@ -548,6 +567,9 @@ export function gateState(topo, events, finished) {
                   line: '⏸ Waiting for a person to approve' + (proposedTitle((w.data || {}).proposed) ? ': ' + proposedTitle(w.data.proposed) : (w.data && w.data.reason ? ': ' + w.data.reason : '')) };
   // Only what the map declares: an inferred map can't know about sign-offs it never saw.
   if (!gates.length) return { state: 'none', line: 'The app declares no sign-off step.' };
+  // Handed over before anything needed approving: a person owns it now, which isn't "nobody".
+  if (finished && /^Handed to a person/.test(outcome(topo, events).text))
+    return { state: 'handed', line: 'No AI action to approve: it was handed to a person, who decides everything from here.' };
   return { state: finished ? 'not_needed' : 'pending', line: finished ? '– Not needed this time.' : 'Not reached yet.' };
 }
 
@@ -589,6 +611,25 @@ export function costWords(usd) {
 }
 export function runCost(events) {
   return events.reduce(function (a, e) { return a + (e.event_type === 'llm_call' && e.data && e.data.cost_usd != null ? Number(e.data.cost_usd) : 0); }, 0);
+}
+/* What the run's model calls say about cost: the sum of the prices they carry, and which calls
+   carry none. A call with tokens and no price is unknown, never free. */
+export function costInfo(events) {
+  var calls = 0, priced = 0, usd = 0, unpriced = [];
+  events.forEach(function (e) {
+    if (e.event_type !== 'llm_call') return;
+    var d = e.data || {};
+    calls++;
+    if (d.cost_usd != null) { priced++; usd += Number(d.cost_usd); }
+    else if (unpriced.indexOf(String(d.model || 'unknown')) < 0) unpriced.push(String(d.model || 'unknown'));
+  });
+  return { calls: calls, priced: priced, usd: usd, unpriced: unpriced, known: calls > 0 && priced === calls };
+}
+// The cost in Presentation's words: unknown when no call carries a price, a floor when some don't.
+export function costLine(info) {
+  if (!info.calls) return '';
+  if (!info.priced) return 'AI cost not known';
+  return (info.known ? '' : 'at least ') + costWords(info.usd) + (info.usd > 0 ? ' of AI' : '') + (info.known ? '' : ' (some calls carry no price)');
 }
 export function baselineOf(events) {
   var b = null;
@@ -636,11 +677,13 @@ export function outcome(topo, events) {
     var what = act ? act.title : proposedTitle(action);
     text = 'Done' + (what ? ': ' + what : '') + (gate && gate.approved ? ', approved by a person' : '');
   }
-  else if (named) text = OUTCOME[named] || human(named).replace(/^./, function (c) { return c.toUpperCase(); });
+  // An outcome word ("handed_off") is put in plain words; free text (an answer) is the app's, verbatim.
+  else if (named) text = OUTCOME[named] || (/\s/.test(named.trim()) ? named.trim() : human(named).replace(/^./, function (c) { return c.toUpperCase(); }));
   else if (handed) text = 'Handed to a person';
   else text = 'Finished';
-  // "Why" only when a person ends up with it (handed over, or a person said no), not on an approval.
-  var why = /Handed to a person|said no/.test(text) && rationale ? rationale : null;
+  // "Why" only when the AI handed it over: on an approval it's noise, and on a denial the
+  // rationale is the AI's case for the action, not the reason a person said no.
+  var why = /^Handed to a person/.test(text) && rationale ? rationale : null;
   return { done: true, text: text, why: why };
 }
 
@@ -676,6 +719,7 @@ export function narrate(topo, events, id, opts) {
       var said = d.detail ? CHECK_WORDS[st].split(' ')[0] + ' ' + d.detail : CHECK_WORDS[st];
       lines.push({ kind: 'state', cls: st, text: copy && copy[st] ? who + fillCopy(copy[st], d) : who + said });
     } else if (t === 'gate_waiting') {
+      if (evs.some(function (x) { return x.event_type === 'gate_resolved'; })) return;   // decided: the waiting line is history
       lines.push({ kind: 'state', cls: 'waiting', text: '⏸ Waiting for a person to approve' + (proposedTitle(d.proposed) ? ': ' + proposedTitle(d.proposed) : '') });
     } else if (t === 'gate_resolved') {
       lines.push({ kind: 'state', cls: d.approved ? 'passed' : 'failed', text: (d.approved ? '✓ Approved by ' : '✕ Denied by ') + (d.by || 'a person') + (e.ts ? ', ' + clock(e.ts) : '') + '.' });
@@ -695,11 +739,27 @@ export function narrate(topo, events, id, opts) {
     }
   });
   out.model = evs.some(function (e) { return e.event_type === 'llm_call'; });
+  // What this step's own model calls were given from the sources (the row below is the whole run's).
+  if (out.model) {
+    var mine = evs.filter(function (e) { return e.event_type === 'llm_call'; });
+    sourceStates(topo, events).forEach(function (s) {
+      if (!s.anyRetrieval || !s.found) return;
+      var txt = mine.map(function (e) { var d = e.data || {}; return [evText(d.system)].concat((d.messages || []).map(function (m) { return evText(m && m.content); })).join('\n'); }).join('\n');
+      if (!txt.trim()) return;
+      var n = s.items.filter(function (it) { return it.text && it.text.trim() && txt.indexOf(it.text.trim()) >= 0; }).length;
+      lines.push({ kind: 'given', text: s.title + ': ' + (n ? 'this step was given ' + n + (s.count != null ? ' of ' + s.count : '') + '.'
+                                                         : 'this step was given none of it.') });
+    });
+  }
+  // The last step of a finished run: what the person was finally told, word for word.
+  if (opts.finished && opts.reply && opts.last === id) lines.push({ kind: 'reply', text: opts.reply });
+  // A step visited twice (a model called again after a tool) says each generic line once.
+  out.lines = lines.filter(function (l, i) { return !lines.slice(0, i).some(function (m) { return m.kind === l.kind && m.text === l.text; }); });
   return out;
 }
 
 // ---- "What the AI was given" -------------------------------------------------------------------
-export var ROLE_WORDS = { system: 'Its instructions', developer: 'Its instructions', user: 'The message it was sent', assistant: 'What it said earlier', tool: 'What a tool returned', output: 'What it answered' };
+export var ROLE_WORDS = { system: 'Its instructions', developer: 'Its instructions', user: 'What the app sent it', assistant: 'What it said earlier', tool: 'What a tool returned', output: 'What it answered' };
 /* Splits `text` into segments, marking every retrieval hit's text found in it. Ranges are found
    in the raw string first and escaped per segment after, so offsets never drift. */
 export function highlightSegments(text, hits) {
@@ -741,10 +801,40 @@ export function givenBlocks(topo, events) {
     var d = e.data || {}, blocks = [];
     if (d.system != null) blocks.push({ role: 'system', label: ROLE_WORDS.system, text: evText(d.system) });
     (d.messages || []).forEach(function (m) { blocks.push({ role: m.role, label: ROLE_WORDS[m.role] || human(m.role || 'message'), text: evText(m && m.content) }); });
-    if (d.output != null) blocks.push({ role: 'output', label: ROLE_WORDS.output, text: evText(d.output) });
+    var form = formFields(d.params);
+    if (form) blocks.push({ role: 'form', label: 'The form it had to fill in', text: '', fields: form });
+    if (d.output != null) {
+      var ob = { role: 'output', label: ROLE_WORDS.output, text: evText(d.output) }, obj = answerFields(d.output);
+      if (obj) ob.answer = obj;
+      blocks.push(ob);
+    }
     blocks.forEach(function (b) { b.segments = highlightSegments(b.text, hits); });
     return { node: e.node, title: plainLabel(nodeOf(topo, e.node), e.node), blocks: blocks, mode: e.content_mode || 'redacted' };
   });
+}
+/* A structured-output schema the app sent with the call (params.json_schema, the helpdesk's
+   form), as plain rows: each field, what the app told the AI it means, and its allowed values. */
+export function formFields(params) {
+  var sch = params && (params.json_schema || params.schema);
+  var props = sch && sch.properties;
+  if (!props || typeof props !== 'object') return null;
+  var defs = sch.$defs || sch.definitions || {};
+  return Object.keys(props).map(function (k) {
+    var p = props[k] || {};
+    if (p.$ref) { var ref = defs[String(p.$ref).split('/').pop()]; if (ref) p = Object.assign({}, ref, p); }
+    var choices = p.enum || (p.anyOf || []).reduce(function (a, x) { return a.concat(x.enum || (x.$ref && (defs[String(x.$ref).split('/').pop()] || {}).enum) || []); }, []);
+    return { name: k, description: p.description || '', choices: choices && choices.length ? choices.map(String) : null };
+  });
+}
+/* A model answer that is one flat JSON object, as rows (field → value), so a room reads it as a
+   filled-in form, not as JSON. Anything else stays text. */
+export function answerFields(output) {
+  var v = output;
+  if (typeof v === 'string') { var t = v.trim(); if (t.charAt(0) !== '{') return null; try { v = JSON.parse(t); } catch (e) { return null; } }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  var keys = Object.keys(v);
+  if (!keys.length || keys.some(function (k) { return v[k] !== null && typeof v[k] === 'object'; })) return null;
+  return keys.map(function (k) { return { name: k, value: v[k] == null ? '–' : String(v[k]) }; });
 }
 var PLACEHOLDER = /\[(?:redacted|masked|email|phone|name|address|private key|api key|aws key|jwt|[a-z]+ token)\]|<redacted>/i;
 /* The one privacy line Presentation ever shows, inside the overlay, and only when masked
@@ -775,11 +865,15 @@ export function requesterOf(events) {
 }
 
 // ---- Level 0: a map inferred from the trace -------------------------------------------------------
-// semconv span names like "chat gpt-4o" would make a node per model; key LLM spans by operation.
-var LLM_SPAN = /^(chat|text_completion|generate_content|embeddings)\s+\S.*$/;
+/* Semconv span names like "chat gpt-4o" would make a node per model, so a model name after the
+   operation is folded away. Anything else after it (the bench's own adapter puts the agent there:
+   "chat refund_triage") is part of the id and stays, so an inferred map, the event log and a
+   registered map all use the same id. */
+var LLM_SPAN = /^(chat|text_completion|generate_content|embeddings)\s+(\S.*)$/;
+var MODEL_NAME = /^(gpt|o[1-9]|chatgpt|claude|gemini|gemma|llama|mistral|mixtral|codestral|command|grok|qwen|deepseek|phi|text-|davinci|anthropic|openai|us\.anthropic)[\w.:\/-]*$/i;
 export function canonicalNode(name) {
   var m = LLM_SPAN.exec(String(name || ''));
-  return m ? m[1] : name;
+  return m && MODEL_NAME.test(m[2]) ? m[1] : name;
 }
 var KIND_BY_EVENT = { llm_call: 'llm', retrieval: 'retrieval', tool_call: 'tool', gate_waiting: 'gate', gate_resolved: 'gate', check_result: 'check' };
 /* Nodes in order of first start; edges from sibling order (same parent step) by start time,

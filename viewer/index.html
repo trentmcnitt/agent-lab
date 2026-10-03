@@ -174,18 +174,31 @@
   .p-out { flex: 1; min-width: 0; }
   .p-oc { font-size: 14px; font-weight: 600; color: var(--muted); }
   .p-oc.done { color: var(--accent); }
-  .p-why { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 1px; }
+  .p-why { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 1px; cursor: pointer; }
+  .p-why.full { display: block; -webkit-line-clamp: unset; }
   .p-why b { color: var(--text); font-weight: 600; }
   .p-transport { display: flex; gap: 4px; flex: 0 0 auto; }
   .p-transport:empty { display: none; }
   .p-transport button, .p-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; cursor: pointer; font: 600 12.5px -apple-system, BlinkMacSystemFont, sans-serif; text-decoration: none; display: inline-block; }
-  .p-transport button.main { min-width: 92px; border-color: var(--accent); color: var(--accent); }
+  /* A presenter hits these without looking: big enough for a clicker-free mouse. */
+  .p-transport button { min-width: 38px; padding: 6px 11px; font-size: 14px; }
+  .p-transport button.main { min-width: 108px; border-color: var(--accent); color: var(--accent); }
+  .p-transport button.speed { min-width: 0; font-size: 12px; color: var(--muted); }
+  .p-transport button:disabled { opacity: .7; cursor: default; }
   .p-transport button:hover, .p-btn:hover { border-color: var(--accent); }
   .p-btn.primary { background: rgba(94,234,212,.14); border-color: var(--accent); color: var(--accent); }
   .p-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  .p-graph { flex: 1 1 auto; min-height: 120px; position: relative; padding: 6px 8px 2px; overflow: hidden; }
+  /* The map keeps at least about half the height; the card and rows below give way and scroll,
+     so opening a row never shrinks the map to a thumbnail. "Map only" gives it everything. */
+  .p-graph { flex: 1 1 auto; min-height: clamp(160px, 55vh, 600px); position: relative; padding: 6px 8px 2px; overflow: hidden; }
   .p-graph .graphwrap { overflow: hidden; }
-  .p-side { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; }
+  .p-side { flex: 0 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: auto; }
+  .p-maponly .p-side { display: none; }
+  .p-maponly .p-graph { min-height: 0; }
+  .p-mapbtn { position: absolute; right: 8px; top: 6px; z-index: 3; background: rgba(23,29,44,.85); color: var(--muted); border: 1px solid var(--border); border-radius: 7px; padding: 3px 9px; cursor: pointer; font: 600 11.5px -apple-system, BlinkMacSystemFont, sans-serif; }
+  .p-mapbtn:hover { color: var(--text); border-color: var(--accent); }
+  .p-appname { color: var(--text); font-weight: 600; }
+  .p-appname:empty { display: none; }
   .p-now { border-top: 1px solid var(--border); padding: 8px 12px; background: var(--panel); max-height: 27vh; overflow: auto; }
   .p-nowhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
   .p-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); border: 1px solid rgba(94,234,212,.4); border-radius: 8px; padding: 1px 6px; }
@@ -199,6 +212,9 @@
   .p-line.k-state { font-weight: 600; }
   .p-line.c-passed { color: var(--good); } .p-line.c-failed { color: var(--bad); } .p-line.c-waiting { color: var(--warn); }
   .p-line.muted { color: var(--muted); }
+  .p-line.k-given { color: var(--muted); font-size: 12px; }
+  .p-line.k-reply { color: var(--text); border-left: 2px solid var(--accent); padding: 2px 0 2px 8px; white-space: pre-wrap; }
+  .p-replyt { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); margin-bottom: 2px; }
   .p-story { margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 5px; }
   .p-storyt { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 3px; }
   .p-acts { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
@@ -244,6 +260,17 @@
   .g-output .g-text { border-color: var(--accent); }
   .hlwrap mark { background: rgba(94,234,212,.13); color: var(--text); border-bottom: 1px solid rgba(94,234,212,.6); }
   .hltag { display: block; font: 600 10.5px -apple-system, sans-serif; color: var(--accent); margin: 6px 0 1px; }
+  mark.g-key { background: rgba(94,234,212,.13); color: var(--text); border-bottom: 1px solid rgba(94,234,212,.6); padding: 0 3px; }
+  .g-big { margin-left: auto; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+  .g-big:hover { color: var(--text); border-color: var(--accent); }
+  .g-head .g-big + .p-close { margin-left: 0; }
+  .g-fields { display: grid; grid-template-columns: minmax(90px, max-content) 1fr; gap: 4px 14px; margin: 4px 0 0; padding: 8px 10px; background: #111726; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; }
+  .g-fields dt { color: var(--accent-2); font-weight: 600; text-transform: capitalize; }
+  .g-fields dd { margin: 0; overflow-wrap: anywhere; }
+  .g-answer { border-color: var(--accent); }
+  .g-raw summary { cursor: pointer; color: var(--muted); font-size: 11.5px; margin: 4px 0; }
+  .g-panel.big .g-text { font-size: 15px; } .g-panel.big .g-fields { font-size: 15px; } .g-panel.big .g-call h4 { font-size: 16px; }
+  .badge.dl { background: none; cursor: pointer; color: var(--accent); border-color: var(--accent); font: 11px -apple-system, sans-serif; }
   @media (min-width: 1200px) {
     .p-main { flex-direction: row; }
     .p-graph { flex: 0 0 60%; border-right: 1px solid var(--border); }
@@ -260,6 +287,7 @@
     .p-sum { white-space: normal; }
     .p-rowbody { max-height: none; }
     .p-outrow { flex-wrap: wrap; }
+    .p-graph { min-height: 0; }
   }
 
   #picker { padding: 24px; max-width: 640px; }
@@ -319,7 +347,8 @@
     return '?' + u.toString();
   }
 
-  var topoUrl = q.get('topology') || (q.get('app') ? base + 'topology/' + encodeURIComponent(q.get('app')) : null);
+  // ?missing=null: an app with no registered map gets a 200 null (Level 0), not a 404 in the console.
+  var topoUrl = q.get('topology') || (q.get('app') ? base + 'topology/' + encodeURIComponent(q.get('app')) + '?missing=null' : null);
 
   if (source === 'parent') {
     // Embedded sync: the map, story and events all arrive from the app via the shell.
@@ -366,14 +395,15 @@
     }).catch(function (e) { fail('Could not load the recording: ' + e.message); });
   } else if (topoUrl) {
     getJSON(topoUrl).then(function (t) {
+      if (t === null && q.get('app')) { var e404 = new Error('no map'); e404.status = 404; throw e404; }
       bench.setTopology(t);
       if (t.story) bench.loadStory(t.app.id, null, base);
-      new BenchSources.LiveSource(bench, base, q.get('session')).start();
+      new BenchSources.LiveSource(bench, base, q.get('session'), q.get('app')).start();
     }).catch(function (e) {
       // Level 0: the app sends spans but never registered a map. Draw one from what arrives.
       if (e.status === 404 && q.get('app')) {
         bench.useInferredMap(q.get('app'));
-        new BenchSources.LiveSource(bench, base, q.get('session')).start();
+        new BenchSources.LiveSource(bench, base, q.get('session'), q.get('app')).start();
       } else fail('Could not load the map for this app: ' + e.message + '. Has the app registered with the bench?');
     });
   } else {
@@ -386,7 +416,7 @@
       var apps = res[0], recs = res[1], esc = BenchLogic.esc;
       document.getElementById('bench').innerHTML = '<div id="picker"><p><a href="../">↑ Up</a></p><h3>Bench</h3>' +
         (apps ? '<p class="muted">Live, per registered app (add &amp;session=&lt;id&gt; to filter):</p>' +
-          (apps.length ? apps.map(function (a) { return '<div><a href="?app=' + encodeURIComponent(a.id) + '">' + esc(a.name) + '</a>' + (a.story ? ' <span class="muted">· story</span>' : '') + '</div>'; }).join('')
+          (apps.length ? apps.map(function (a) { return '<div><a href="?app=' + encodeURIComponent(a.id) + '">' + esc(a.name) + '</a>' + (a.story ? ' <span class="muted">· story</span>' : '') + (a.inferred ? ' <span class="muted">· no map registered: the bench infers one</span>' : '') + '</div>'; }).join('')
                        : '<div class="muted">none yet: an app registers with PUT /apps/&lt;id&gt;</div>') : '') +
         '<p class="muted" style="margin-top:16px">Recordings:</p>' +
         recs.map(function (r) { return '<div><a href="?replay=' + encodeURIComponent(r.path) + '">' + esc(r.title) + '</a>' + (r.group ? ' <span class="muted">· ' + esc(r.group) + '</span>' : '') + '</div>'; }).join('') + '</div>';

@@ -3,9 +3,13 @@
 (function (global) {
   'use strict';
 
-  function LiveSource(bench, base, sessionId) {
+  // appId: only that app's runs (the receiver filters; an OTLP run is its service.name's).
+  function LiveSource(bench, base, sessionId, appId) {
     this.bench = bench;
-    this.url = base + 'stream' + (sessionId ? '?session_id=' + encodeURIComponent(sessionId) : '');
+    var q = [];
+    if (sessionId) q.push('session_id=' + encodeURIComponent(sessionId));
+    if (appId) q.push('app=' + encodeURIComponent(appId));
+    this.url = base + 'stream' + (q.length ? '?' + q.join('&') : '');
   }
   LiveSource.prototype.start = function () {
     var self = this;
@@ -23,7 +27,8 @@
   function ParentSource(bench) { this.bench = bench; }
   ParentSource.prototype.start = function () {
     var self = this, registered = false;
-    this.bench.setStatus('● Live · following the app', 'ok');
+    // It follows the app's own run, which may itself be a recording (the static demo): not "live".
+    this.bench.setStatus('● Following the app', 'ok');
     window.addEventListener('message', function (m) {
       if (m.source !== window.parent || !m.data || typeof m.data.type !== 'string') return;
       var d = m.data;
@@ -74,24 +79,29 @@
     this.until = null;
     this.timer = null;
     this.onstate = opts.onstate || function () {};
+    // A replay of a run already on the bench (Bench.stepThrough) pushes and resets through the bench's own hooks.
+    this.push = opts.push || function (ev) { bench.push(ev); };
+    this._reset = opts.reset || function () { bench.reset(); };
+    this.what = opts.what || 'a recording';
   }
   ReplaySource.prototype._label = function () {
-    return '▶ Playing a recording' + (this.speed !== 1 ? ' · ' + this.speed + '×' : '');
+    return '▶ Playing ' + this.what + (this.speed !== 1 ? ' · ' + this.speed + '×' : '');
   };
-  ReplaySource.prototype.start = function () { this.bench.reset(); this.i = 0; this.until = null; this.onstate('restart'); this.play(); };
+  ReplaySource.prototype.start = function () { this._reset(); this.i = 0; this.until = null; this.onstate('restart'); this.play(); };
   ReplaySource.prototype.play = function () {
     var self = this;
     if (this.i >= this.events.length) return this.start();
     this.playing = true;
     clearTimeout(this.timer);
-    this.onstate('playing');
+    // A single step (next) isn't Play: the transport keeps reading as paused while it plays out.
+    this.onstate(this.until != null ? 'stepping' : 'playing');
     (function step() {
       if (!self.playing) return;
       if (self.i >= self.events.length) {
         self.playing = false; self.bench.setStatus('Recording · finished', 'ok'); self.onstate('done'); return;
       }
       var k = self.i, ev = self.events[self.i++];
-      self.bench.push(ev);
+      self.push(ev);
       self.bench.setStatus(self._label(), 'rep');
       if (self.i >= self.events.length) return step();
       if (self.until != null && k >= self.until) { self.until = null; return self._stop('paused'); }
@@ -123,9 +133,9 @@
     this.seek(target);
   };
   ReplaySource.prototype.seek = function (target) {
-    this.bench.reset();
+    this._reset();
     this.i = 0;
-    while (this.i <= target && this.i < this.events.length) this.bench.push(this.events[this.i++]);
+    while (this.i <= target && this.i < this.events.length) this.push(this.events[this.i++]);
     this.bench.skipPacing();
     if (this.i >= this.events.length) { this.bench.setStatus('Recording · finished', 'ok'); this.onstate('done'); }
     else { this.bench.setStatus('Recording · paused', 'warn'); this.onstate('paused'); }
@@ -133,7 +143,7 @@
   ReplaySource.prototype.restart = function () { this.start(); };
   ReplaySource.prototype.finish = function () {
     this.playing = false; clearTimeout(this.timer); this.until = null;
-    while (this.i < this.events.length) this.bench.push(this.events[this.i++]);
+    while (this.i < this.events.length) this.push(this.events[this.i++]);
     this.bench.skipPacing();
     this.bench.setStatus('Recording · finished', 'ok'); this.onstate('done');
   };

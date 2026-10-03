@@ -9,7 +9,8 @@
 
   var GEOM = { w: 184, h: 54, gx: 18, gy: 30, pad: 10 };
   // Presentation: same boxes, tighter rows, so an 8-layer map fits a ~640 px pane with no scrolling.
-  var PRES_GEOM = { w: 184, h: 50, gx: 18, gy: 20, pad: 8 };
+  // Boxes a little wider than Engineering's, so plain labels like "Decide what kind of request" fit.
+  var PRES_GEOM = { w: 212, h: 50, gx: 12, gy: 16, pad: 8 };
 
   var BL = null;
   function lg() {
@@ -140,6 +141,7 @@
         '<span class="badge" data-f="mode">–</span>' +
         '<span class="badge" data-f="content" title="Whether prompts and outputs are shown here exactly as sent, with personal details masked in this record (not necessarily for the model), or not captured at all. The app decides.">–</span>' +
         '<span class="badge" data-f="inferred" hidden title="No map was registered for this app, so the bench drew one from the steps it has seen.">map inferred from the trace</span>' +
+        '<button class="badge dl" data-f="download" hidden title="Download this inferred map as a starting topology.json for Level 1: its node ids are the ones your spans produce. Add plain_label and description, then PUT it to /apps/<id>.">⤓ map as topology.json</button>' +
         '<span class="badge" data-f="session" title="Live, the bench follows only this session.">session –</span>' +
         '<select data-f="runs" title="Every run the bench has seen"></select>' +
         '<span class="bh-spacer"></span>' + toggle +
@@ -162,12 +164,13 @@
       '<div class="pres">' +
         '<header class="p-head">' +
           '<div class="p-req" data-p="req"></div>' +
-          '<div class="p-sub"><span class="p-who" data-p="who"></span><span class="p-inferred" data-p="inferred" hidden>map inferred from the trace</span>' +
+          '<div class="p-sub"><span class="p-appname" data-p="appname"></span><span class="p-who" data-p="who"></span><span class="p-inferred" data-p="inferred" hidden>map inferred from the trace</span>' +
             '<span class="bh-spacer"></span><span data-p="picker"></span>' + toggle + '</div>' +
           '<div class="p-outrow"><div class="p-out"><div data-p="outcome"></div><div class="p-why" data-p="why"></div></div><div class="p-transport" data-p="transport"></div></div>' +
         '</header>' +
         '<div class="p-main">' +
-          '<section class="p-graph"><div class="graphwrap" data-p="graph"></div><div class="edgetip" data-p="tip" hidden></div></section>' +
+          '<section class="p-graph"><div class="graphwrap" data-p="graph"></div><div class="edgetip" data-p="tip" hidden></div>' +
+            '<button class="p-mapbtn" data-p="mapbtn" title="Give the map the whole screen (for a room); again to bring the details back">⤢ Map only</button></section>' +
           '<section class="p-side">' +
             '<div class="p-now" data-p="now"></div>' +
             '<div class="p-rows" data-p="rows"></div>' +
@@ -185,9 +188,23 @@
       b.onclick = function () { self.setViewMode(b.getAttribute('data-v'), true); };
     });
     // Delegated clicks for everything Presentation redraws.
-    this.p.now.onclick = this.p.rows.onclick = this.p.bottom.onclick = this.p.overlay.onclick = this.p.transport.onclick = function (e) { self._presClick(e); };
+    this.p.now.onclick = this.p.rows.onclick = this.p.bottom.onclick = this.p.overlay.onclick = this.p.transport.onclick = this.p.why.onclick = function (e) { self._presClick(e); };
+    this.p.mapbtn.onclick = function () {
+      self.mapOnly = !self.mapOnly;
+      self.root.classList.toggle('p-maponly', self.mapOnly);
+      self.p.mapbtn.textContent = self.mapOnly ? '⤡ Show details' : '⤢ Map only';
+      if (self._fit) self._fit();
+    };
+    this.f.download.onclick = function () { self.downloadMap(); };
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && self.overlay) { self.overlay = null; self.render(); }
+      if (e.key === 'Escape' && self.overlay) { self.overlay = null; self.render(); return; }
+      // A presenter's keys (and clicker, which sends PageUp/PageDown): step, and Space to play/pause.
+      if (self.mode !== 'presentation' || self.overlay || !self.transport || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target && e.target.tagName) || '') && e.key === ' ') return;
+      if (/^(INPUT|SELECT|TEXTAREA)$/.test((e.target && e.target.tagName) || '')) return;
+      var act = { ArrowRight: 'next', PageDown: 'next', ArrowLeft: 'back', PageUp: 'back' }[e.key];
+      if (e.key === ' ') act = self._tstateShown === 'playing' ? 'pause' : self._tstateShown === 'done' ? 'restart' : 'play';
+      if (act && self.transport[act]) { e.preventDefault(); self.selectedNode = null; self.transport[act](); }
     });
     var res = this._resolveMode();
     this.setViewMode(res.mode, false);
@@ -270,7 +287,10 @@
   Bench.prototype.setTopology = function (topo) {
     this.topo = topo;
     this.f.app.textContent = topo.app.name;
-    this.f.inferred.hidden = this.p.inferred.hidden = !topo.inferred;
+    this.f.inferred.hidden = this.p.inferred.hidden = this.f.download.hidden = !topo.inferred;
+    // Beside a live app its own pane names it; elsewhere the room should know which app this is.
+    this.p.appname.textContent = this.source === 'parent' ? '' : topo.app.name;
+    this.p.appname.title = topo.app.description || '';
     this._drawGraph();
     this._buildPanels();
     this.render();
@@ -288,12 +308,68 @@
     this.setTopology(lg().inferMap(all, this.inferred.appId, this.inferred.name));
   };
 
+  // Level 0 → 1: the inferred map as a file to edit and register (its ids are the wire's ids).
+  Bench.prototype.downloadMap = function () {
+    if (!this.topo) return;
+    var t = JSON.parse(JSON.stringify(this.topo));
+    delete t.inferred;
+    t.app.description = '';
+    t.nodes.forEach(function (n) { n.plain_label = n.plain_label || ''; n.description = n.description || ''; });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(t, null, 2) + '\n'], { type: 'application/json' }));
+    a.download = (t.app.id || 'app') + '.topology.json';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
   Bench.prototype.reset = function () {
+    if (this._local && !this._localPush) this._endLocal(false);
     this.runs = {}; this.runOrder = []; this.current = null; this.pinned = false; this.render();
+  };
+
+  /* "Step through": a run that came from the app (beside it, or live) replayed here, paced like
+     a recording, with the presenter's transport and its pauses at the moments that matter. Any
+     new event from the app ends it, and the bench follows the app again. */
+  Bench.prototype.stepThrough = function () {
+    var run = this.current && this.runs[this.current], self = this, L = lg();
+    if (!run || !global.BenchSources) return;
+    var saved = [], ids = this.runOrder.slice(), keep = this.current;
+    ids.forEach(function (id) { saved = saved.concat(self.runs[id].events); });
+    var events = L.sortEvents(run.events);
+    this._local = { saved: saved, current: keep, transport: this.transport };
+    var src = new global.BenchSources.ReplaySource(this, events, {
+      stops: L.cursorStops(events, this.topo),
+      push: function (ev) { self._localPush = true; try { self.push(ev); } finally { self._localPush = false; } },
+      reset: function () { self._localPush = true; try { self.reset(); } finally { self._localPush = false; } },
+      onstate: function (st) { self.setTransportState(st); }
+    });
+    this._local.src = src;
+    this.setTransport({ back: function () { src.back(); }, next: function () { src.next(); }, restart: function () { src.start(); },
+                        play: function () { src.play(); }, pause: function () { src.pause(); },
+                        speed: function () { src.speed = src.speed === 1 ? 2 : src.speed === 2 ? 0.5 : 1; self.speedNow = src.speed; self.render(); },
+                        follow: function () { self._endLocal(true); } });
+    this.speedNow = 1;
+    src.start();
+  };
+  // Back to following the app: everything it had sent, then anything that arrived meanwhile.
+  Bench.prototype._endLocal = function (render) {
+    var loc = this._local;
+    if (!loc) return;
+    this._local = null;
+    loc.src.playing = false; clearTimeout(loc.src.timer);
+    this.transport = loc.transport; this.tstate = null; this.selectedNode = null;
+    this.runs = {}; this.runOrder = []; this.current = null; this.pinned = false;
+    var self = this;
+    loc.saved.forEach(function (ev) { self.push(ev); });
+    if (loc.current && this.runs[loc.current]) this.current = loc.current;
+    this.setStatus(this.source === 'parent' ? '● Following the app' : '● Live', 'ok');
+    this.skipPacing();
+    if (render) this.render();
   };
 
   Bench.prototype.push = function (ev) {
     var L = lg();
+    // While stepping through a past run, anything new from the app means: follow the app again.
+    if (this._local && !this._localPush) { this._endLocal(false); }
     ev = L.normalizeEvent(ev);
     if (this.inferred && ev.node !== '_run') {
       var cn = L.canonicalNode(ev.node);
@@ -353,7 +429,7 @@
       if (pres && long) e = Object.assign({}, e, { from_branch: null, when: null });
       svg += '<g class="edge" data-edge="' + i + '"><path d="' + d + '" marker-end="url(#arr)"/>' +
         (pres && e.description ? '<path class="hit" d="' + d + '"/>' : '') +
-        ((e.from_branch || e.when) ? labelAt(x1, y1, x2, y2, dy, (e.from_branch || e.when).replace(/_/g, ' '), long ? 0.22 : 0.78) : '') + '</g>';
+        ((e.from_branch || e.when) ? labelAt(x1, y1, x2, y2, dy, (pres && e.plain_label) || (e.from_branch || e.when).replace(/_/g, ' '), long ? 0.22 : 0.78) : '') + '</g>';
     });
     svg += '</svg>';
     var boxes = topo.nodes.map(function (n) {
@@ -404,7 +480,7 @@
         function show(ev) {
           var untaken = /untaken/.test(eg.getAttribute('class'));
           var taken = /\btaken\b/.test(eg.getAttribute('class'));
-          tip.innerHTML = '<b>' + esc(untaken ? 'Not taken this time' : taken ? 'Taken' : 'Path') + (ed.from_branch ? ': ' + ed.from_branch.replace(/_/g, ' ') : '') + '</b> ' + esc(ed.description);
+          tip.innerHTML = '<b>' + esc(untaken ? 'Not taken this time' : taken ? 'Taken' : 'Path') + (ed.plain_label || ed.from_branch ? ': ' + esc(ed.plain_label || ed.from_branch.replace(/_/g, ' ')) : '') + '</b> ' + esc(ed.description);
           tip.hidden = false;
           var rb = sec.getBoundingClientRect();
           var x = Math.min(Math.max(4, ev.clientX - rb.left + 10), Math.max(4, rb.width - 250));
@@ -448,10 +524,14 @@
     var self = this, run = this.current ? this.runs[this.current] : null;
     // run selector
     var sel = this.f.runs;
-    if (sel.options.length !== this.runOrder.length) {
+    var selKey = this.runOrder.map(function (id) { var r = self.runs[id]; return id + (r.input ? 1 : 0) + (r.status || ''); }).join('|');
+    if (sel._key !== selKey) {
+      sel._key = selKey;
       sel.innerHTML = this.runOrder.map(function (id, i) {
         var r = self.runs[id];
-        return '<option value="' + esc(id) + '">#' + (i + 1) + ' ' + esc(r.label ? short(r.label, 40) : id) + '</option>';
+        // An OTLP run's label is its root span's name ("invoke_agent x", the same every run); its request tells runs apart.
+        var lab = r.started && r.started.via === 'otlp' && r.input ? (typeof r.input === 'string' ? r.input : JSON.stringify(r.input)) : r.label;
+        return '<option value="' + esc(id) + '">#' + (i + 1) + ' ' + esc(lab ? short(lab, 40) : id) + (r.status && r.status !== 'ok' ? ' · ' + esc(r.status) : '') + '</option>';
       }).join('');
     }
     if (this.current) sel.value = this.current;
@@ -468,8 +548,11 @@
     this.f.content.className = 'badge';
     this.f.session.textContent = 'session ' + (run.session || '–');
     function m(v, label, title) { return '<span' + (title ? ' title="' + esc(title) + '"' : '') + '><b>' + v + '</b> ' + label + '</span>'; }
+    var ci = L.costInfo(run.events);
     var cost = (run.cost.actual ? m(fmtUsd(run.cost.actual), 'cost, reported by the provider') : '') +
-      (run.cost.estimated ? m(fmtUsd(run.cost.estimated), 'estimated cost', 'Priced by the app from a price table') : '') || m('$0', 'cost');
+      (run.cost.estimated ? m(fmtUsd(run.cost.estimated), 'estimated cost', 'Priced by the app from a price table') : '') +
+      (ci.unpriced.length ? m('cost unknown', '(no price for ' + esc(ci.unpriced.join(', ')) + ')', 'These model calls carry tokens but no cost_usd, and the bench has no price for them. Unknown, not free.') : '') ||
+      (ci.calls ? m('$0', 'cost') : '');
     var st = run.status || (run.gate && run.gate.state === 'waiting' ? 'waiting' : 'running');
     var stTxt = { ok: '✓ finished', error: '✕ error', aborted: 'aborted', waiting: '⏸ waiting for approval', running: '● running' }[st] || st;
     var split = L.timeSplit(run.events), base = L.baselineOf(run.events);
@@ -505,10 +588,19 @@
      running; the node order (for lit edges); and whether the run is shown finished. */
   Bench.prototype._shown = function (run) {
     var now = wallNow(), shownEnd = schedule(run);
-    var ran = {}, seq = [], openNode = null, lastNode = null;
+    var ran = {}, seq = [], openNode = null, lastNode = null, nest = {};
+    // A nested step (a retrieval inside a tool call) lights once its parent is shown, with the
+    // edge into it; it never becomes the NOW step or part of the run's order.
+    function shownStep(s) { return s.vs <= now && (!s.parent || !run.steps[s.parent] || shownStep(run.steps[s.parent])); }
     run.stepOrder.forEach(function (sid) {
       var s = run.steps[sid];
-      if (s.parent || s.vs > now) return;
+      if (s.parent) {
+        if (!shownStep(s)) return;
+        ran[s.node] = (ran[s.node] || []).concat([s]);
+        if (run.steps[s.parent]) nest[run.steps[s.parent].node + '>' + s.node] = true;
+        return;
+      }
+      if (s.vs > now) return;
       ran[s.node] = (ran[s.node] || []).concat([s]);
       if (s.ve > now) openNode = s.node;
       lastNode = s.node;
@@ -517,12 +609,12 @@
     });
     // Events whose step isn't shown yet are held back too, so every panel agrees with the map.
     var hidden = {};
-    run.stepOrder.forEach(function (sid) { var s = run.steps[sid]; if (!s.parent && s.vs > now) hidden[sid] = true; });
+    run.stepOrder.forEach(function (sid) { var s = run.steps[sid]; if (!shownStep(s)) hidden[sid] = true; });
     var events = run.events.filter(function (e) { return !(e.step_id && hidden[e.step_id]); });
     var finished = !!run.status && now >= shownEnd;
     var caught = !Object.keys(hidden).length;   // every step received is on screen
     if (!finished) events = events.filter(function (e) { return e.event_type !== 'run_finished'; });
-    return { now: now, shownEnd: shownEnd, ran: ran, seq: seq, openNode: openNode, lastNode: lastNode, finished: finished, caught: caught, events: events };
+    return { now: now, shownEnd: shownEnd, ran: ran, seq: seq, nest: nest, openNode: openNode, lastNode: lastNode, finished: finished, caught: caught, events: events };
   };
 
   Bench.prototype._renderGraph = function (run) {
@@ -530,6 +622,7 @@
     var S = this._shown(run), now = S.now, ran = S.ran, finished = S.finished;
     var nowId = this.selectedNode || S.openNode || S.lastNode;
     var taken = L.takenEdges(this.topo, S.events.filter(function (e) { return ran[e.node] || e.node === '_run'; }), S.seq);
+    Object.keys(S.nest).forEach(function (k) { taken[k] = true; });
     var srcCount = {};
     if (pres) L.sourceStates(this.topo, S.events).forEach(function (s) { s.items.forEach(function (it) { srcCount[it.id] = s.count; }); });
     g.querySelectorAll('.gnode').forEach(function (n) {
@@ -564,7 +657,7 @@
       if (!shownOpen) {
         var hitsCount = null;
         steps.forEach(function (s) { s.events.forEach(function (e) { if (e.event_type === 'retrieval' && e.data && e.data.hits && e.data.hits[0]) hitsCount = srcCount[e.data.hits[0].id]; }); });
-        pv = L.preview(steps, self.mode, hitsCount, node.kind === 'check');
+        pv = L.preview(steps, self.mode, hitsCount, node.kind === 'check', self.topo);
       }
       n.querySelector('.gp').textContent = pv;
     });
@@ -744,7 +837,7 @@
     }
     var d = ev.data || {};
     var tabs = calls.length > 1 ? '<div class="iotabs">' + calls.map(function (c, i) {
-      return '<button class="iotab' + (c === ev ? ' on' : '') + '" data-i="' + i + '">' + esc(c.node) + '</button>';
+      return '<button class="iotab' + (c === ev ? ' on' : '') + '" data-i="' + i + '">#' + (i + 1) + ' ' + esc(c.node) + '</button>';
     }).join('') + '</div>' : '';
     var head = '<div class="row mono"><span class="tag">' + esc(ev.node) + '</span> ' + esc(d.model) + '<span class="right">' + fmtTok(d.input_tokens) + ' in / ' +
       fmtTok(d.output_tokens) + ' out' + (d.cost_usd != null ? ' · ' + fmtUsd(d.cost_usd) : '') + (d.latency_ms != null ? ' · ' + fmtMs(d.latency_ms) : '') +
@@ -792,6 +885,9 @@
     else if (act === 'item') { this.presItem = this.presItem === arg ? null : arg; this.presOpen.looked = true; }
     else if (act === 'record') { this.presOpen.record = !this.presOpen.record; }
     else if (act === 'clearsel') { this.selectedNode = null; }
+    else if (act === 'why') { this.whyOpen = !this.whyOpen; }
+    else if (act === 'bigtext') { this.bigText = !this.bigText; }
+    else if (act === 'stepthrough') { this.selectedNode = null; this.stepThrough(); return; }
     else if (this.transport && this.transport[act]) { this.selectedNode = null; this.transport[act](); return; }
     else return;
     this.render();
@@ -808,7 +904,8 @@
     // before it; until the screen catches up it reads as still playing, so the Continue sits
     // on the step it belongs to.
     var tstate = this.tstate;
-    if (S && (tstate === 'moment' || tstate === 'paused') && !S.caught) tstate = 'catching';
+    if (S && (tstate === 'moment' || tstate === 'paused' || tstate === 'stepping') && !S.caught) tstate = tstate === 'stepping' ? 'stepping' : 'catching';
+    if (tstate === 'stepping' && S && S.caught) tstate = 'paused';
     if (S && tstate === 'done' && !finished) tstate = 'catching';
     this._tstateShown = tstate;
 
@@ -818,18 +915,27 @@
     p.req.hidden = this.source === 'parent' && true;
     setHTML(p.who, run ? esc(L.requesterOf(run.events)) : '');
     var oc = run ? L.outcome(topo, events) : { text: '', why: null, done: false };
-    if (!oc.done && oc.text === 'Working…' && (tstate === 'paused' || tstate === 'moment')) oc.text = 'Paused · ▶ to go on, ◂ ▸ to step';
+    if (!oc.done && oc.text === 'Working…' && (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping')) oc.text = 'Paused · ▶ to go on, ◂ ▸ to step';
     setHTML(p.outcome, oc.text ? '<span class="p-oc' + (oc.done ? ' done' : '') + '">' + (oc.done ? '▸ ' : '') + esc(oc.text) + '</span>' : '');
-    setHTML(p.why, oc.why ? '<b>Why:</b> ' + esc(oc.why) : '');
-    setHTML(p.transport, this._transportHTML(finished));
+    // The reason is the strongest line on a hand-off; clamped to two lines, a click shows it whole.
+    setHTML(p.why, oc.why ? '<span data-act="why" title="' + (this.whyOpen ? 'Show less' : 'Show it all') + '"><b>Why:</b> ' + esc(oc.why) + '</span>' : '');
+    p.why.classList.toggle('full', !!this.whyOpen);
+    setHTML(p.transport, this._transportHTML(finished, run, S));
 
     // NOW card: the selected step, else the step being shown, else (finished) the last one.
     var nowId = this.selectedNode || (S && (S.openNode || S.lastNode)) || null;
     this._nowNode = nowId;
-    setHTML(p.now, this._nowHTML(run, events, nowId, finished));
+    setHTML(p.now, this._nowHTML(run, events, nowId, finished, S));
     setHTML(p.rows, run ? this._rowsHTML(run, events, finished) : '');
     setHTML(p.bottom, run ? this._bottomHTML(run, events, finished) : '');
-    if (this.overlay && run) { p.overlay.hidden = false; setHTML(p.overlay, this._overlayHTML(run, events)); }
+    if (this.overlay && run) {
+      p.overlay.hidden = false; setHTML(p.overlay, this._overlayHTML(run, events));
+      // Opened from a step: start at that step's call, not at the top of the run.
+      if (this.overlay.focus && !this.overlay.scrolled) {
+        var sec = p.overlay.querySelector('.g-call.focus');
+        if (sec) { p.overlay.scrollTop = Math.max(0, sec.offsetTop - 60); this.overlay.scrolled = true; }
+      }
+    }
     else { p.overlay.hidden = true; }
     if (this._fit) this._fit();
   };
@@ -838,30 +944,40 @@
     return this._renderGraph(run);
   };
 
-  Bench.prototype._transportHTML = function (finished) {
-    if (!this.transport) return '';
+  /* Replay: ◂ ▶ ▸ ⟲ (keys: ← → or PageUp/PageDown, Space). Beside the app or live, there is no
+     transport, but a finished run (or one waiting for a person) can be stepped through here. */
+  Bench.prototype._transportHTML = function (finished, run, S) {
+    if (!this.transport) {
+      var idle = run && S && S.caught && (finished || (run.gate && run.gate.state === 'waiting'));
+      return idle && global.BenchSources ? '<button data-act="stepthrough" class="main" title="Replay this run here, one step at a time, pausing at the moments that matter (the app stays as it is)">▶ Step through it</button>' : '';
+    }
     var s = this._tstateShown || this.tstate;
     var playing = s === 'playing';
     var catching = s === 'catching';
-    return '<button data-act="back" title="Back one step">◂</button>' +
-      (playing ? '<button data-act="pause" class="main" title="Pause">❚❚ Pause</button>'
+    var started = run && run.events.length > 0;
+    return '<button data-act="back" title="Back one step (←)">◂</button>' +
+      (playing ? '<button data-act="pause" class="main" title="Pause (Space)">❚❚ Pause</button>'
                : catching ? '<button class="main" disabled title="Finishing">❚❚ Playing</button>'
                : s === 'done' ? '<button data-act="restart" class="main" title="Play it again from the start">↻ Replay</button>'
-               : '<button data-act="play" class="main" title="Play; it pauses at the moments that matter">▶ ' + (s === 'moment' ? 'Continue' : 'Play') + '</button>') +
-      '<button data-act="next" title="Forward one step">▸</button>' +
-      '<button data-act="restart" title="Start over">⟲</button>';
+               : '<button data-act="play" class="main" title="Play (Space); it pauses at the moments that matter">▶ ' + (started ? 'Continue' : 'Play') + '</button>') +
+      '<button data-act="next" title="Forward one step (→)">▸</button>' +
+      '<button data-act="restart" title="Start over">⟲</button>' +
+      (this.transport.speed ? '<button data-act="speed" class="speed" title="Playing speed">' + (this.speedNow || 1) + '×</button>' : '') +
+      (this.transport.follow ? '<button data-act="follow" title="Stop stepping through and follow the app again">' + (this.source === 'parent' ? '✕ Follow the app' : '✕ Back to live') + '</button>' : '');
   };
 
-  Bench.prototype._nowHTML = function (run, events, id, finished) {
+  Bench.prototype._nowHTML = function (run, events, id, finished, S) {
     var L = lg(), topo = this.topo, self = this;
     if (!run || !id) return '<div class="p-nowhead"><span class="p-label">Now</span></div><div class="p-line muted">' +
       (run ? 'Starting…' : this.source === 'parent' ? 'Nothing has run yet. Pick a request in the app, and this side shows what the AI does with it.' : 'Nothing has run yet.') + '</div>';
-    var n = L.narrate(topo, events, id, { finished: finished });
+    var reply = run.output != null ? (typeof run.output === 'string' ? run.output : JSON.stringify(run.output)) : null;
+    var n = L.narrate(topo, events, id, { finished: finished, reply: reply, last: S && S.lastNode });
+    // The map box already carries the technical name; the card keeps to plain words.
     var head = '<div class="p-nowhead"><span class="p-label">' + (this.selectedNode ? 'Selected' : 'Now') + '</span><b>' + esc(n.title) + '</b>' +
       '<span class="actor actor-' + esc(n.actor) + '">' + esc(ACTOR_CHIP[n.actor] || n.actor) + '</span>' +
-      (n.technical && n.technical !== n.title ? '<span class="p-tech mono">' + esc(n.technical) + '</span>' : '') +
       (this.selectedNode ? '<button class="p-x" data-act="clearsel" title="Follow the run again">✕</button>' : '') + '</div>';
     var lines = n.lines.map(function (l) {
+      if (l.kind === 'reply') return '<div class="p-line k-reply"><span class="p-replyt">What the person was told</span>' + esc(l.text) + '</div>';
       return '<div class="p-line k-' + esc(l.kind) + (l.cls ? ' c-' + esc(l.cls) : '') + '">' + esc(l.text) + '</div>';
     }).join('');
     // The app's own story panels for this step (audience both or presentation), in Presentation's voice.
@@ -883,10 +999,11 @@
       if (html) panels += '<div class="p-story"><div class="p-storyt">' + esc(pn.title) + '</div>' + html + '</div>';
     });
     var acts = '';
-    var calls = events.filter(function (e) { return e.event_type === 'llm_call'; });
+    // Only on a step where the AI was asked something, and only when the app sent the text.
+    var calls = events.filter(function (e) { return e.event_type === 'llm_call' && e.node === id; });
     var hasText = calls.some(function (e) { var d = e.data || {}; return d.system != null || (d.messages || []).length || d.output != null; });
     if (this._tstateShown === 'moment' && this.transport) acts += '<button class="p-btn primary" data-act="play">Continue ▸</button>';
-    if (hasText) acts += '<button class="p-btn" data-act="given" data-arg="' + esc(n.model ? id : '') + '">What the AI was given ▸</button>';
+    if (hasText) acts += '<button class="p-btn" data-act="given" data-arg="' + esc(id) + '">What the AI was given ▸</button>';
     if (this.pair && n.kind === 'gate' && events.some(function (e) { return e.event_type === 'gate_resolved'; })) acts += '<a class="p-btn" href="' + esc(this.pair.href) + '">' + esc(this.pair.text) + '</a>';
     // The buttons sit above the body, so a long note never scrolls "Continue" out of reach.
     return head + (acts ? '<div class="p-acts">' + acts + '</div>' : '') + '<div class="p-nowbody">' + lines + panels + '</div>';
@@ -938,12 +1055,14 @@
     var L = lg(), topo = this.topo;
     var bits = [];
     // Live, an open gate keeps waiting by the wall clock; a replay's times are the recorded ones.
-    var nowTs = this.source === 'replay' || finished ? null : Date.now() / 1000;
+    var nowTs = null;
+    if (this.source !== 'replay' && !this._local && !finished && run.gate && run.gate.state === 'waiting' && run.gate.seenAt != null)
+      nowTs = run.gate.since + (wallNow() - run.gate.seenAt) / 1000;   // the app's own clock, run on by the wall
     // Mid-run the time is a running total, said as one ("So far: 2.3 s"), not a clipped "Took…".
     var split = events.length ? L.timeSplit(events, nowTs) : null;
     if (split) bits.push(esc(finished || split.gated ? L.timeLine(split) : 'So far: ' + L.timeLine(split).replace(/^Took /, '')));
-    var cost = L.runCost(events);
-    if (events.some(function (e) { return e.event_type === 'llm_call'; })) bits.push(esc(L.costWords(cost)) + (cost > 0 ? ' of AI' : ''));
+    var cl = L.costLine(L.costInfo(events));
+    if (cl) bits.push(esc(cl));
     var base = finished ? L.baselineOf(events) : null;
     if (base) bits.push('by hand: ' + esc(base) + ' <span class="muted">(the team’s estimate)</span>');
     var tr = topo.app && topo.app.track_record;
@@ -957,20 +1076,37 @@
   Bench.prototype._overlayHTML = function (run, events) {
     var L = lg(), calls = L.givenBlocks(this.topo, events), focus = this.overlay && this.overlay.focus;
     var note = L.privacyLine(this.topo, events);
+    var anyHit = false;
     var body = calls.map(function (c) {
       var blocks = c.blocks.map(function (b) {
-        var segs = b.segments.map(function (s) {
-          if (!s.hit) return esc(s.text);
-          return '<span class="hlwrap"><span class="hltag">from ' + esc(s.hit.source ? s.hit.source + ': ' : '') + esc(s.hit.title) + '</span><mark>' + esc(s.text) + '</mark></span>';
+        if (b.role === 'form') {
+          return '<div class="g-block g-form"><div class="g-role">' + esc(b.label) + '</div><div class="g-note">The app sent this with its request: the fields the AI\u2019s answer had to fill in, and what it was told each one means.</div>' +
+            '<dl class="g-fields">' + b.fields.map(function (f) {
+              return '<dt>' + esc(f.name.replace(/_/g, ' ')) + '</dt><dd>' + (f.description ? esc(f.description) : '<span class="muted">no description</span>') +
+                (f.choices ? '<div class="muted">one of: ' + esc(f.choices.join(' · ')) + '</div>' : '') + '</dd>';
+            }).join('') + '</dl></div>';
+        }
+        var segs = b.segments.map(function (sg) {
+          if (!sg.hit) return esc(sg.text);
+          anyHit = true;
+          return '<span class="hlwrap"><span class="hltag">from ' + esc(sg.hit.source ? sg.hit.source + ': ' : '') + esc(sg.hit.title) + '</span><mark>' + esc(sg.text) + '</mark></span>';
         }).join('');
+        // A one-object JSON answer reads as a filled-in form; its exact text stays one click away.
+        if (b.answer) {
+          return '<div class="g-block g-output"><div class="g-role">' + esc(b.label) + '</div><dl class="g-fields g-answer">' + b.answer.map(function (f) {
+              return '<dt>' + esc(f.name.replace(/_/g, ' ')) + '</dt><dd>' + esc(f.value) + (/confidence/i.test(f.name) ? ' <span class="muted">(the AI\u2019s own estimate, not measured accuracy)</span>' : '') + '</dd>';
+            }).join('') + '</dl><details class="g-raw"><summary>its exact text</summary><pre class="g-text">' + segs + '</pre></details></div>';
+        }
         return '<div class="g-block g-' + esc(b.role || 'x') + '"><div class="g-role">' + esc(b.label) + '</div><pre class="g-text">' + segs + '</pre></div>';
       }).join('');
-      return '<section class="g-call' + (focus && focus === c.node ? ' focus' : '') + '"><h4>Step: ' + esc(c.title) + '</h4>' + (blocks || '<div class="muted">The app didn’t send this call’s text.</div>') + '</section>';
+      return '<section class="g-call' + (focus && focus === c.node ? ' focus' : '') + '" data-node="' + esc(c.node) + '"><h4>Step: ' + esc(c.title) + '</h4>' + (blocks || '<div class="muted">The app didn\u2019t send this call\u2019s text.</div>') + '</section>';
     }).join('');
-    return '<div class="g-panel"><div class="g-head"><b>What the AI was given</b><span class="muted">every time the AI was asked something in this run, word for word</span>' +
-      '<button class="p-close" data-act="close" title="Close (Esc)">✕ Close</button></div>' +
+    return '<div class="g-panel' + (this.bigText ? ' big' : '') + '"><div class="g-head"><b>What the AI was given</b><span class="muted">every time the AI was asked something in this run, word for word as the app recorded it</span>' +
+      '<button class="g-big" data-act="bigtext" title="Larger or smaller text">' + (this.bigText ? 'A\u2212 Smaller text' : 'A+ Larger text') + '</button>' +
+      '<button class="p-close" data-act="close" title="Close (Esc)">\u2715 Close</button></div>' +
+      (anyHit ? '<div class="g-note"><mark class="g-key">highlighted</mark> text was found by the search and pasted into the AI\u2019s prompt, word for word; the label above each says where it came from.</div>' : '') +
       (note ? '<div class="g-note">' + esc(note) + '</div>' : '') +
-      '<div class="g-body">' + (body || '<div class="muted">The AI hasn’t been asked anything yet.</div>') + '</div></div>';
+      '<div class="g-body">' + (body || '<div class="muted">The AI hasn\u2019t been asked anything yet.</div>') + '</div></div>';
   };
 
   global.Bench = Bench;

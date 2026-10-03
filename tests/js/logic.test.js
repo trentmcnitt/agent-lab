@@ -267,7 +267,7 @@ test('highlight segments find retrieved text in the raw prompt and never drift o
   assert.deepEqual(segs.map((s) => [s.text, !!s.hit]), [['a <b> & ', false], ['HELLO WORLD TEXT', true], [' tail', false]]);
   const { topo, events } = hello('hello-answer');
   const calls = L.givenBlocks(topo, events);
-  assert.deepEqual(calls[1].blocks.map((b) => b.label), ['Its instructions', 'The message it was sent', 'What it answered']);
+  assert.deepEqual(calls[1].blocks.map((b) => b.label), ['Its instructions', 'What the app sent it', 'What it answered']);
   const hit = calls[1].blocks[0].segments.find((s) => s.hit);
   assert.equal(hit.hit.id, 'doc-3'); assert.equal(hit.hit.source, 'Help docs');
 });
@@ -327,4 +327,75 @@ test('helpdesk: outcomes read right for each kind of run', { skip: !haveDesk && 
   assert.equal(L.outcome(a.topo, a.events).why, null, 'an approved ticket needs no Why');
   const d = desk('req-012-denied');
   assert.equal(L.gateState(d.topo, d.events, true).state, 'denied');
+});
+
+// ---- 10-03 fixes (usability round 4) ---------------------------------------------------------
+// An OTLP run: the root agent span is the run, not a step, and every step names it as parent.
+function otlpRun() {
+  const e = (node, et, ts, sid, data) => ({ v: 'bench/0', run_id: 'o', ts, node, event_type: et, step_id: sid, parent_step_id: sid ? 'root' : undefined, data: data || {} });
+  return [
+    e('chat a', 'step_started', 1, 's1'), e('chat a', 'llm_call', 1.2, 's1', { model: 'fake', input_tokens: 5, output_tokens: 2 }), e('chat a', 'step_finished', 1.2, 's1', { status: 'ok' }),
+    e('execute_tool t', 'step_started', 1.3, 's2'), e('execute_tool t', 'tool_call', 1.4, 's2', { tool: 't' }), e('execute_tool t', 'step_finished', 1.4, 's2', { status: 'ok' }),
+    { v: 'bench/0', run_id: 'o', ts: 1, node: '_run', event_type: 'run_started', data: { via: 'otlp', input: 'q' } },
+    { v: 'bench/0', run_id: 'o', ts: 1.5, node: '_run', event_type: 'run_finished', data: { status: 'ok', outcome: 'inside the 30-day window' } }];
+}
+test('OTLP: children of the root agent span are top-level steps (they light, and NOW follows them)', () => {
+  const events = L.sortEvents(otlpRun());
+  const run = runOf(events);
+  const top = run.stepOrder.map((sid) => run.steps[sid]).filter((s) => !s.parent).map((s) => s.node);
+  assert.deepEqual(top, ['chat a', 'execute_tool t']);
+  assert.deepEqual(L.visits(events).map((v) => v.node), ['chat a', 'execute_tool t']);
+  assert.ok(L.takenEdges({ edges: [] }, events)['chat a>execute_tool t']);
+  assert.equal(L.narrate({ nodes: [] }, events, 'chat a', { finished: true }).ran, true);
+  assert.notEqual(L.narrate({ nodes: [] }, events, 'chat a', { finished: true }).lines[0].text, 'This step didn’t run this time.');
+  // A real parent step still nests its child.
+  const n = [{ run_id: 'n', ts: 1, node: 'p', event_type: 'step_started', step_id: 'p1', data: {} },
+             { run_id: 'n', ts: 2, node: 'c', event_type: 'step_started', step_id: 'c1', parent_step_id: 'p1', data: {} }];
+  assert.equal(runOf(n).steps.c1.parent, 'p1');
+});
+test('outcome: free text passes through verbatim; outcome words become plain', () => {
+  assert.equal(L.outcome({ nodes: [] }, otlpRun()).text, 'inside the 30-day window');
+  const fin = (o) => [{ run_id: 'x', ts: 1, node: '_run', event_type: 'run_finished', data: { status: 'ok', outcome: o } }];
+  assert.equal(L.outcome({ nodes: [] }, fin('handed_off')).text, 'Handed to a person');
+  assert.equal(L.outcome({ nodes: [] }, fin('self-service')).text, 'Self service');
+});
+test('cost: calls with tokens and no price are unknown, never free', () => {
+  const c = (cost, model) => ({ event_type: 'llm_call', data: Object.assign({ model: model || 'm', input_tokens: 10 }, cost == null ? {} : { cost_usd: cost }) });
+  assert.equal(L.costLine(L.costInfo([c(null, 'fake-gpt')])), 'AI cost not known');
+  assert.deepEqual(L.costInfo([c(null, 'fake-gpt')]).unpriced, ['fake-gpt']);
+  assert.equal(L.costLine(L.costInfo([c(0.01)])), 'about 1¢ of AI');
+  assert.match(L.costLine(L.costInfo([c(0.01), c(null)])), /^at least about 1¢ of AI \(some calls/);
+  assert.equal(L.costLine(L.costInfo([])), '');
+});
+test('the inferred map keeps an agent name in an LLM node id, and folds only a model name', () => {
+  assert.equal(L.canonicalNode('chat refund_triage'), 'chat refund_triage');
+  assert.equal(L.canonicalNode('chat gpt-4o-mini'), 'chat');
+  assert.equal(L.canonicalNode('chat claude-sonnet-4-5'), 'chat');
+});
+test('helpdesk: decided gates drop the waiting line; hand-offs say who owns it now; no Why on a denial', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
+  const a = desk('req-012-approved');
+  const n = L.narrate(a.topo, a.events, 'approval_gate', { finished: true });
+  assert.ok(!n.lines.some((l) => /Waiting for a person/.test(l.text)), JSON.stringify(n.lines));
+  assert.ok(n.lines.some((l) => /Approved by/.test(l.text)));
+  const h = desk('req-020');
+  assert.equal(L.gateState(h.topo, h.events, true).state, 'handed');
+  assert.match(L.gateState(h.topo, h.events, true).line, /handed to a person/);
+  const d = desk('req-012-denied');
+  assert.equal(L.outcome(d.topo, d.events).why, null);
+  // Fill in a ticket is told only the message: its own line says so, whatever the run's row says.
+  const t = L.narrate(a.topo, a.events, 'propose_action', { finished: true });
+  assert.ok(t.lines.some((l) => l.kind === 'given' && /none of it/.test(l.text)), JSON.stringify(t.lines));
+  const c = L.narrate(a.topo, a.events, 'classify', { finished: true });
+  assert.ok(c.lines.some((l) => l.kind === 'given' && /given 4 of 16/.test(l.text)), JSON.stringify(c.lines));
+});
+test('the overlay: the answer form from params.json_schema, and a JSON answer as rows', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
+  const a = desk('req-012-approved');
+  const calls = L.givenBlocks(a.topo, a.events);
+  const ticket = calls.find((c) => c.node === 'propose_action');
+  const form = ticket.blocks.find((b) => b.role === 'form');
+  assert.ok(form && form.fields.some((f) => f.name === 'action_type' && f.description), 'the action_type description is shown');
+  const out = ticket.blocks.find((b) => b.role === 'output');
+  assert.ok(out.answer && out.answer.some((r) => r.name === 'title' && /JetBrains/.test(r.value)));
+  assert.equal(L.answerFields('plain text'), null);
+  assert.equal(L.answerFields('{"a": {"b": 1}}'), null);
 });

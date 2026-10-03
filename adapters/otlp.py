@@ -338,7 +338,9 @@ def _span_events(span: dict, a: dict, ctx: dict, node_from: dict | None, price: 
                     v = [{"role": "user", "content": v}]
                 v = [{"role": m.get("role", "?"), "content": _parts(m)} if isinstance(m, dict) else {"role": "?", "content": m} for m in v]
             if dst == "output" and isinstance(v, list):
-                v = "\n".join(str(_parts(m)) for m in v if isinstance(m, dict)) if all(isinstance(m, dict) for m in v) else v
+                # Text parts as text; anything else (a tool call) as JSON, never a Python repr.
+                v = "\n".join(p if isinstance(p := _parts(m), str) else json.dumps(p, ensure_ascii=False)
+                              for m in v if isinstance(m, dict)) if all(isinstance(m, dict) for m in v) else v
             llm[dst] = v
         if a.get("gen_ai.usage.cost") is not None:
             llm.update(cost_usd=float(a["gen_ai.usage.cost"]), cost_source="actual",
@@ -410,6 +412,12 @@ class TraceState:
 
     def __init__(self) -> None:
         self.traces: OrderedDict[str, dict] = OrderedDict()
+        self._run_apps: dict[str, str] = {}  # run_id -> app, since the last take_run_apps()
+
+    def take_run_apps(self) -> dict[str, str]:
+        """Which app each run converted since the last call belongs to (the server keeps it)."""
+        out, self._run_apps = self._run_apps, {}
+        return out
 
     def _trace(self, tid: str) -> dict:
         t = self.traces.get(tid)
@@ -458,6 +466,8 @@ class TraceState:
                     t["mode"] = a["bench.content_mode"]
             ctx = {"run_id": str(t["run_id"] or tid), "session": t["session"], "app": t["app"],
                    "run_mode": t["mode"] or ("full" if t["content"] else "absent")}
+            if t["app"]:
+                self._run_apps[ctx["run_id"]] = str(t["app"])
             nf = node_from(t["app"]) if callable(node_from) else node_from
             trace_events: list[dict] = []
             for s, a in merged:

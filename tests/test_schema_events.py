@@ -33,6 +33,7 @@ def c(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "LOG_DIR", tmp_path / "log")
     monkeypatch.setattr(srv, "APPS_DIR", tmp_path / "apps")
     srv.store.events.clear()
+    srv.store.run_app.clear()
     srv.store.load_apps()
     return TestClient(srv.app)
 
@@ -99,11 +100,11 @@ def test_check_alias_normalized_on_ingest(c, tmp_path):
 def test_check_alias_reaches_live_subscribers_as_check_result(c):
     # /stream fans out from store.subscribers; a subscriber sees what was stored.
     q = asyncio.Queue()
-    srv.store.subscribers.add((q, "s2"))
+    srv.store.subscribers.add((q, "s2", None))
     try:
         c.post("/ingest", json=ev("check", {"name": "g", "passed": False}, session_id="s2"))
     finally:
-        srv.store.subscribers.discard((q, "s2"))
+        srv.store.subscribers.discard((q, "s2", None))
     assert q.get_nowait()["event_type"] == "check_result"
 
 

@@ -87,6 +87,8 @@ Open <http://127.0.0.1:8790/> and pick the **hello-agent** recording to see a ru
    OTEL_BSP_SCHEDULE_DELAY=200                 # optional: send every 200 ms instead of 5 s
    ```
 
+   **From an inferred map to your own (Level 0 → Level 1).** With no map registered, the bench lists your app on its front page and draws a map from your spans. To give it plain words, open `?app=my-app&mode=engineering` and click **⤓ map as topology.json**: you get that map as a file, with the node ids your spans actually produce (the same ids the event log shows, e.g. `chat my_agent` and `execute_tool lookup_order`; see SPEC section 6b). Fill in each node's `plain_label` and `description`, add `from_branch`/`description` on edges and any `sources`, then register it as in step 1 (`{"topology": <the file>, "story": null}`). A model call with no price shows its cost as unknown, never as $0.
+
 3. **Watch** at `http://127.0.0.1:8790/?app=my-app`, or side by side with your app: `http://127.0.0.1:8790/shell/?app=<your app's url>&appid=my-app`.
 
 [`examples/make_hello.py`](examples/make_hello.py) builds a complete map, story and recording; [`SPEC.md`](SPEC.md) has the full format.

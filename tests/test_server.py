@@ -15,6 +15,7 @@ def c(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "LOG_DIR", tmp_path / "log")
     monkeypatch.setattr(srv, "APPS_DIR", tmp_path / "apps")
     srv.store.events.clear()
+    srv.store.run_app.clear()
     srv.store.otlp = otlp.TraceState()
     srv.store.load_apps()
     return TestClient(srv.app)

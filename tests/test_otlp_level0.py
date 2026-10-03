@@ -30,6 +30,7 @@ def c(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "LOG_DIR", tmp_path / "log")
     monkeypatch.setattr(srv, "APPS_DIR", tmp_path / "apps")
     srv.store.events.clear()
+    srv.store.run_app.clear()
     srv.store.otlp = otlp.TraceState()
     srv.store.load_apps()
     return TestClient(srv.app)
@@ -113,12 +114,14 @@ def test_app_and_session_routing(c):
     assert run["app"] == "svc" and run["session_id"] == "from-header"
     # Query parameters override both.
     srv.store.events.clear()
+    srv.store.run_app.clear()
     srv.store.otlp = otlp.TraceState()
     c.post("/v1/traces?app=other&session_id=from-query", json=b, headers={"x-agent-lab-session": "from-header"})
     run = c.get("/runs").json()[0]
     assert run["app"] == "other" and run["session_id"] == "from-query"
     # With neither, the span's session.id.
     srv.store.events.clear()
+    srv.store.run_app.clear()
     srv.store.otlp = otlp.TraceState()
     c.post("/v1/traces", json=b)
     assert c.get("/runs").json()[0]["session_id"] == "from-span"
@@ -326,3 +329,32 @@ def test_real_openinference_export(c):
     ret = next(e for e in ev if e["event_type"] == "retrieval")
     assert ret["node"] == "search handbook" and ret["data"]["hits"][0]["id"] == "vpn-reset"
     assert {e["node"] for e in ev} == {"_run", "answer", "search handbook", "chat"}
+
+
+# ---- usability round 4 (engineer persona) ------------------------------------------------------
+def test_app_filter_keeps_other_apps_runs_out_of_the_stream(c):
+    """?app= on /stream: another service's runs never reach this app's page (or its inferred map),
+    even before their root span (and run_started) arrives."""
+    child = span("chat m1", "cd" * 8, parent="ef" * 8, trace="2" * 32, attrs=CHAT)
+    c.post("/v1/traces", json=body(child, res={"service.name": "other-app"}))
+    c.post("/v1/traces", json=body(span("chat m1", "ab" * 8, attrs=CHAT), res={"service.name": "mine"}))
+    mine, other = srv.store.backlog(None, "mine"), srv.store.backlog(None, "other-app")
+    assert mine and all(e["run_id"] == "1" * 32 for e in mine)
+    assert other and all(e["run_id"] == "2" * 32 for e in other)
+    # A native run that never names its app passes any app filter (the filter only keeps out known others).
+    c.post("/ingest", json={"v": "bench/0", "run_id": "native", "ts": 1.0, "node": "n", "event_type": "step_started", "data": {}})
+    assert any(e["run_id"] == "native" for e in srv.store.backlog(None, "mine"))
+    # Unregistered apps that sent runs are listed, marked inferred; a missing map can be asked for as null.
+    listed = {a["id"]: a for a in c.get("/topologies").json()}
+    assert listed["mine"]["inferred"] and listed["other-app"]["inferred"]
+    assert c.get("/topology/mine").status_code == 404
+    r = c.get("/topology/mine?missing=null")
+    assert r.status_code == 200 and r.json() is None
+
+
+def test_tool_call_output_is_json_not_a_python_repr():
+    out = json.dumps([{"role": "assistant", "parts": [{"type": "tool_call", "id": "t1", "name": "lookup_order", "arguments": {"order_id": "B200"}}]}])
+    ev = [e for e in otlp.convert(body(span("chat m1", "ab" * 8, attrs={**CHAT, "gen_ai.output.messages": out})))
+          if e["event_type"] == "llm_call"][0]
+    assert json.loads(ev["data"]["output"])[0]["name"] == "lookup_order"
+    assert "'" not in ev["data"]["output"]

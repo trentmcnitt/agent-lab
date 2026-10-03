@@ -58,7 +58,8 @@ class Store:
         self.events: list[dict] = []
         self.topologies: dict[str, dict] = {}
         self.stories: dict[str, str] = {}
-        self.subscribers: set[tuple[asyncio.Queue, str | None]] = set()
+        self.subscribers: set[tuple[asyncio.Queue, str | None, str | None]] = set()
+        self.run_app: dict[str, str] = {}  # run_id -> app id, when known (OTLP: service.name; native: run_started.data.app)
         self.otlp = otlp_adapter.TraceState()  # OTLP runs arrive over several requests
         self.load_apps()
 
@@ -92,7 +93,19 @@ class Store:
             (d / "story.js").write_text(story)
             self.stories[app_id] = story
 
+    def app_of(self, ev: dict) -> str | None:
+        if ev.get("event_type") == "run_started" and isinstance(ev.get("data"), dict) and ev["data"].get("app"):
+            self.run_app.setdefault(ev["run_id"], str(ev["data"]["app"]))
+        return self.run_app.get(ev["run_id"])
+
+    @staticmethod
+    def matches(ev: dict, app_of: str | None, sid: str | None, app: str | None) -> bool:
+        """A stream's filters. A run whose app isn't known (a native app that never names it)
+        passes an app filter: the filter only keeps out runs known to be another app's."""
+        return (sid is None or ev.get("session_id") == sid) and (app is None or app_of is None or app_of == app)
+
     def add(self, ev: dict) -> None:
+        app_of = self.app_of(ev)
         self.events.append(ev)
         if len(self.events) > MAX_EVENTS:
             del self.events[: len(self.events) - MAX_EVENTS]
@@ -100,12 +113,16 @@ class Store:
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             with open(LOG_DIR / f"{time.strftime('%Y-%m-%d')}.jsonl", "a") as fh:
                 fh.write(json.dumps(ev) + "\n")
-        for q, sid in list(self.subscribers):
-            if sid is None or ev.get("session_id") == sid:
+        for q, sid, app in list(self.subscribers):
+            if self.matches(ev, app_of, sid, app):
                 q.put_nowait(ev)
 
-    def backlog(self, sid: str | None) -> list[dict]:
-        return [e for e in self.events if sid is None or e.get("session_id") == sid]
+    def backlog(self, sid: str | None, app: str | None = None) -> list[dict]:
+        return [e for e in self.events if self.matches(e, self.run_app.get(e["run_id"]), sid, app)]
+
+    def seen_apps(self) -> list[str]:
+        """App ids that sent runs, registered or not (Level 0 apps never register)."""
+        return sorted(set(self.run_app.values()))
 
 
 store = Store()
@@ -180,6 +197,8 @@ async def ingest_otlp(request: Request) -> Response:
         body, app=request.query_params.get("app") or None,
         session_id=request.query_params.get("session_id") or request.headers.get("x-agent-lab-session") or None,
         node_from=lambda app_id: (store.topologies.get(app_id) or {}).get("node_from"))
+    # Every event of an OTLP run knows its app now, though its run_started (the root span) comes last.
+    store.run_app.update(store.otlp.take_run_apps())
     res = _accept(events)
     # OTLP exporters expect an ExportTraceServiceResponse, in their own encoding; partialSuccess reports drops.
     n, msg = len(res["rejected"]), (res["rejected"][0]["error"] if res["rejected"] else "")
@@ -193,16 +212,17 @@ async def ingest_otlp(request: Request) -> Response:
 
 async def stream(request: Request) -> Response:
     sid = request.query_params.get("session_id") or None
+    app_id = request.query_params.get("app") or None
     backlog = request.query_params.get("backlog", "1") != "0"
     q: asyncio.Queue = asyncio.Queue()
-    entry = (q, sid)
+    entry = (q, sid, app_id)
 
     async def gen():
         store.subscribers.add(entry)
         try:
             yield "retry: 2000\n\n"
             if backlog:
-                for ev in store.backlog(sid):
+                for ev in store.backlog(sid, app_id):
                     yield f"data: {json.dumps(ev)}\n\n"
             while True:
                 try:
@@ -249,13 +269,21 @@ async def get_story(request: Request) -> Response:
 
 
 async def get_topology(request: Request) -> Response:
+    """An app's map. `?missing=null` answers an unregistered app with 200 null instead of 404, so
+    a Level 0 viewer (which then infers the map) doesn't log a failed request."""
     t = store.topologies.get(request.path_params["app_id"])
-    return JSONResponse(t) if t else JSONResponse({"error": "unknown app"}, status_code=404)
+    if t:
+        return JSONResponse(t)
+    if request.query_params.get("missing") == "null":
+        return JSONResponse(None)
+    return JSONResponse({"error": "unknown app"}, status_code=404)
 
 
 async def list_topologies(request: Request) -> Response:
-    return JSONResponse([{"id": k, "name": v["app"]["name"], "story": k in store.stories}
-                         for k, v in store.topologies.items()])
+    """Registered apps, then apps that have sent runs without registering (`inferred: true`)."""
+    out = [{"id": k, "name": v["app"]["name"], "story": k in store.stories} for k, v in store.topologies.items()]
+    out += [{"id": a, "name": a, "story": False, "inferred": True} for a in store.seen_apps() if a not in store.topologies]
+    return JSONResponse(out)
 
 
 async def list_runs(request: Request) -> Response:

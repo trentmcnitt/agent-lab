@@ -129,6 +129,10 @@
           "description": {
             "type": "string",
             "description": "What taking this branch means, in plain words; on an untaken edge, why it wasn't taken."
+          },
+          "plain_label": {
+            "type": "string",
+            "description": "Optional. The branch in Presentation's words; drawn as the edge label and the source box's \"→\" line there. Falls back to the target node's plain_label."
           }
         },
         "patternProperties": {
