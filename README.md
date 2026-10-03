@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="https://agentlab.trentmcnitt.com"><img src="https://img.shields.io/badge/Live_Lab-agentlab.trentmcnitt.com-5eead4" alt="Live lab"></a>
+  <img src="https://img.shields.io/badge/status-0.1_pre--alpha-f59e0b" alt="Status: 0.1 pre-alpha">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-FSL--1.1--ALv2-a78bfa" alt="License: FSL-1.1-ALv2"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/works_with-OpenTelemetry-f5a800" alt="Works with OpenTelemetry">
@@ -28,7 +29,7 @@
 </p>
 
 > [!NOTE]
-> **Pre-alpha.** This is day-three software: the format and APIs will change. Issues and ideas are welcome.
+> **0.1 pre-alpha.** This is day-three software: the format and APIs will change. Issues and ideas are welcome.
 
 Agent Lab is a bench you set beside an AI app. The app reports what it does as it runs; the bench draws the app's whole flowchart, lights up the path each run takes, and shows every step's prompt, output, time and cost. It's built for showing an AI system to people as much as for debugging it: a flowchart anyone can follow, with every engineering detail one click away.
 
