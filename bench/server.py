@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
+import zlib
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,18 @@ REC_DIR = Path(os.environ.get("BENCH_RECORDINGS_DIR", ROOT / "data/recordings"))
 MAX_STORY = 512 * 1024
 MAX_EVENTS = int(os.environ.get("BENCH_MAX_EVENTS", "50000"))
 MAX_BODY = 5 * 1024 * 1024
+# Accepted on ingest and stored under the standard name (SPEC.md section 2).
+EVENT_ALIASES = {"check": "check_result"}
+log = logging.getLogger("bench.server")
+
+
+def _topo_error(topo: Any) -> str | None:
+    """The first schema error in a map, with where it is, or None."""
+    errs = sorted(TOPO_SCHEMA.iter_errors(topo), key=lambda e: list(e.absolute_path))
+    if not errs:
+        return None
+    where = "/".join(str(p) for p in errs[0].absolute_path)
+    return f"{where + ': ' if where else ''}{errs[0].message}"
 
 
 class Store:
@@ -45,6 +59,7 @@ class Store:
         self.topologies: dict[str, dict] = {}
         self.stories: dict[str, str] = {}
         self.subscribers: set[tuple[asyncio.Queue, str | None]] = set()
+        self.otlp = otlp_adapter.TraceState()  # OTLP runs arrive over several requests
         self.load_apps()
 
     def load_apps(self) -> None:
@@ -53,9 +68,12 @@ class Store:
         for d in sorted(APPS_DIR.glob("*/")) if APPS_DIR.exists() else []:
             try:
                 t = json.loads((d / "topology.json").read_text())
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                log.warning("skipping stored map %s: unreadable (%s)", d, exc)
                 continue
-            if list(TOPO_SCHEMA.iter_errors(t)):
+            err = _topo_error(t)
+            if err:
+                log.warning("skipping stored map %s: %s", d, err)
                 continue
             self.topologies[t["app"]["id"]] = t
             if (d / "story.js").exists():
@@ -118,6 +136,8 @@ async def ingest(request: Request) -> Response:
 def _accept(events: list[dict]) -> dict:
     accepted, rejected = 0, []
     for i, ev in enumerate(events):
+        if isinstance(ev, dict) and ev.get("event_type") in EVENT_ALIASES:
+            ev = {**ev, "event_type": EVENT_ALIASES[ev["event_type"]]}
         err = _first_error(ev)
         if err:
             rejected.append({"index": i, "error": err})
@@ -128,20 +148,46 @@ def _accept(events: list[dict]) -> dict:
 
 
 async def ingest_otlp(request: Request) -> Response:
-    """OTLP/HTTP JSON (POST /v1/traces). Protobuf is not accepted in v0."""
-    if "json" not in request.headers.get("content-type", ""):
-        return JSONResponse({"error": "OTLP/HTTP JSON only (Content-Type: application/json)"}, status_code=415)
+    """OTLP/HTTP traces (POST /v1/traces): protobuf or JSON, optionally gzip-compressed.
+
+    The app is `?app=`, else the resource's `service.name` (OTEL_SERVICE_NAME). The session is
+    `?session_id=`, else the `x-agent-lab-session` header (OTEL_EXPORTER_OTLP_HEADERS), else the
+    spans' `session.id`. A standard exporter can't add a query string to its endpoint, so the
+    header and resource attributes are the zero-code path; the query parameters are overrides."""
+    ctype = request.headers.get("content-type", "")
+    proto = "protobuf" in ctype
+    if not proto and "json" not in ctype:
+        return JSONResponse({"error": "OTLP/HTTP protobuf or JSON only (Content-Type: application/x-protobuf or application/json)"},
+                            status_code=415)
+    raw = await request.body()
+    if len(raw) > MAX_BODY:
+        return JSONResponse({"error": "body too large"}, status_code=413)
+    if request.headers.get("content-encoding", "").lower() == "gzip":
+        d = zlib.decompressobj(wbits=31)
+        try:
+            raw = d.decompress(raw, MAX_BODY + 1)
+        except zlib.error:
+            return JSONResponse({"error": "body is not valid gzip"}, status_code=400)
+        if len(raw) > MAX_BODY or d.unconsumed_tail:
+            return JSONResponse({"error": "body too large"}, status_code=413)
     try:
-        body = json.loads(await request.body())
-    except ValueError:
-        return JSONResponse({"error": "body is not JSON"}, status_code=400)
-    app_id = request.query_params.get("app")
-    node_from = (store.topologies.get(app_id) or {}).get("node_from") if app_id else None
-    res = _accept(otlp_adapter.convert(body, node_from=node_from, session_id=request.query_params.get("session_id")))
-    # OTLP exporters expect an ExportTraceServiceResponse; partialSuccess reports drops.
+        body = otlp_adapter.decode_protobuf(raw) if proto else json.loads(raw)
+    except Exception:  # DecodeError from protobuf, ValueError from json
+        return JSONResponse({"error": f"body is not OTLP {'protobuf' if proto else 'JSON'}"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "body is not an OTLP export request"}, status_code=400)
+    events = store.otlp.ingest(
+        body, app=request.query_params.get("app") or None,
+        session_id=request.query_params.get("session_id") or request.headers.get("x-agent-lab-session") or None,
+        node_from=lambda app_id: (store.topologies.get(app_id) or {}).get("node_from"))
+    res = _accept(events)
+    # OTLP exporters expect an ExportTraceServiceResponse, in their own encoding; partialSuccess reports drops.
+    n, msg = len(res["rejected"]), (res["rejected"][0]["error"] if res["rejected"] else "")
+    if proto:
+        return Response(otlp_adapter.encode_response(n, msg), media_type="application/x-protobuf")
     out: dict = {}
-    if res["rejected"]:
-        out["partialSuccess"] = {"rejectedSpans": str(len(res["rejected"])), "errorMessage": res["rejected"][0]["error"]}
+    if n:
+        out["partialSuccess"] = {"rejectedSpans": str(n), "errorMessage": msg}
     return JSONResponse(out)
 
 
@@ -184,10 +230,9 @@ async def register_app(request: Request) -> Response:
     topo, story = body.get("topology"), body.get("story")
     if not isinstance(topo, dict):
         return JSONResponse({"error": "topology is required"}, status_code=400)
-    errs = sorted(TOPO_SCHEMA.iter_errors(topo), key=lambda e: list(e.absolute_path))
-    if errs:
-        where = "/".join(str(p) for p in errs[0].absolute_path)
-        return JSONResponse({"error": f"topology {where}: {errs[0].message}"}, status_code=400)
+    err = _topo_error(topo)
+    if err:
+        return JSONResponse({"error": f"topology {err}"}, status_code=400)
     if topo["app"]["id"] != app_id:
         return JSONResponse({"error": "app.id does not match the URL"}, status_code=400)
     if story is not None and (not isinstance(story, str) or len(story) > MAX_STORY):
@@ -222,23 +267,41 @@ async def list_runs(request: Request) -> Response:
         r["first_ts"] = min(r.get("first_ts", e["ts"]), e["ts"])
         r["last_ts"] = max(r.get("last_ts", e["ts"]), e["ts"])
         r["events"] += 1
+        if e["event_type"] == "run_started" and e.get("data", {}).get("app"):
+            r["app"] = e["data"]["app"]  # OTLP runs: which app sent them (service.name)
         if e["event_type"] == "run_finished":
             r["status"] = e["data"].get("status")
     return JSONResponse(sorted(runs.values(), key=lambda r: r["first_ts"]))
 
 
+def recording_entry(prefix: str, p: Path) -> dict | None:
+    """One picker entry: title from the header's app name plus the file name; the plain run
+    picker (Presentation's "Try another request") also reads `app`, `plain_title` and `group`."""
+    try:
+        with open(p) as fh:
+            head = json.loads(fh.readline())
+    except (OSError, ValueError):
+        return None
+    is_head = head.get("v") == "bench-recording/0"
+    app = ((head.get("topology") or {}).get("app") or {}) if is_head else {}
+    name = app.get("name", "")
+    entry = {"path": f"{prefix}/{p.name}", "title": (name + " · " if name else "") + p.name.removesuffix(".recording.jsonl")}
+    if app.get("id"):
+        entry["app"] = app["id"]
+    if is_head and head.get("title"):
+        entry["plain_title"] = head["title"]
+    if is_head and head.get("group"):
+        entry["group"] = head["group"]
+    return entry
+
+
 def recording_list() -> list[dict]:
-    """Recordings the picker offers: title from the header's app name plus the file name."""
+    """Recordings the picker offers."""
     out = []
     for prefix, d in (("examples", ROOT / "examples"), ("recordings", REC_DIR)):
         for p in sorted(d.glob("*.recording.jsonl")) if d.exists() else []:
-            try:
-                with open(p) as fh:
-                    head = json.loads(fh.readline())
-            except (OSError, ValueError):
-                continue
-            app = ((head.get("topology") or {}).get("app") or {}).get("name", "") if head.get("v") == "bench-recording/0" else ""
-            out.append({"path": f"{prefix}/{p.name}", "title": (app + " · " if app else "") + p.name.removesuffix(".recording.jsonl")})
+            if (entry := recording_entry(prefix, p)) is not None:
+                out.append(entry)
     return out
 
 

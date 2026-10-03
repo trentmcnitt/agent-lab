@@ -1,0 +1,117 @@
+{
+  "v": "bench-topology/0",
+  "app": {
+    "id": "hello-agent",
+    "name": "Hello agent (synthetic example)",
+    "description": "A made-up support triage agent that ships with the bench as its example."
+  },
+  "nodes": [
+    {
+      "id": "receive",
+      "label": "receive",
+      "kind": "step"
+    },
+    {
+      "id": "triage",
+      "label": "triage",
+      "kind": "llm"
+    },
+    {
+      "id": "lookup",
+      "label": "look up docs",
+      "kind": "retrieval"
+    },
+    {
+      "id": "answer",
+      "label": "draft answer",
+      "kind": "llm"
+    },
+    {
+      "id": "escalate",
+      "label": "escalate",
+      "kind": "gate"
+    },
+    {
+      "id": "reply",
+      "label": "reply",
+      "kind": "terminal"
+    }
+  ],
+  "edges": [
+    {
+      "from": "receive",
+      "to": "triage"
+    },
+    {
+      "from": "triage",
+      "to": "lookup",
+      "from_branch": "answerable"
+    },
+    {
+      "from": "triage",
+      "to": "escalate",
+      "from_branch": "needs_human"
+    },
+    {
+      "from": "lookup",
+      "to": "answer"
+    },
+    {
+      "from": "answer",
+      "to": "reply"
+    },
+    {
+      "from": "escalate",
+      "to": "reply"
+    }
+  ],
+  "panels": [
+    {
+      "id": "triage",
+      "title": "Triage (story panel)",
+      "event_types": [
+        "decision"
+      ],
+      "nodes": [
+        "triage"
+      ],
+      "story": true
+    },
+    {
+      "id": "docs",
+      "title": "Docs found (declared fields)",
+      "event_types": [
+        "retrieval"
+      ],
+      "fields": [
+        {
+          "key": "query",
+          "label": "query"
+        },
+        {
+          "key": "hits",
+          "label": "hits",
+          "format": "json"
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "title": "Escalation",
+      "event_types": [
+        "gate_waiting",
+        "gate_resolved"
+      ],
+      "mode": "append"
+    },
+    {
+      "id": "llm",
+      "title": "Model calls",
+      "event_types": [
+        "llm_call"
+      ],
+      "mode": "append"
+    }
+  ],
+  "story": true
+}

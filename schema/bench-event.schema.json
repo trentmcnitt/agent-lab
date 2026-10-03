@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://bench.local/schema/bench-event/0",
   "title": "Bench event, v0",
-  "description": "One observability event. See SPEC.md. Unknown event_type values are valid; known ones constrain data.",
+  "description": "One observability event. See SPEC.md. Unknown event_type values are valid; known ones constrain data. \"check\" is an alias of \"check_result\": the receiver stores it as check_result.",
   "type": "object",
   "required": [
     "v",
@@ -61,8 +61,10 @@
     "content_mode": {
       "enum": [
         "full",
-        "redacted"
-      ]
+        "redacted",
+        "absent"
+      ],
+      "description": "full: real text; redacted: masked before sending; absent: no content was captured. Default redacted."
     },
     "data": {
       "type": "object"
@@ -125,6 +127,10 @@
               },
               "outcome": {
                 "type": "string"
+              },
+              "baseline": {
+                "type": "string",
+                "description": "What this job takes a person, as the app states it (e.g. \"~10-15 minutes\"); shown attributed."
               }
             }
           }
@@ -273,6 +279,13 @@
               "params": {
                 "type": "object",
                 "description": "Request parameters that shaped the output: max_tokens, temperature, tools offered, ..."
+              },
+              "context_items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional hint: source item ids that went into this prompt. Kept for redacted prompts, where the bench can't verify by text."
               }
             },
             "dependentRequired": {
@@ -359,6 +372,10 @@
                     }
                   }
                 }
+              },
+              "source": {
+                "type": "string",
+                "description": "The map's sources[].id this retrieval read from."
               }
             }
           }
@@ -480,6 +497,66 @@
       "if": {
         "properties": {
           "event_type": {
+            "enum": [
+              "check_result",
+              "check"
+            ]
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "required": [
+              "name",
+              "passed"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The check; a node of kind check, or a check run inside another node."
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "state": {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not_on_path"
+                ],
+                "description": "Optional; not_on_path = declared but not needed this run."
+              },
+              "detail": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Source item ids the check relied on."
+              },
+              "kind": {
+                "type": "string",
+                "description": "Open set, e.g. grounding, policy, permission, format."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
             "const": "decision"
           }
         },
@@ -494,6 +571,13 @@
               "branch": {
                 "type": "string",
                 "description": "The branch taken out of this node (Agent Spec branch_selected); matched against the map's edges[].from_branch."
+              },
+              "cited": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Source item ids the decision rests on."
               }
             }
           }

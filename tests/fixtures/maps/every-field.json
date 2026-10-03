@@ -1,0 +1,42 @@
+{
+  "v": "bench-topology/0",
+  "app": {
+    "id": "every-field",
+    "name": "Every map field",
+    "description": "A fixture that uses every field of the map schema.",
+    "url": "http://127.0.0.1:9999",
+    "privacy_note": "Emails and phone numbers are hidden on this screen. The AI itself saw the original message.",
+    "track_record": "Tested on 23 requests it had never seen.",
+    "x-owner": "tests"
+  },
+  "nodes": [
+    {"id": "read", "label": "retrieve", "plain_label": "Look it up", "kind": "retrieval", "actor": "app", "description": "Searches the handbook."},
+    {"id": "answer", "label": "draft", "plain_label": "Write the answer", "kind": "llm", "actor": "ai", "moment": true},
+    {"id": "grounded", "label": "grounding check", "plain_label": "Check it against the handbook", "kind": "check", "description": "Compares the answer's words with the section it cites.", "x-not-needed": "Not needed: nothing was drafted."},
+    {"id": "approve", "label": "approval", "plain_label": "A person approves", "kind": "gate", "actor": "person", "moment": true},
+    {"id": "done", "label": "done", "kind": "terminal"}
+  ],
+  "edges": [
+    {"from": "read", "to": "answer"},
+    {"from": "answer", "to": "grounded"},
+    {"from": "grounded", "to": "done", "from_branch": "grounded", "description": "The answer matches the handbook."},
+    {"from": "grounded", "to": "approve", "from_branch": "ungrounded", "description": "A person must decide.", "x-style": "dashed"},
+    {"from": "approve", "to": "done"}
+  ],
+  "panels": [
+    {"id": "why", "title": "Why", "event_types": ["decision"], "story": true, "audience": "presentation"},
+    {"id": "scores", "title": "Scores", "event_types": ["retrieval"], "fields": ["query"], "audience": "engineering", "x-width": 2},
+    {"id": "calls", "title": "Model calls", "event_types": ["llm_call"], "mode": "append", "audience": "both"}
+  ],
+  "sources": [
+    {"id": "handbook", "title": "Helpdesk handbook", "kind": "documents", "description": "15 sections. It can't see your email or HR files.", "count": 2,
+     "items": [{"id": "h-01", "title": "Passwords"}, {"id": "h-02", "title": "Licenses", "x-section": 2}]},
+    {"id": "message", "title": "The message", "kind": "message", "description": "The request as sent.", "x-pii": true}
+  ],
+  "actions": [
+    {"id": "open_ticket", "title": "Open a ticket", "description": "Files a ticket in the queue, after a person approves.", "x-api": "tickets.create"}
+  ],
+  "never": ["Change anyone's password", "Grant admin rights"],
+  "story": true,
+  "x-generated-by": "tests"
+}

@@ -1,5 +1,5 @@
-/* Event sources for the bench: a live SSE stream from the receiver, or a recording
-   played back with its original timing. Both only ever call bench.push(ev). */
+/* Event sources for the bench: a live SSE stream from the receiver, the shell's postMessages,
+   or a recording played back with its original timing. All only ever call bench.push(ev). */
 (function (global) {
   'use strict';
 
@@ -9,20 +9,21 @@
   }
   LiveSource.prototype.start = function () {
     var self = this;
-    this.bench.setMode('● Live · connecting', 'warn');
+    this.bench.setStatus('● Live · connecting', 'warn');
     this.es = new EventSource(this.url);
-    this.es.onopen = function () { self.bench.setMode('● Live', 'ok'); };
-    this.es.onerror = function () { self.bench.setMode('● Live · reconnecting', 'warn'); };
+    this.es.onopen = function () { self.bench.setStatus('● Live', 'ok'); };
+    this.es.onerror = function () { self.bench.setStatus('● Live · reconnecting', 'warn'); };
     this.es.onmessage = function (m) {
       try { self.bench.push(JSON.parse(m.data)); } catch (e) { /* a malformed line never stops the stream */ }
     };
   };
 
-  /* Embedded sync (SPEC section 3a): the shell relays the app's replay as postMessages. */
+  /* Embedded sync (SPEC section 3a): the shell relays the app's replay as postMessages. The app
+     sets the pace, so there are no transport controls and no pauses. */
   function ParentSource(bench) { this.bench = bench; }
   ParentSource.prototype.start = function () {
     var self = this, registered = false;
-    this.bench.setMode('● Live · following the app', 'ok');
+    this.bench.setStatus('● Live · following the app', 'ok');
     window.addEventListener('message', function (m) {
       if (m.source !== window.parent || !m.data || typeof m.data.type !== 'string') return;
       var d = m.data;
@@ -47,7 +48,7 @@
   }
 
   /* A recording: JSONL whose first line may be a header, {"v": "bench-recording/0",
-     "topology": {...}, "story": "<js>" | null}, followed by one event per line. */
+     "topology": {...}, "story": "<js>" | null, "title"?, "group"?}, then one event per line. */
   function parseRecording(text) {
     var rows = parseJSONL(text), header = null;
     if (rows.length && rows[0].v === 'bench-recording/0') header = rows.shift();
@@ -55,48 +56,86 @@
   }
 
   /* Plays events with the gaps between their ts values, so a replay feels like the run did.
-     Gaps longer than maxGap (a human taking a minute to approve) are shortened to it. */
+     Gaps longer than maxGap (a human taking a minute to approve) are shortened to it.
+     The presenter's cursor (opts.stops, from BenchLogic.cursorStops): Play pauses on its own
+     after each "moment" (autoPause); next() plays to the end of the next step; back() rebuilds
+     the run from the first event up to the previous step's end, without pacing. */
   function ReplaySource(bench, events, opts) {
     opts = opts || {};
     this.bench = bench;
-    this.events = events.slice().sort(function (a, b) { return a.ts - b.ts || (a.seq || 0) - (b.seq || 0); });
+    var L = global.BenchLogic;
+    this.events = L ? L.sortEvents(events) : events.slice().sort(function (a, b) { return a.ts - b.ts || (a.seq || 0) - (b.seq || 0); });
     this.speed = opts.speed || 1;
     this.maxGap = opts.maxGap != null ? opts.maxGap : 1.5;
     this.minGap = opts.minGap != null ? opts.minGap : 0.04;
+    this.stops = opts.stops || { steps: [], moments: [] };
+    this.autoPause = opts.autoPause !== false;
     this.i = 0;
+    this.until = null;
     this.timer = null;
     this.onstate = opts.onstate || function () {};
   }
   ReplaySource.prototype._label = function () {
     return '▶ Playing a recording' + (this.speed !== 1 ? ' · ' + this.speed + '×' : '');
   };
-  ReplaySource.prototype.start = function () { this.bench.reset(); this.i = 0; this.play(); };
+  ReplaySource.prototype.start = function () { this.bench.reset(); this.i = 0; this.until = null; this.onstate('restart'); this.play(); };
   ReplaySource.prototype.play = function () {
     var self = this;
+    if (this.i >= this.events.length) return this.start();
     this.playing = true;
     clearTimeout(this.timer);
+    this.onstate('playing');
     (function step() {
       if (!self.playing) return;
       if (self.i >= self.events.length) {
-        self.playing = false; self.bench.setMode('Recording · finished', 'ok'); self.onstate('done'); return;
+        self.playing = false; self.bench.setStatus('Recording · finished', 'ok'); self.onstate('done'); return;
       }
-      var ev = self.events[self.i++];
+      var k = self.i, ev = self.events[self.i++];
       self.bench.push(ev);
-      self.bench.setMode(self._label(), 'rep');
+      self.bench.setStatus(self._label(), 'rep');
+      if (self.i >= self.events.length) return step();
+      if (self.until != null && k >= self.until) { self.until = null; return self._stop('paused'); }
+      if (self.until == null && self.autoPause && self.stops.moments.indexOf(k) >= 0) return self._stop('moment');
       var next = self.events[self.i];
-      if (!next) return step();
       var gap = Math.min(self.maxGap, Math.max(self.minGap, next.ts - ev.ts)) / self.speed;
       if (next.ts === ev.ts) gap = 0;
       self.timer = setTimeout(step, gap * 1000);
     })();
-    this.onstate('playing');
   };
-  ReplaySource.prototype.pause = function () { this.playing = false; clearTimeout(this.timer); this.bench.setMode('Recording · paused', 'warn'); this.onstate('paused'); };
+  ReplaySource.prototype._stop = function (state) {
+    this.playing = false; clearTimeout(this.timer);
+    this.bench.setStatus(state === 'moment' ? 'Recording · paused at a moment' : 'Recording · paused', 'warn');
+    this.onstate(state);
+  };
+  ReplaySource.prototype.pause = function () { this.until = null; this._stop('paused'); };
+  // Forward one step (a node visit), played with its timing, then pause.
+  ReplaySource.prototype.next = function () {
+    var L = global.BenchLogic, target = L.nextStop(this.stops.steps, this.i - 1);
+    if (target == null) return this.finish();
+    this.until = target;
+    this.play();
+  };
+  // Back one step: reset and replay events[0..previous stop] at once, with pacing skipped.
+  ReplaySource.prototype.back = function () {
+    var L = global.BenchLogic;
+    this.playing = false; clearTimeout(this.timer); this.until = null;
+    var cur = this.i - 1, target = L.prevStop(this.stops.steps, cur);
+    this.seek(target);
+  };
+  ReplaySource.prototype.seek = function (target) {
+    this.bench.reset();
+    this.i = 0;
+    while (this.i <= target && this.i < this.events.length) this.bench.push(this.events[this.i++]);
+    this.bench.skipPacing();
+    if (this.i >= this.events.length) { this.bench.setStatus('Recording · finished', 'ok'); this.onstate('done'); }
+    else { this.bench.setStatus('Recording · paused', 'warn'); this.onstate('paused'); }
+  };
+  ReplaySource.prototype.restart = function () { this.start(); };
   ReplaySource.prototype.finish = function () {
-    this.pause();
+    this.playing = false; clearTimeout(this.timer); this.until = null;
     while (this.i < this.events.length) this.bench.push(this.events[this.i++]);
     this.bench.skipPacing();
-    this.bench.setMode('Recording · finished', 'ok'); this.onstate('done');
+    this.bench.setStatus('Recording · finished', 'ok'); this.onstate('done');
   };
 
   global.BenchSources = { LiveSource: LiveSource, ParentSource: ParentSource, ReplaySource: ReplaySource, parseJSONL: parseJSONL, parseRecording: parseRecording };

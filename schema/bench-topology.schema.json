@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://bench.local/schema/bench-topology/0",
   "title": "Bench topology manifest, v0",
-  "description": "One app's map: every step and every possible branch, so untaken branches render. Registered by the app; the bench stores nothing app-specific. Edge vocabulary follows Open Agent Spec (ControlFlowEdge: from_node, from_branch, to_node). See SPEC.md section 4.",
+  "description": "One app's map: every step and every possible branch, so untaken branches render; plus, optionally, what the app can read (sources), what it can do (actions, never) and plain-language notes for Presentation mode. Registered by the app; the bench stores nothing app-specific. Edge vocabulary follows Open Agent Spec (ControlFlowEdge: from_node, from_branch, to_node). Keys starting with x- are free for an app's own extensions at the top level and on app, nodes, edges, panels, sources and actions; any other unknown key is rejected. See SPEC.md section 4.",
   "type": "object",
   "required": [
     "v",
@@ -33,7 +33,18 @@
         },
         "description": {
           "type": "string"
+        },
+        "privacy_note": {
+          "type": "string",
+          "description": "What the app hides on this screen, in plain words. Presentation shows it instead of a generic line; it must not claim more than the app does."
+        },
+        "track_record": {
+          "type": "string",
+          "description": "The app's own claim about how it has performed, shown attributed to the app."
         }
+      },
+      "patternProperties": {
+        "^x-": {}
       },
       "additionalProperties": false
     },
@@ -56,6 +67,10 @@
           "label": {
             "type": "string"
           },
+          "plain_label": {
+            "type": "string",
+            "description": "The Presentation name, in plain words. Falls back to label, then id."
+          },
           "kind": {
             "enum": [
               "step",
@@ -63,12 +78,31 @@
               "tool",
               "retrieval",
               "gate",
+              "check",
               "terminal"
-            ]
+            ],
+            "description": "Picks the icon and which details the node box shows. Default step. check: a node that guards the app (its Checks row)."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "What this step does, in plain words (the node's note)."
+          },
+          "actor": {
+            "enum": [
+              "ai",
+              "rule",
+              "person",
+              "app"
+            ],
+            "description": "Who does this step. Default from kind: llm->ai, gate->person, check->rule, anything else->app."
+          },
+          "moment": {
+            "type": "boolean",
+            "description": "Replay's Play pauses here (a moment worth stopping on)."
           }
+        },
+        "patternProperties": {
+          "^x-": {}
         },
         "additionalProperties": false
       }
@@ -91,7 +125,14 @@
           "from_branch": {
             "type": "string",
             "description": "The branch of `from` that selects this edge (Agent Spec from_branch). Matched against a decision event's data.branch; also drawn as the edge label."
+          },
+          "description": {
+            "type": "string",
+            "description": "What taking this branch means, in plain words; on an untaken edge, why it wasn't taken."
           }
+        },
+        "patternProperties": {
+          "^x-": {}
         },
         "additionalProperties": false
       }
@@ -176,9 +217,120 @@
           "story": {
             "type": "boolean",
             "description": "Rendered by the app's story script (its panels[<id>] function). Falls back to fields, then the generic view, if the story has none."
+          },
+          "audience": {
+            "enum": [
+              "both",
+              "presentation",
+              "engineering"
+            ],
+            "description": "Which mode shows this panel. Default both. Presentation shows both and presentation panels; Engineering shows all."
           }
         },
+        "patternProperties": {
+          "^x-": {}
+        },
         "additionalProperties": false
+      }
+    },
+    "sources": {
+      "type": "array",
+      "description": "What the app can read: documents, tables, systems. Item text never lives here; it arrives only in retrieval hits.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "description"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Named by retrieval events' data.source."
+          },
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Open set, e.g. documents, database, api, inbox, message."
+          },
+          "description": {
+            "type": "string",
+            "description": "The app's own statement of what this is and what it can't see; shown attributed to the app."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many items the source holds, when items are not listed (or not all are)."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Matches retrieval hits[].id, check_result evidence and decision cited."
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "patternProperties": {
+                "^x-": {}
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "patternProperties": {
+          "^x-": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "actions": {
+      "type": "array",
+      "description": "What the app can do in the world (tool calls, writes).",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "description"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "patternProperties": {
+          "^x-": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "never": {
+      "type": "array",
+      "description": "What the app can never do, in plain words; shown as the app's statement.",
+      "items": {
+        "type": "string",
+        "minLength": 1
       }
     },
     "node_from": {
@@ -214,6 +366,9 @@
       "type": "boolean",
       "description": "The app registers a story script with its map (custom panels and renderers). See SPEC.md section 5."
     }
+  },
+  "patternProperties": {
+    "^x-": {}
   },
   "additionalProperties": false
 }

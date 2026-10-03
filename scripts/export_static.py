@@ -15,6 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from bench.server import recording_entry  # noqa: E402  (shared with the live picker)
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -27,7 +29,7 @@ def main() -> None:
         shutil.rmtree(out)
     (out / "viewer").mkdir(parents=True)
     shutil.copy(ROOT / "viewer/index.html", out / "index.html")
-    for f in ("bench.js", "sources.js"):
+    for f in ("logic.js", "bench.js", "sources.js"):
         shutil.copy(ROOT / "viewer" / f, out / "viewer" / f)
     shutil.copytree(ROOT / "shell", out / "shell")
     listing = []
@@ -36,9 +38,9 @@ def main() -> None:
         for p in sorted(d.glob("*.recording.jsonl")):
             (out / prefix).mkdir(exist_ok=True)
             shutil.copy(p, out / prefix / p.name)
-            head = json.loads(p.read_text().split("\n", 1)[0])
-            app = ((head.get("topology") or {}).get("app") or {}).get("name", "") if head.get("v") == "bench-recording/0" else ""
-            listing.append({"path": f"{prefix}/{p.name}", "title": (app + " · " if app else "") + p.name.removesuffix(".recording.jsonl")})
+            entry = recording_entry(prefix, p)
+            if entry is not None:
+                listing.append(entry)
     (out / "recordings.json").write_text(json.dumps(listing, indent=1))
     print(f"wrote {out}: {len(listing)} recordings")
 

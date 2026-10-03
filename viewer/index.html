@@ -16,6 +16,8 @@
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .muted { color: var(--muted); }
   #bench { display: flex; flex-direction: column; height: 100vh; }
+  #bench > .eng, #bench > .pres { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .mode-presentation > .eng, .mode-engineering > .pres { display: none !important; }
 
   .bh { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
   .bh .app { font-weight: 600; font-size: 13.5px; }
@@ -32,9 +34,8 @@
   .meterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 11.5px; color: var(--muted); }
   .meterbar b { color: var(--accent); font-weight: 600; }
   .meterbar .status { margin-left: auto; }
-  .view-overview .detail-only { display: none !important; }
-  /* Overview: branch names only on the path this run took, so labels never pile up at busy junctions. Detailed shows them all. */
-  .view-overview .edge:not(.taken) text { display: none; }
+  /* Presentation: branch names only on the path this run took, so labels never pile up at busy junctions. Engineering shows them all. */
+  .mode-presentation .edge:not(.taken) text { display: none; }
   .stitle b { color: var(--text); font-weight: 600; letter-spacing: .08em; }
   .stitle span { text-transform: none; letter-spacing: 0; font-size: 11px; margin-left: 6px; }
   .stephead { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 2px; }
@@ -46,7 +47,8 @@
   .st-ok { color: var(--good); } .st-error { color: var(--bad); } .st-aborted { color: var(--warn); } .st-running { color: var(--accent); } .st-waiting { color: var(--warn); }
 
   #controls { display: none; gap: 6px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 12px; }
-  #controls.on { display: flex; }
+  #controls.on { display: flex; flex-wrap: wrap; }
+  #controls.on.hide { display: none; }
   #controls button, #controls select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
   #controls button:hover { border-color: var(--accent); }
 
@@ -73,6 +75,7 @@
   .gnode.kind-gate .gl::before { content: "⏸ "; color: var(--warn); }
   .gnode.kind-tool .gl::before { content: "⚙ "; }
   .gnode.kind-retrieval .gl::before { content: "⌕ "; }
+  .gnode.kind-check .gl::before { content: "✓ "; color: #93c5fd; }
   .gnode.idle { opacity: .55; }
   .gnode.done { color: var(--text); border-color: var(--accent-2); background: #2a2550; }
   .gnode.done .gm { color: var(--text); }
@@ -146,52 +149,184 @@
   .lrow .ld { color: var(--muted); }
   .lrow.t-llm_call .le { color: var(--accent); } .lrow.t-error .le { color: var(--bad); } .lrow.t-gate_waiting .le, .lrow.t-gate_resolved .le { color: var(--warn); }
 
+  .aud { color: var(--accent-2); font-size: 9.5px; }
+  .ck { font-size: 11.5px; white-space: nowrap; }
+  .ck-passed, .c-passed { color: var(--good); } .ck-failed, .c-failed { color: var(--bad); } .ck-not_on_path, .ck-pending, .c-not_on_path, .c-pending { color: var(--muted); } .ck-ran, .ck-running { color: var(--accent); }
+  .srcblock + .srcblock { border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 6px; }
+  .tiles { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+  .tile { min-width: 24px; height: 22px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: var(--muted); font: 11px ui-monospace, monospace; cursor: pointer; opacity: .7; }
+  .tile.st-found { border-color: var(--accent-2); color: var(--text); opacity: 1; }
+  .tile.st-given { background: rgba(94,234,212,.16); border-color: var(--accent); color: var(--accent); opacity: 1; }
+  .tile.relied { background: var(--accent); color: #06201c; box-shadow: 0 0 7px rgba(94,234,212,.55); }
+  .tile.sel { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+  .legend .tile { cursor: default; display: inline-block; min-width: 0; width: 13px; height: 11px; padding: 0; vertical-align: -1px; margin: 0 3px 0 8px; font-size: 0; }
+
+  /* ---- Presentation: one screen for a ~640 px pane; graph shrinks to fit, nothing scrolls ---- */
+  .pres { position: relative; }
+  .p-head { padding: 8px 12px 7px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .p-req { font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-req:empty { display: none; }
+  .p-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .p-inferred { font-size: 11px; border: 1px dashed var(--muted); border-radius: 10px; padding: 0 7px; }
+  .p-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .p-pick select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; padding: 3px 4px; max-width: 240px; }
+  .p-outrow { display: flex; align-items: center; gap: 10px; margin-top: 6px; min-height: 28px; }
+  .p-out { flex: 1; min-width: 0; }
+  .p-oc { font-size: 14px; font-weight: 600; color: var(--muted); }
+  .p-oc.done { color: var(--accent); }
+  .p-why { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 1px; }
+  .p-why b { color: var(--text); font-weight: 600; }
+  .p-transport { display: flex; gap: 4px; flex: 0 0 auto; }
+  .p-transport:empty { display: none; }
+  .p-transport button, .p-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; cursor: pointer; font: 600 12.5px -apple-system, BlinkMacSystemFont, sans-serif; text-decoration: none; display: inline-block; }
+  .p-transport button.main { min-width: 92px; border-color: var(--accent); color: var(--accent); }
+  .p-transport button:hover, .p-btn:hover { border-color: var(--accent); }
+  .p-btn.primary { background: rgba(94,234,212,.14); border-color: var(--accent); color: var(--accent); }
+  .p-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .p-graph { flex: 1 1 auto; min-height: 120px; position: relative; padding: 6px 8px 2px; overflow: hidden; }
+  .p-graph .graphwrap { overflow: hidden; }
+  .p-side { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; }
+  .p-now { border-top: 1px solid var(--border); padding: 8px 12px; background: var(--panel); max-height: 27vh; overflow: auto; }
+  .p-nowhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+  .p-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); border: 1px solid rgba(94,234,212,.4); border-radius: 8px; padding: 1px 6px; }
+  .p-tech { font-size: 10.5px; color: var(--muted); }
+  .p-x { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; cursor: pointer; font-size: 11px; }
+  .p-nowbody { margin-top: 4px; }
+  .p-line { font-size: 12.5px; margin: 3px 0; }
+  .p-line.k-note { color: var(--text); }
+  .p-line.k-edge { color: var(--accent); }
+  .p-line.k-why { color: var(--muted); border-left: 2px solid var(--border); padding-left: 7px; }
+  .p-line.k-state { font-weight: 600; }
+  .p-line.c-passed { color: var(--good); } .p-line.c-failed { color: var(--bad); } .p-line.c-waiting { color: var(--warn); }
+  .p-line.muted { color: var(--muted); }
+  .p-story { margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 5px; }
+  .p-storyt { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 3px; }
+  .p-acts { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
+  .p-rows { border-top: 1px solid var(--border); }
+  .p-rowhead { width: 100%; display: flex; align-items: baseline; gap: 10px; padding: 6px 12px; background: none; border: none; border-bottom: 1px solid var(--border); color: var(--text); text-align: left; font: 12.5px -apple-system, BlinkMacSystemFont, sans-serif; cursor: pointer; }
+  .p-rowhead:hover { background: rgba(30,39,64,.6); }
+  .p-q { flex: 0 0 150px; font-weight: 600; color: var(--accent-2); }
+  .p-sum { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-chev { color: var(--muted); }
+  .p-rowbody { padding: 6px 12px 10px; max-height: 30vh; overflow: auto; font-size: 12.5px; background: rgba(23,29,44,.7); border-bottom: 1px solid var(--border); }
+  .p-rowbody ul { margin: 2px 0 6px 18px; padding: 0; }
+  .p-says { color: var(--muted); font-size: 12px; margin: 2px 0; }
+  .p-src + .p-src, .p-check + .p-check { margin-top: 8px; }
+  .p-item pre.io { max-height: 160px; margin-top: 4px; }
+  .p-bottom { border-top: 1px solid var(--border); padding: 7px 12px; background: var(--panel); font-size: 12.5px; }
+  .p-bline .sep { color: var(--muted); margin: 0 3px; }
+  .p-link { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12.5px; padding: 0 0 0 6px; }
+  .p-record { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .pnode { padding: 5px 8px 4px; }
+  .pnode .gl { font: 600 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .pnode .gt { font-size: 9.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; padding-right: 50px; min-height: 12px; }
+  .pnode.active .gt, .pnode.active .gp { color: #06201c; }
+  .pnode .gp { font-size: 10.5px; }
+  .actor { font: 600 9px/1.3 -apple-system, sans-serif; text-transform: uppercase; letter-spacing: .05em; padding: 1px 5px; border-radius: 8px; border: 1px solid currentColor; white-space: nowrap; }
+  .pnode .actor { position: absolute; top: 21px; right: 6px; }
+  .actor-ai { color: var(--accent-2); } .actor-rule { color: #93c5fd; } .actor-person { color: var(--warn); } .actor-app { color: var(--muted); }
+  .pnode.active .actor { color: #06201c; }
+  .gnode.now { box-shadow: 0 0 0 2px rgba(94,234,212,.45); }
+  .edge .hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; fill: none; cursor: help; }
+  .edgetip { position: absolute; z-index: 6; max-width: 260px; background: #0b1020; border: 1px solid var(--accent-2); border-radius: 8px; padding: 6px 9px; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.4); pointer-events: none; }
+  .edgetip b { color: var(--accent-2); display: block; margin-bottom: 2px; }
+  .p-overlay { position: fixed; inset: 0; z-index: 30; background: var(--bg); overflow: auto; }
+  .g-panel { max-width: 940px; margin: 0 auto; padding: 0 14px 20px; }
+  .g-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 12px 0 8px; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .g-head b { font-size: 15px; } .g-head .muted { font-size: 12px; }
+  .p-close { margin-left: auto; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+  .p-close:hover { border-color: var(--accent); }
+  .g-note { font-size: 11.5px; color: var(--muted); margin: 8px 0 0; }
+  .g-call { margin-top: 14px; } .g-call h4 { margin: 0 0 4px; font-size: 13px; color: var(--accent-2); }
+  .g-call.focus h4::after { content: "  ← this step"; color: var(--accent); font-weight: 400; }
+  .g-role { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); margin: 10px 0 3px; }
+  .g-text { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #111726; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); }
+  .g-output .g-text { border-color: var(--accent); }
+  .hlwrap mark { background: rgba(94,234,212,.13); color: var(--text); border-bottom: 1px solid rgba(94,234,212,.6); }
+  .hltag { display: block; font: 600 10.5px -apple-system, sans-serif; color: var(--accent); margin: 6px 0 1px; }
+  @media (min-width: 1200px) {
+    .p-main { flex-direction: row; }
+    .p-graph { flex: 0 0 60%; border-right: 1px solid var(--border); }
+    .p-side { flex: 1 1 auto; min-width: 0; overflow: auto; }
+    .p-now { max-height: none; border-top: none; }
+    .p-rowbody { max-height: none; }
+  }
+  @media (max-width: 560px) {
+    #bench.mode-presentation { height: auto; min-height: 100vh; }
+    .p-main, .p-graph { flex: none; }
+    .p-now { max-height: none; }
+    .p-rowhead { flex-wrap: wrap; gap: 2px 8px; }
+    .p-q { flex: 1 1 100%; }
+    .p-sum { white-space: normal; }
+    .p-rowbody { max-height: none; }
+    .p-outrow { flex-wrap: wrap; }
+  }
+
   #picker { padding: 24px; max-width: 640px; }
   #picker a { color: var(--accent); }
 
   /* Narrow (a phone, or the bench beside an app in the shell): one scrolling page, not
      three scroll boxes, so the graph and panels keep their natural height. */
   @media (max-width: 820px) {
-    #bench { height: auto; min-height: 100vh; }
+    #bench.mode-engineering { height: auto; min-height: 100vh; }
     .bgrid { display: block; }
     .col { overflow: visible; border-right: none; border-bottom: 1px solid var(--border); }
     .logcol { flex: none; max-height: none; overflow: visible; }
+    #bench > .eng { flex: none; }
     .lrow { grid-template-columns: 24px 52px 90px 1fr; } .lrow .ld { display: none; }
   }
 </style>
 </head>
 <body>
 <div id="controls">
+  <button id="cBack" title="Back one step">◂</button>
   <button id="cPlay">Pause</button>
+  <button id="cNext" title="Forward one step">▸</button>
   <button id="cRestart">Restart</button>
   <button id="cEnd">Skip to end</button>
   <label class="muted">speed <select id="cSpeed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label>
+  <label class="muted" title="Play stops by itself at decisions, checks and sign-offs"><input type="checkbox" id="cAuto" checked> pause at moments</label>
   <span class="muted" id="cSrc"></span>
 </div>
 <div id="bench"></div>
-<script src="viewer/bench.js"></script>
-<script src="viewer/sources.js"></script>
-<script>
+<!-- logic.js is an ES module (node --test imports it too); bench.js and sources.js stay classic
+     scripts for pages that only want BenchLayout. Module scripts run in document order. -->
+<script type="module">
+  import * as BenchLogic from './viewer/logic.js';
+  window.BenchLogic = BenchLogic;
+</script>
+<script type="module" src="viewer/bench.js"></script>
+<script type="module" src="viewer/sources.js"></script>
+<script type="module">
 (function () {
   var q = new URLSearchParams(location.search);
-  var base = document.baseURI.replace(/[^/]*$/, '');
-  var bench = new Bench(document.getElementById('bench'));
+  // The directory this page is served from (a query string may contain slashes, so not a regex on the URL).
+  var base = new URL('./', document.baseURI).href;
+  var replay = q.get('replay');
+  var source = q.get('source') === 'parent' ? 'parent' : replay ? 'replay' : 'live';
+  var ctl = document.getElementById('controls');
+  var bench = new Bench(document.getElementById('bench'), {
+    source: source,
+    onmode: function (m) { ctl.classList.toggle('hide', m === 'presentation'); }
+  });
 
-  function getJSON(url) { return fetch(url).then(function (r) { if (!r.ok) throw new Error(url + ': ' + r.status); return r.json(); }); }
+  function getJSON(url) { return fetch(url).then(function (r) { if (!r.ok) { var e = new Error(url + ': ' + r.status); e.status = r.status; throw e; } return r.json(); }); }
   function getText(url) { return fetch(url).then(function (r) { if (!r.ok) throw new Error(url + ': ' + r.status); return r.text(); }); }
   function fail(msg) { document.getElementById('bench').innerHTML = '<div id="picker"><p style="color:var(--bad)">' + msg + '</p></div>'; }
+  function withParams(changes) {
+    var u = new URLSearchParams(location.search);
+    Object.keys(changes).forEach(function (k) { if (changes[k] == null) u.delete(k); else u.set(k, changes[k]); });
+    return '?' + u.toString();
+  }
 
-  var replay = q.get('replay');
   var topoUrl = q.get('topology') || (q.get('app') ? base + 'topology/' + encodeURIComponent(q.get('app')) : null);
 
-  if (q.get('source') === 'parent') {
+  if (source === 'parent') {
     // Embedded sync: the map, story and events all arrive from the app via the shell.
-    document.getElementById('bench').querySelector('[data-f=meters]').textContent = 'waiting for the app…';
     new BenchSources.ParentSource(bench).start();
   } else if (replay) {
     // A recording carries its app's map and story in its first line (SPEC section 3), so a
     // replay needs no receiver and no registration: it works from a static export.
-    var ctl = document.getElementById('controls');
     ctl.classList.add('on');
     document.getElementById('cSrc').textContent = replay.split('/').pop();
     getText(replay).then(function (text) {
@@ -200,19 +335,33 @@
       return (topo ? Promise.resolve(topo) : getJSON(topoUrl)).then(function (t) {
         bench.setTopology(t);
         if (rec.header && rec.header.story) bench.loadStory(t.app.id, rec.header.story);
-        return rec.events;
+        offerOthers(t);
+        return rec.events.map(BenchLogic.normalizeEvent);
       });
     }).then(function (events) {
       var btn = document.getElementById('cPlay');
       var src = new BenchSources.ReplaySource(bench, events, {
         speed: Number(q.get('speed') || 1),
-        onstate: function (s) { btn.textContent = s === 'playing' ? 'Pause' : s === 'done' ? 'Replay' : 'Play'; }
+        stops: BenchLogic.cursorStops(BenchLogic.sortEvents(events), bench.topo),
+        autoPause: q.get('pause') !== '0',
+        onstate: function (s) {
+          btn.textContent = s === 'playing' ? 'Pause' : s === 'done' ? 'Replay' : s === 'moment' ? 'Continue' : 'Play';
+          bench.setTransportState(s);
+        }
       });
-      btn.onclick = function () { if (src.playing) src.pause(); else if (src.i >= src.events.length) src.start(); else src.play(); };
+      bench.setTransport({
+        back: function () { src.back(); }, next: function () { src.next(); }, restart: function () { src.start(); },
+        play: function () { src.play(); }, pause: function () { src.pause(); }
+      });
+      btn.onclick = function () { if (src.playing) src.pause(); else src.play(); };
+      document.getElementById('cBack').onclick = function () { src.back(); };
+      document.getElementById('cNext').onclick = function () { src.next(); };
       document.getElementById('cRestart').onclick = function () { src.start(); };
       document.getElementById('cEnd').onclick = function () { src.finish(); };
       document.getElementById('cSpeed').value = String(src.speed);
       document.getElementById('cSpeed').onchange = function (e) { src.speed = Number(e.target.value); };
+      document.getElementById('cAuto').checked = src.autoPause;
+      document.getElementById('cAuto').onchange = function (e) { src.autoPause = e.target.checked; };
       src.start();
     }).catch(function (e) { fail('Could not load the recording: ' + e.message); });
   } else if (topoUrl) {
@@ -220,7 +369,13 @@
       bench.setTopology(t);
       if (t.story) bench.loadStory(t.app.id, null, base);
       new BenchSources.LiveSource(bench, base, q.get('session')).start();
-    }).catch(function (e) { fail('Could not load the map for this app: ' + e.message + '. Has the app registered with the bench?'); });
+    }).catch(function (e) {
+      // Level 0: the app sends spans but never registered a map. Draw one from what arrives.
+      if (e.status === 404 && q.get('app')) {
+        bench.useInferredMap(q.get('app'));
+        new BenchSources.LiveSource(bench, base, q.get('session')).start();
+      } else fail('Could not load the map for this app: ' + e.message + '. Has the app registered with the bench?');
+    });
   } else {
     // No app named: list the apps that registered, plus recordings listed in recordings.json
     // (a static export has no receiver, so a failed /topologies just means "recordings only").
@@ -228,13 +383,34 @@
       getJSON(base + 'topologies').catch(function () { return null; }),
       getJSON(base + 'recordings.json').catch(function () { return []; })
     ]).then(function (res) {
-      var apps = res[0], recs = res[1];
+      var apps = res[0], recs = res[1], esc = BenchLogic.esc;
       document.getElementById('bench').innerHTML = '<div id="picker"><p><a href="../">↑ Up</a></p><h3>Bench</h3>' +
         (apps ? '<p class="muted">Live, per registered app (add &amp;session=&lt;id&gt; to filter):</p>' +
-          (apps.length ? apps.map(function (a) { return '<div><a href="?app=' + encodeURIComponent(a.id) + '">' + a.name + '</a>' + (a.story ? ' <span class="muted">· story</span>' : '') + '</div>'; }).join('')
+          (apps.length ? apps.map(function (a) { return '<div><a href="?app=' + encodeURIComponent(a.id) + '">' + esc(a.name) + '</a>' + (a.story ? ' <span class="muted">· story</span>' : '') + '</div>'; }).join('')
                        : '<div class="muted">none yet: an app registers with PUT /apps/&lt;id&gt;</div>') : '') +
         '<p class="muted" style="margin-top:16px">Recordings:</p>' +
-        recs.map(function (r) { return '<div><a href="?replay=' + encodeURIComponent(r.path) + '">' + r.title + '</a></div>'; }).join('') + '</div>';
+        recs.map(function (r) { return '<div><a href="?replay=' + encodeURIComponent(r.path) + '">' + esc(r.title) + '</a>' + (r.group ? ' <span class="muted">· ' + esc(r.group) + '</span>' : '') + '</div>'; }).join('') + '</div>';
+    });
+  }
+
+  /* "Try another request": the same app's other recordings, grouped and titled from their
+     headers; and, for a run with a gate, the paired recording that went the other way. */
+  function offerOthers(topo) {
+    getJSON(base + 'recordings.json').catch(function () { return []; }).then(function (recs) {
+      var mine = recs.filter(function (r) {
+        return r.app ? r.app === topo.app.id : String(r.title || '').indexOf(topo.app.name + ' · ') === 0;
+      }).map(function (r) {
+        return { path: r.path, group: r.group || '', title: r.plain_title || String(r.title || r.path).replace(topo.app.name + ' · ', '') };
+      });
+      var cur = mine.filter(function (r) { return r.path === replay; })[0] ? replay : (mine.filter(function (r) { return replay.slice(-r.path.length) === r.path; })[0] || {}).path;
+      bench.setPicker(mine, cur, function (path) { location.search = withParams({ replay: path }); });
+      var m = /-(approved|denied)(\.recording\.jsonl)$/.exec(cur || replay);
+      if (!m) return;
+      var other = m[1] === 'approved' ? 'denied' : 'approved';
+      var twin = (cur || replay).replace(m[0], '-' + other + m[2]);
+      if (mine.some(function (r) { return r.path === twin; })) {
+        bench.setPair({ href: withParams({ replay: twin }), text: other === 'denied' ? 'See what happens if they deny ▸' : 'See what happens if they approve ▸' });
+      }
     });
   }
 })();

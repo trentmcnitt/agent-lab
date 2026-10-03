@@ -78,7 +78,14 @@ Open <http://127.0.0.1:8790/> and pick the **hello-agent** recording to see a ru
    }'
    ```
 
-   Already emitting OpenTelemetry? Point your OTLP/HTTP JSON exporter at `http://127.0.0.1:8790/v1/traces` instead.
+   Already emitting OpenTelemetry? Skip the events and point your exporter at the bench; it draws a map from the spans it sees (verified with Pydantic AI and OpenInference's OpenAI instrumentor, 10-03-26; see [`examples/level0_pydantic_ai.py`](examples/level0_pydantic_ai.py)):
+
+   ```bash
+   OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:8790
+   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf   # Python's auto-configuration otherwise defaults to gRPC
+   OTEL_SERVICE_NAME=my-app                    # the bench's app id
+   OTEL_BSP_SCHEDULE_DELAY=200                 # optional: send every 200 ms instead of 5 s
+   ```
 
 3. **Watch** at `http://127.0.0.1:8790/?app=my-app`, or side by side with your app: `http://127.0.0.1:8790/shell/?app=<your app's url>&appid=my-app`.
 
@@ -111,7 +118,9 @@ A small client library (Python and TypeScript), forwarding runs to Langfuse, Log
 ## 🧑‍💻 Development
 
 ```bash
-uv run pytest -q                                # format, OTLP adapter, receiver
+uv run pytest -q                                # format, OTLP adapter, receiver, story harness, browser e2e
+node --test tests/js/*.test.js                  # viewer logic (viewer/logic.js)
+uv run pytest tests/e2e -q                      # just the browser tests (Playwright; skip if no Chromium)
 uv run python scripts/export_static.py          # static, replay-only build -> dist/bench/
 ```
 

@@ -75,7 +75,7 @@
 /* The shell: the app on the left, the bench on the right, one session id for both.
    Query: app=<app url> bench=<bench url, default ../> appid=<topology id> session=<id>
    sync=1 (static sites: the app's replay drives the bench by postMessage, SPEC section 3a)
-   back=<url> (a "← All scenarios" link)  home=<url> (a Home link; the brand links there too)  hint=<text> (what to do first, shown in the bar)
+   mode=presentation|engineering (passed to the bench)  back=<url> (a "← All scenarios" link)  home=<url> (a Home link; the brand links there too)  hint=<text> (what to do first, shown in the bar)
    (generated if absent).  In Agent Lab it is always side by side.  The session id is appended to the app's URL
    as bench_session=<id> so the app can stamp its events with it. */
 (function () {
@@ -96,6 +96,8 @@
   } else {
     benchUrl = withParam(withParam(benchBase, 'app', q.get('appid') || ''), 'session', session);
   }
+  // A presenter's ?mode= (presentation | engineering) reaches the bench.
+  if (q.get('mode')) benchUrl = withParam(benchUrl, 'mode', q.get('mode'));
   document.getElementById('benchFrame').src = benchUrl;
   // Opened with nothing to show (no app, no recording): say so, and point somewhere useful.
   if (!appUrl && !q.get('replay')) {
@@ -113,8 +115,8 @@
   }).catch(function () {});
   if (q.get('hint')) { var h = document.getElementById('hint'); h.textContent = q.get('hint'); h.hidden = false; }
 
-  // One layout, always side by side (Trent, 09-29). Clear the old per-viewer view choice.
-  try { localStorage.removeItem('bench.view'); } catch (e) {}
+  // One layout, always side by side (Trent, 09-29). The bench picks its own mode (Presentation
+  // for the shell's sources) and migrates any old view choice itself, so nothing is cleared here.
 
   // Narrow screens show one pane at a time; a dot on the Bench tab says something happened there.
   document.body.classList.add('show-app');

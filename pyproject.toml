@@ -6,6 +6,7 @@ license = "FSL-1.1-ALv2"
 requires-python = ">=3.11"
 dependencies = [
     "jsonschema>=4.21",
+    "opentelemetry-proto>=1.45",
     "starlette>=1.7.0",
     "uvicorn>=0.30",
 ]
@@ -13,6 +14,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "playwright>=1.63.0",
     "pytest>=8",
 ]
 
