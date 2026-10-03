@@ -1,6 +1,6 @@
 # The bench, v0: events, maps and stories
 
-Status: **draft v0** (09-28-26; opened and extended 10-03-26: every addition is optional, so v0 maps and events still validate). Name of the project is a placeholder.
+Status: **draft v0** (09-28-26; opened and extended 10-03-26: every addition is optional, so v0 maps and events still validate).
 
 The bench is a read-only observability harness for agent apps. It is framework-neutral: any app that reports to it can be shown on it, whatever it is built with. An app sends **bench events** (directly, or as OpenTelemetry spans the bench converts), and **registers itself**: its **map** (every step and possible branch) and, optionally, its **story** (custom panels that explain the app). The bench renders the events against the map, live or from a recording. It holds nothing app-specific in its own code, and it never calls back into an app: approvals, retries and anything else interactive stay in the app's own UI.
 
@@ -143,24 +143,39 @@ The shell accepts no other messages from the app; any other `type` is ignored. T
 
 ## 4. The map (topology manifest)
 
-One per app, owned by the app and registered by it. It lets the bench draw the whole graph before anything runs, so a branch that is never taken still shows as a box that stayed dark. The bench's own example is `examples/hello-agent.topology.json`:
+One per app, owned by the app and registered by it. It lets the bench draw the whole graph before anything runs, so a branch that is never taken still shows as a box that stayed dark. The bench's own example is `examples/hello-agent.topology.json`; trimmed:
 
 ```json
 {
   "v": "bench-topology/0",
-  "app": { "id": "hello-agent", "name": "Hello agent (synthetic example)" },
+  "app": { "id": "hello-agent", "name": "Hello agent (synthetic example)",
+           "track_record": "A made-up example: it has never been tested on real requests." },
   "nodes": [
-    { "id": "triage", "label": "triage", "kind": "llm" },
-    { "id": "escalate", "label": "escalate", "kind": "gate" }
+    { "id": "triage", "label": "triage", "plain_label": "Decide who handles it", "kind": "llm",
+      "description": "The AI reads the message and decides: answer it from the help docs, or hand it to a person.",
+      "moment": true },
+    { "id": "lookup", "label": "look up docs", "plain_label": "Look up the help docs", "kind": "retrieval",
+      "actor": "rule", "description": "A search, not the AI, picks the help-doc pages that best match the message." },
+    { "id": "answer_check", "label": "answer check", "plain_label": "Check the answer", "kind": "check",
+      "description": "Code, not the AI, checks that the answer only uses steps from the pages it was given.",
+      "moment": true },
+    { "id": "escalate", "label": "escalate", "plain_label": "A person takes over", "kind": "gate" }
   ],
   "edges": [
-    { "from": "triage", "to": "lookup", "from_branch": "answerable" },
-    { "from": "triage", "to": "escalate", "from_branch": "needs_human" }
+    { "from": "triage", "to": "lookup", "from_branch": "answerable",
+      "description": "It decided the help docs already answer this." },
+    { "from": "triage", "to": "escalate", "from_branch": "needs_human",
+      "description": "It decided a person must handle this. The AI won't act on it." }
   ],
+  "sources": [
+    { "id": "docs", "title": "Help docs", "kind": "documents", "count": 12,
+      "description": "The only pages it can look things up in. It can't see your account, your billing or your messages.",
+      "items": [{ "id": "doc-1", "title": "Signing in" }, { "id": "doc-3", "title": "Resetting your password" }] }
+  ],
+  "never": ["Change a password or email itself"],
   "panels": [
-    { "id": "triage", "title": "Triage", "event_types": ["decision"], "nodes": ["triage"], "story": true },
-    { "id": "docs", "title": "Docs found", "event_types": ["retrieval"], "fields": ["query", {"key": "hits", "format": "json"}] },
-    { "id": "llm", "title": "Model calls", "event_types": ["llm_call"], "mode": "append" }
+    { "id": "triage", "title": "Triage (story panel)", "event_types": ["decision"], "nodes": ["triage"], "story": true },
+    { "id": "llm", "title": "Model calls", "event_types": ["llm_call"], "mode": "append", "audience": "engineering" }
   ],
   "story": true
 }
@@ -218,7 +233,7 @@ The instrument panels beside the graph. Each collects the listed event types (op
 A panel drawn by 1 or 2 has a **raw** toggle that shows the generic view of every field, so a story never hides data. `audience` says which view mode shows the panel: `both` (default), `presentation` or `engineering` (section 4a). A panel's `mode` (latest/append) is unrelated to the view mode.
 
 **Other**
-- `node_from` (OTLP apps only): how to get a bench `node` from a span: `{"attribute": "<span attribute>"}` or `{"span_name": true}` (the default).
+- `node_from` (OTLP apps only): how to get a bench `node` from a span: `{"attribute": "<span attribute>"}` or `{"span_name": true}`. Without it, the node id is the operation plus the tool, agent or data-source name (section 6b).
 - `story`: the app registers a story with its map (section 5).
 - **Extensions:** any key starting with `x-` is accepted, and ignored by the bench, at the top level and on `app`, nodes, edges, panels, sources (and their items) and actions. Any other unknown key is rejected, so a typo still fails loudly.
 - Events whose `node` is not in the map still render, in an "unmapped" row, so a stale map never hides data.
@@ -302,6 +317,6 @@ The conventions define **no cost attribute**. If the span carries `gen_ai.usage.
 - Auth, multi-user, retention: local only.
 - Metrics and aggregation across runs (cost per day, p95 latency). The bench shows runs; evals stay in each app.
 - Writing back to the app. Read-only by design.
-- Forwarding to other backends (Langfuse, Logfire, Phoenix...): planned next, so one run can be seen in several tools at once.
+- Forwarding to other backends (Langfuse, Logfire, Phoenix...): an OpenTelemetry Collector in front of both does this (README, "What it isn't"), so the bench never sits on the path to a team's real tracing. On the roadmap's Later list.
 - Reading Agent Spec flow files directly as maps: the vocabulary is aligned, the importer isn't written.
 - Streaming chunk rendering beyond appending text; no app sends `chunk` yet.
