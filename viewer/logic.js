@@ -1574,7 +1574,7 @@ function docWords(t) {
 export function snippet(text, query) {
   // A Markdown heading line is the passage's title, not what it says: dropped when there's other text.
   var body = String(text || '').split('\n').filter(function (l) { return !/^\s*#{1,6}\s/.test(l); }).join('\n');
-  var flat = (body.trim() ? body : String(text || '')).replace(/[ \t]+/g, ' ').trim();
+  var flat = (body.trim() ? body : String(text || '')).replace(/\*\*|__/g, '').replace(/[ \t]+/g, ' ').trim();   // and no Markdown bold markers
   var parts = flat.split(/(?<=[.!?])\s+|\n+/).map(function (p) { return p.trim(); }).filter(Boolean);
   // A stray list number split off as a "sentence" says nothing: never the snippet when there's prose.
   var prose = parts.filter(function (p) { return /\p{L}{2,}/u.test(p); });

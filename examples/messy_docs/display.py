@@ -59,7 +59,7 @@ def snippet(text: str, query: str | None) -> str:
     """The sentence (or line) sharing the most words with the query; ties go to the earlier one.
     Trimmed to SNIPPET_MAX characters on a word boundary. No overlap: the passage's opening."""
     body = "\n".join(l for l in (text or "").split("\n") if not re.match(r"\s*#{1,6}\s", l))
-    flat = re.sub(r"[ \t]+", " ", body if body.strip() else (text or "")).strip()
+    flat = re.sub(r"[ \t]+", " ", re.sub(r"\*\*|__", "", body if body.strip() else (text or ""))).strip()   # no bold markers
     parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", flat) if p.strip()]
     # A Markdown heading line (dropped above) is the passage's title, not what it says; a list number
     # split off as a "sentence" says nothing: neither is the snippet when the passage has prose.

@@ -967,8 +967,9 @@
       var gc = boxGeom(topo, cand, which), lc = layout(topo, gc);
       var kc = Math.min(aw / lc.W, !stacked && ahh > 80 ? ahh / lc.H : Infinity);
       var ok = gc.lines <= 2;
-      // The narrow shape only when it draws clearly larger: wide boxes keep names and lines whole.
-      if (!best || (ok && !best.ok) || (ok === best.ok && kc > best.k * 1.08)) best = { k: kc, g: gc, lay: lc, ok: ok };
+      // The narrow shape only when the wide one would be drawn small and the narrow clearly larger:
+      // wide boxes keep names on one line and the line under them whole.
+      if (!best || (ok && !best.ok) || (ok === best.ok && best.k < 0.85 && kc > best.k * 1.08)) best = { k: kc, g: gc, lay: lc, ok: ok };
     });
     G = this._geom = best.g;
     var Lay = this.layout = best.lay;
