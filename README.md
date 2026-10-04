@@ -62,9 +62,30 @@ Open <http://127.0.0.1:8790/> and pick a **hello-agent** recording to see a run 
 
 ## 🔌 Plug it in
 
-Three levels, each optional on top of the last.
+There are three ways in. Each is optional, and each adds to the one before it:
 
-### Level 0: point your OpenTelemetry at it (no code)
+1. **Zero setup.** Any app that already emits OpenTelemetry shows up, with a map inferred from its spans.
+2. **The `agentlab` library** (Python, LangGraph). Two lines give the app's whole flow, read from its graph. One-line facts and optional wording next to the code make it read well, and `lab.verify` in CI keeps that wording honest.
+3. **Open Agent Spec.** An app defined as an [Agent Spec](https://github.com/oracle/agent-spec) flow gets its map from the flow file.
+
+### What comes from where
+
+Nothing on the screen is typed twice. Each kind of information has one home:
+
+| | where it comes from | what you write | how drift is caught |
+|---|---|---|---|
+| **Structure**: steps, branches, branch names, subgraphs | **derived** from the compiled LangGraph graph, or from the Agent Spec file | nothing | It can't drift: every run carries the map of the code that produced it, and the bench draws each run with its own map. A router whose branches can't be read is a `verify` error (R3), never a guess. |
+| **Runtime facts**: model calls, prompts, outputs, tokens, tool calls, timing, approval pauses | **derived** from LangGraph's callbacks, as OpenTelemetry spans | nothing | It can't drift: these are what happened, attributed to the step that ran them. |
+| **App facts**: documents, searches, decisions, checks, sign-offs, outcomes | **reported** by one line where each fact is produced, passing live variables: `lab.corpus`, `lab.retrieved`, `lab.decision`, `lab.check`, `lab.gate_resolved`, `lab.outcome`, `lab.event` | one line each | A document list comes from the index itself, so a renumbered handbook follows. At runtime the bench flags a fact naming a step, branch or document the map doesn't have (R7 to R9), in Engineering. |
+| **Words**: plain step names, descriptions, branch words, check words, which state fields are the request and the reply | **authored**, on the code they describe: `@lab.step(...)` on the node function, `paths=` on the step a branch leaves, `words=` on `lab.check`. The docstring is Engineering's description. | as much or as little as you like | `lab.verify` (in your tests, or `python -m agentlab verify` in CI) fails on a word naming a step, branch or state field the code doesn't have (R1, R2, R15). After `python -m agentlab lock`, it also flags wording whose step's code changed since someone last re-read it (R6). |
+| **Custom panels** (stories) | **authored** JavaScript, shipped with the app | optional | `verify` fails on a panel naming a step that no longer exists (R1). The bench serves a story only when its hash matches the one the run was built with. The story harness tests it against real recordings. |
+
+The limits, stated plainly:
+- The lock fingerprints the node function (its decorator included) and, for a branching step, its router and path map. Code the node calls elsewhere (a retriever, a helper) isn't fingerprinted, so a change there doesn't flag the step's words.
+- Verification checks that every word names something real, and flags words whose code changed. It never claims the words are right.
+- A `@lab.step` on a function that is no longer added to the graph isn't reported. Its words never reach the map, so nothing wrong is shown.
+
+### 1. Zero setup: point your OpenTelemetry at it
 
 If your app already emits OpenTelemetry with the GenAI conventions, set these and run it:
 
@@ -77,7 +98,9 @@ OTEL_BSP_SCHEDULE_DELAY=200                           # optional: send every 200
 OTEL_EXPORTER_OTLP_COMPRESSION=gzip                   # optional: works
 ```
 
-Then open `http://127.0.0.1:8790/?app=my-app` (the front page lists every app it has seen). With no map registered, the bench infers one from your spans, labelled "map inferred from the trace", and shows the path, Model I/O, tool calls and retrievals.
+Then open `http://127.0.0.1:8790/?app=my-app` (the front page lists every app it has seen). The bench infers a map from your spans, labelled "map inferred from the trace", and shows the path, Model I/O, tool calls and retrievals. An inferred map shows only the steps a run took; the branches it didn't take need the library or a flow file.
+
+A LangGraph app traced by OpenInference or OpenLLMetry has its spans grouped by graph node. Both instrumentors' node keys were read from their real output on 10-03-26 (SPEC section 8.6).
 
 > [!IMPORTANT]
 > **Python defaults to gRPC.** With `OTEL_EXPORTER_OTLP_PROTOCOL` unset, Python's auto-configuration (`opentelemetry-instrument`) picks the gRPC exporter, which the bench doesn't accept. Set `http/protobuf`. An app that builds `OTLPSpanExporter` from `opentelemetry.exporter.otlp.proto.http` in code is already HTTP/protobuf.
@@ -99,34 +122,97 @@ uv run examples/level0_pydantic_ai.py "How do I reset my VPN password?"
 
 A run with no content says "not captured", never "masked". [SPEC](SPEC.md) section 6b has the full span mapping.
 
-### Level 1: the `agentlab` library (Python, LangGraph)
+### 2. The `agentlab` library (Python, LangGraph)
 
-The inferred map shows what a run happened to do. The library sends the map of everything the app *could* do, read from the compiled graph, with each run, plus the facts a trace can't know. Nothing is typed twice, and whatever is written by hand sits next to the code it describes and is checked against it.
+The library sends, with every run, the map of everything the app *could* do, read from the compiled graph, plus the facts a trace can't know. Everything travels as OpenTelemetry span attributes ([SPEC](SPEC.md) section 8). There's no package yet, so depend on the library by path from a checkout of this repo:
+
+```toml
+# your app's pyproject.toml
+dependencies = ["agentlab[langgraph]"]
+
+[tool.uv.sources]
+agentlab = { path = "../agent-lab-bench/sdk/python", editable = true }
+```
+
+**The quickstart.** This is all an existing LangGraph app needs to show its whole flow:
 
 ```python
 import agentlab as lab
 from agentlab.langgraph import instrument
 
-lab.init()       # no settings when the bench runs on this machine; a silent no-op when it isn't running
-
-@lab.step("Decide what kind of request", actor="ai", paths={"escalate": lab.path("needs a person")})
-def classify(state):
-    """The docstring is Engineering's description of this step."""
-    ...
-    lab.decision(parsed.rationale, cited=parsed.cited)     # one line where the fact is produced
-
-graph = instrument(builder.compile(), app=lab.App(name="Support assistant", request="question", reply="answer"),
-                   lock="agentlab.lock.json")
+lab.init()                                       # once at startup
+graph = instrument(builder.compile(), app=lab.App(name="HR policy bot"))
+graph.invoke({"question": "How much PTO do I accrue?"})
 ```
 
-- **Structure** (steps, branches, subgraphs) comes from the graph: `get_graph()` and the path maps. A router whose branches can't be read is an error, never a guess.
-- **Facts** come from one line each, where they happen: `lab.corpus(...)` where an index is built (so its items are the index's), `lab.retrieved`, `lab.decision`, `lab.check`, `lab.gate_resolved`, `lab.outcome`, `lab.event` for anything bespoke. Model calls, tool calls, prompts, tokens, cost and approval pauses come from LangGraph's own callbacks.
-- **Words** (plain labels, branch words, check words, which state fields are the request and the reply) live on the code they describe. `lab.verify(graph)` in a test fails when one names a step, branch or field the code no longer has; `python -m agentlab lock` records the code each wording describes, and Engineering flags wording whose step's own code changed since (the node function and its router; code it calls elsewhere isn't fingerprinted, see [`sdk/python`](sdk/python)). Re-run `lock` after re-reading the words, like updating a snapshot.
-- **Zero words still works.** With only `instrument(graph, app=...)`, steps show by their code names and a step that called the model is shown as the AI's; add words where they pay off.
+Start the bench (`uv run uvicorn bench.server:app --port 8790`), run the app, and open `http://127.0.0.1:8790/?app=hr-policy-bot` (the app id is the name, slugged). You get:
+- every step and every branch, including the ones this run didn't take, with the path it took lit up;
+- each model call's prompt, output, tokens and time, on the step that made it;
+- a step that called the model shown as the AI's.
 
-Everything travels as OpenTelemetry span attributes ([SPEC](SPEC.md) section 8), so Langfuse, Phoenix and the rest see it too. [`examples/langgraph_quickstart`](examples/langgraph_quickstart) is a runnable app with no API key, and [`sdk/python`](sdk/python) is the library's own guide. An app defined as an Open Agent Spec flow gets its map from the flow file ([`examples/agentspec`](examples/agentspec)).
+Steps show by their code names, and `verify` lists what has no words yet as information, not errors. These are the lines a test engineer used to hook up a fresh LangGraph app from this README on 10-03-26, against a bench on another port (set with `AGENT_LAB_URL`), with no other setup. Spans were sent when the process exited, with no shutdown call.
 
-**No library for your language yet?** Declare the map as JSON instead. Open `?app=my-app&mode=engineering` on a Level 0 run and click **⤓ map as topology.json**: it has the node ids your spans actually produce. Fill in the plain words, then register it:
+`lab.init()` with no arguments sends to `http://127.0.0.1:8790`, and it is a silent no-op while nothing listens there, so the same code runs in production with no bench. Set `AGENT_LAB_URL=http://host:port` only when the bench runs on another machine; `AGENT_LAB_URL=off` turns it off.
+
+**Make it read well, where it pays off.** Add facts and words next to the code they describe:
+
+```python
+@lab.step("Is it a policy question?", says="The AI decides whether the handbook covers this.", actor="ai",
+          paths={"policy": lab.path("a policy question"), "smalltalk": lab.path("just chatting")})
+def triage(state):
+    """Model returns {route, why} as JSON."""                    # Engineering's description
+    parsed = json.loads(model.invoke(prompt(state)).content)
+    lab.decision(parsed["why"])                                   # the AI's own reason, one line
+    return {"route": parsed["route"]}
+
+lab.corpus("handbook", title="Employee handbook", items=[(d.id, d.title) for d in HANDBOOK])   # where the index is built
+lab.check("cites_handbook", ok, evidence=cited, words={"passed": "The answer names a policy it was given."})   # at the check
+
+graph = instrument(builder.compile(), lock="agentlab.lock.json",
+                   app=lab.App(name="HR policy bot", request="question", reply="answer"))
+```
+
+- `paths=` keys are the router's real branch names. `request=` and `reply=` are the state's own field names, so the screen shows the question and the answer instead of the whole state.
+- Branch lighting is derived from which step ran next, so it's right even when your code overrides the model's pick.
+- The text you pass to a fact (`lab.decision`'s reason, `lab.check`'s `detail`) is read by the room in Presentation, so write it for them.
+
+**Keep it honest in CI:**
+
+```python
+def test_agent_lab_words_match_code():
+    lab.verify(build_graph(), strict=True)       # strict: also fail on worded code changed since `lock`
+```
+
+```bash
+uv run python -m agentlab verify my_app.graph:build_graph --strict   # the same check from the command line
+uv run python -m agentlab lock my_app.graph:build_graph              # after re-reading words whose code changed
+```
+
+`lock` works like updating a snapshot. Editing only a step's words also asks for a re-lock, because the decorator is part of what's fingerprinted.
+
+In the same usability run, the engineer renamed a node, split one document index into two and added a branch, with nothing else touched. The renamed step, the new branch and both document sets appeared on the next run, and earlier runs kept their own map. `verify --strict` failed with R1 (a panel still naming the old step) and R6 (worded code changed since `lock`); a separate branch rename failed with R2 (a branch word naming a branch the code no longer has, with the real ones listed). It passed again once the words were fixed and re-locked.
+
+[`examples/langgraph_quickstart`](examples/langgraph_quickstart) is a complete app with every kind of line, a scripted model (no API key) and its own CI test. [`sdk/python`](sdk/python) is the library's guide: redaction, cost, sharing your app's OpenTelemetry provider, gates and every rule.
+
+### 3. Open Agent Spec
+
+When an app is defined as an Agent Spec **flow** and its runtime executes that file, the file *is* the structure, so Agent Lab reads the map from it and the two can't disagree:
+
+```bash
+cd sdk/python
+uv run python -m agentlab.agentspec ../../examples/agentspec/helpdesk_triage.yaml --verify    # the map; exit 1 on a file error
+```
+
+- **From the file (tested against Oracle's example flows):** node names, descriptions and types, each branch by its own name, and a `FlowNode`'s subflow drawn inside it. Words can go on top with `steps=`, checked like LangGraph's.
+- **`verify` catches what the file gets wrong (R14):** an edge leaving from a branch its node doesn't declare, two edges leaving one branch, an edge to a node the flow doesn't list. pyagentspec's validators don't check the first two. Oracle's own branching example has a case mismatch (`yes` against `Yes`) that `verify` reports, and pyagentspec's loader fails on that file with `KeyError: 'Maybe'`.
+- **Live runs:** run the flow with pyagentspec's LangGraph loader, then `instrument(graph, app=..., structure=agentspec.structure_from("flow.yaml"))`, so each run carries the file's map. The loader names each node by its Agent Spec id, which is the id this map uses (checked by running a flow with no model nodes). The `structure=` hook is tested with a hand-built structure. A run through pyagentspec's loader with it hasn't been run yet.
+- **No runtime yet:** `--register http://127.0.0.1:8790` registers the file's map as a declared map.
+
+**Exporting a LangGraph app to Agent Spec isn't needed for Agent Lab, and isn't recommended.** pyagentspec's exporter ran on the quickstart graph, but every node becomes an opaque tool with no words. Wherever a path map's labels differ from its targets, the file's branch names don't match its own edges: four R14 errors on the quickstart. A LangGraph app should use `agentlab.langgraph`. Details: [`examples/agentspec`](examples/agentspec).
+
+### No library for your language yet?
+
+Declare the map as JSON. Open `?app=my-app&mode=engineering` on a zero-setup run and click **⤓ map as topology.json**: it has the node ids your spans actually produce. Fill in the plain words, then register it:
 
 ```bash
 curl -X PUT http://127.0.0.1:8790/apps/my-app \
@@ -134,9 +220,9 @@ curl -X PUT http://127.0.0.1:8790/apps/my-app \
   -d @my-app.registration.json          # {"topology": {...}, "story": null}
 ```
 
-Registration validates the map against [`schema/bench-topology.schema.json`](schema/bench-topology.schema.json); keys starting with `x-` are yours. [`examples/hello-agent.topology.json`](examples/hello-agent.topology.json) uses every field. A declared map is typed by hand, so it can drift from the code; a run that carries its own map always wins over it.
+Registration validates the map against [`schema/bench-topology.schema.json`](schema/bench-topology.schema.json); keys starting with `x-` are yours. [`examples/hello-agent.topology.json`](examples/hello-agent.topology.json) uses every field. **A declared map is typed by hand, so it can drift from the code**; nothing checks it against the code, which is why it's the fallback and not the way in. A run that carries its own map always wins over it.
 
-Not using OpenTelemetry? Send bench events instead, one at a time or in batches:
+Not using OpenTelemetry? Send bench events instead, one at a time or in batches (the low-level path; the library doesn't use it):
 
 ```bash
 curl -X POST http://127.0.0.1:8790/ingest -H 'Content-Type: application/json' -d '{
@@ -146,9 +232,21 @@ curl -X POST http://127.0.0.1:8790/ingest -H 'Content-Type: application/json' -d
 }'
 ```
 
-### Level 2: tell the story
+### Custom panels (stories)
 
-For what plain data can't explain (a situation too bespoke for any universal view, or extra color someone wants to add), an app ships a **story**: JavaScript panels that draw its own runs (`BenchStory.register('<app id>', {panels, renderers})`). With the library it's `instrument(..., story=lab.Story(file="story.js", panels=[lab.Panel(...)]))` (the `Panel` fields are in [`sdk/python`](sdk/python#stories-custom-panels); name a panel's steps by their functions, `nodes=[check_grounding]`, and a rename can't strand it): each run names the story file by its hash, and the bench serves it only from a file you trust (`AGENT_LAB_STORIES="<app id>=<path>"`) whose hash matches; a declared map sends it as the `story` string at registration. While writing a story, add `AGENT_LAB_STORIES_DEV=1`: the bench then serves the file as it is now, so an edit shows on a viewer reload without re-running the app. Story panels add to the generic views and never replace them. Each panel gets `ctx.mode` (`"presentation"` or `"engineering"`), so one panel can speak plainly to a room and show every score to an engineer. A map panel's `audience` (`both`, `presentation` or `engineering`) says which mode shows it.
+The generic views cover every app the same way. A story is for the two things they can't do: a situation too bespoke for any universal view, and the color or detail someone wants to add, the way some people write extra comments in their code. It's JavaScript panels that draw the app's own runs (`BenchStory.register('<app id>', {panels, renderers})`), added beside the generic views, never replacing them:
+
+```python
+story = lab.Story("story.js", panels=[
+    lab.Panel("why", "Where the answer came from", ["check_result"], nodes=[check_grounding]),
+])
+graph = instrument(compiled, app=APP, story=story)
+```
+
+- Name a panel's steps by their functions (`nodes=[check_grounding]`), so a rename can't strand it. A panel naming a step the graph doesn't have fails `verify` (R1).
+- Each run names the story file by its hash. The bench serves it only from a file you trust (`AGENT_LAB_STORIES="<app id>=<path>"`, set when the bench starts) and only when the hash matches. While writing a story, add `AGENT_LAB_STORIES_DEV=1`: the bench serves the file as it is now, so an edit shows on a viewer reload.
+- Each panel gets `ctx.mode` (`"presentation"` or `"engineering"`), so one panel can speak plainly to a room and show every score to an engineer. A panel's `audience` (`both`, `presentation` or `engineering`) says which mode shows it.
+- The `Panel` fields are in [`sdk/python`](sdk/python#stories-custom-panels). A declared map sends its story as the `story` string at registration.
 
 Test a story before anyone sees it. The story harness renders every panel at every event of your recordings, in both modes, and fails on a throw, an empty panel, `undefined`, `NaN` or `[object Object]`:
 
@@ -163,8 +261,8 @@ node tests/story_harness.js --story path/to/story.js [--topology path/to/map.jso
 | | **Presentation** | **Engineering** |
 |---|---|---|
 | For | a meeting, a demo, a handoff: anyone can drive it | building and debugging the app |
-| Shows | plain step names, a "now" card, what it looked at, how it was checked, who signed off, time and cost in words, "What the AI was given" | everything: tokens, scores, ids, Model I/O, raw JSON, the event log |
-| Pace | recordings: Play pauses at the key moments, ◂ / ▸ step through; live and beside an app it follows the run, then offers "▶ Step through it" | follows the run |
+| Shows | the map with one callout on the current step: plain step names, what it looked at, how it was checked, who signed off, time and cost in words, "What the AI was given" | everything: tokens, scores, ids, Model I/O, raw JSON, the event log, and "Checks on this map" (every verify and runtime finding) |
+| Pace | recordings: open paused on the first step and go at the presenter's pace (clicker keys), or Play pauses at the key moments; live and beside an app it follows the run, then offers "▶ Step through it" | follows the run |
 
 A recording opens paused on its first step, so the presenter can talk first: → / Space / PageDown (what a clicker sends) go forward a step, ← / PageUp back, Home to the first step, End to the end, R the recap, M the map alone, `?` lists the keys. `&play=1` plays it instead; `&at=<step>` opens it at a step, `&at=end&recap=1` on the recap.
 
@@ -218,19 +316,21 @@ The Langfuse settings follow [Langfuse's OpenTelemetry docs](https://langfuse.co
 | Piece | What it is |
 |---|---|
 | **Events** | `bench/0`: run and step boundaries, model calls with tokens, cost and I/O, decisions, retrievals, checks, tool calls, human gates. Unknown event types are fine; they render generically. |
-| **Map** | Every step (`nodes`) and possible branch (`edges`, with `from_branch`), in plain words, plus the sources it can read, the checks that guard it and the panels to show. |
-| **Story** | Optional JavaScript that draws an app's own panels, registered with its map. |
-| **Receiver** | `bench/server.py`: register, ingest, OTLP (`adapters/otlp.py`), a live stream per session or app, recordings. |
+| **Map** | Every step (`nodes`) and possible branch (`edges`, with `from_branch`), with its words, plus the sources it can read, the checks that guard it and the panels to show. Library apps send it with every run, derived from their code; the bench keeps each by hash and draws every run with its own. |
+| **Library** | `sdk/python` (`agentlab`): derives the map from a LangGraph graph or an Agent Spec flow, sends it and the app's facts over OpenTelemetry, and verifies the words. |
+| **Story** | Optional JavaScript that draws an app's own panels, named by hash in the map each run carries. |
+| **Receiver** | `bench/server.py`: OTLP (`adapters/otlp.py`), per-run maps (`/maps/<hash>`), declared maps, native ingest, a live stream per session or app. `python -m bench.record` turns OTLP/JSON into recordings with the same reader. |
 | **Viewer** | `viewer/`: Presentation and Engineering over the flow, sources, checks, timeline, Model I/O and panels. Its pure logic is `viewer/logic.js`. `shell/` is the side-by-side page. |
 
 ## 🗺️ Roadmap
 
-Deploying the new lab, before-and-after comparisons of two architectures, and more scenarios. A TypeScript library, forwarding and a browser extension are on the Later list, with the reasons. See [ROADMAP.md](ROADMAP.md).
+Deploying the new lab, before-and-after comparisons of two architectures, and more scenarios. A TypeScript library, more framework integrations, forwarding and a browser extension are on the Later list, with the reasons. See [ROADMAP.md](ROADMAP.md).
 
 ## 🧑‍💻 Development
 
 ```bash
 uv run pytest -q                                # format, OTLP adapter, receiver, story harness, browser e2e
+(cd sdk/python && uv run pytest -q)             # the agentlab library, incl. LangGraph and Agent Spec
 node --test tests/js/*.test.js                  # viewer logic (viewer/logic.js)
 uv run pytest tests/e2e -q                      # just the browser tests (Playwright; skip if no Chromium)
 node tests/story_harness.js examples/*.recording.jsonl   # the story harness on hello-agent

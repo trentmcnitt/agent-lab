@@ -24,6 +24,8 @@ lab.init()      # once at startup. No env needed when the bench runs on this mac
                 # With no bench listening it is a silent no-op.
 ```
 
+That and `instrument(builder.compile(), app=lab.App(name=...))` are all a LangGraph app needs to show its whole flow. Facts and words are additions, made where they pay off.
+
 ## LangGraph
 
 ```python
@@ -60,7 +62,7 @@ def test_agent_lab_words_match_code():
 
 `python -m agentlab verify app.graph:build_graph [--strict]` does the same in CI. `python -m agentlab lock app.graph:build_graph` records the code each wording describes in `agentlab.lock.json`; when that code later changes, Engineering mode shows the wording as needing a re-read (`--strict` fails on it). Treat it like a snapshot test: after changing a worded step, re-read its words, then run `lock` again.
 
-What the fingerprint covers, exactly: the node function's own source (its decorator included, so editing only its words also asks for a re-lock) and, for a branching node, its router's source and its path map. Code the node calls in another function or module (a retriever, a helper) is not fingerprinted: a change there changes what the step does without flagging its words. Verification checks that every word names something real and flags words whose step changed; it never claims the words are right.
+What the fingerprint covers, exactly: the node function's own source (its decorator included, so editing only its words also asks for a re-lock) and, for a branching node, its router's source and its path map. Code the node calls in another function or module (a retriever, a helper) is not fingerprinted: a change there changes what the step does without flagging its words. Verification checks that every word names something real and flags words whose step changed; it never claims the words are right. Two things it can't see: a `@lab.step` on a function that is no longer added to the graph (its words never reach the map, so nothing wrong is shown), and a lock entry for a step that no longer exists (harmless; the next `lock` drops it).
 
 Don't hard-code step names in your own tests either: the quickstart's test checks that every span lands on a step the graph has, so a rename only fails `verify`, with a message that says what to fix.
 

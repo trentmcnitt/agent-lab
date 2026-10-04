@@ -2,7 +2,7 @@
 
 Status: **draft v0** (09-28-26; opened and extended 10-03-26: every addition is optional, so v0 maps and events still validate).
 
-The bench is a read-only observability harness for agent apps. It is framework-neutral: any app that reports to it can be shown on it, whatever it is built with. An app sends **bench events** (directly, or as OpenTelemetry spans the bench converts), and **registers itself**: its **map** (every step and possible branch) and, optionally, its **story** (custom panels that explain the app). The bench renders the events against the map, live or from a recording. It holds nothing app-specific in its own code, and it never calls back into an app: approvals, retries and anything else interactive stay in the app's own UI.
+The bench is a read-only observability harness for agent apps. It is framework-neutral: any app that reports to it can be shown on it, whatever it is built with. An app sends **bench events** (directly, or as OpenTelemetry spans the bench converts) and its **map** (every step and possible branch): attached to every run when it uses the `agentlab` library (section 8), else registered once (section 3). Optionally it adds a **story** (custom panels that explain the app). The bench renders the events against the map, live or from a recording. It holds nothing app-specific in its own code, and it never calls back into an app: approvals, retries and anything else interactive stay in the app's own UI.
 
 Two machine-readable files define v0:
 
@@ -145,7 +145,7 @@ The shell accepts no other messages from the app; any other `type` is ignored. T
 
 ## 4. The map (topology manifest)
 
-One per app, owned by the app and registered by it. It lets the bench draw the whole graph before anything runs, so a branch that is never taken still shows as a box that stayed dark. The bench's own example is `examples/hello-agent.topology.json`; trimmed:
+One per app version, owned by the app: derived from its code and carried by each run (section 8.5), or declared by hand and registered (section 3). It lets the bench draw the whole graph before anything runs, so a branch that is never taken still shows as a box that stayed dark. The bench's own example is `examples/hello-agent.topology.json`; trimmed:
 
 ```json
 {
@@ -317,7 +317,7 @@ Against the OTel GenAI semantic conventions, which are **Development** status an
 | `gen_ai.operation.name = execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.arguments` / `.result` | `tool_call` |
 | any root span (no parent) | `run_started` (`data`: `label`, `via: "otlp"`, `app`, `input`) / `run_finished` (`outcome`). An `invoke_agent`/`invoke_workflow` root is only the run; any other root is the run and its first step. Its children still name it as `parent_step_id`; since it isn't a step, they are top-level steps (a `parent_step_id` nests a step only when it names another step of the run). `run_started` usually arrives last: the viewer sorts by `ts`, then `seq`. |
 | a trace with no span carrying `gen_ai.*`, `llm.*`, `openinference.*` or `traceloop.*` attributes | dropped (not AI work) |
-| node id (default) | `execute_tool {gen_ai.tool.name}`, `invoke_agent {gen_ai.agent.name}`, `retrieval {gen_ai.data_source.id}`, LLM ops `{op} {gen_ai.agent.name}` or `{op}`; never the model. A map's `node_from` wins; `{"span_name": true}` restores span names. These are the ids a Level 1 map must use: the event log shows them, and an inferred map uses them unchanged (it folds only a model name after an LLM op, as in a span named `chat gpt-4o`). Engineering's "⤓ map as topology.json" downloads the inferred map as a starting file. In Presentation an inferred node is named from its operation (`execute_tool search_handbook` → "Tool: search handbook", `retrieval handbook` → "Search: handbook", `chat` → "AI: chat", `invoke_agent x` → "Agent: x"), with the raw id as its small technical label. |
+| node id (default) | `execute_tool {gen_ai.tool.name}`, `invoke_agent {gen_ai.agent.name}`, `retrieval {gen_ai.data_source.id}`, LLM ops `{op} {gen_ai.agent.name}` or `{op}`; never the model. A map's `node_from` wins; `{"span_name": true}` restores span names. These are the ids a declared map must use: the event log shows them, and an inferred map uses them unchanged (it folds only a model name after an LLM op, as in a span named `chat gpt-4o`). Engineering's "⤓ map as topology.json" downloads the inferred map as a starting file. In Presentation an inferred node is named from its operation (`execute_tool search_handbook` → "Tool: search handbook", `retrieval handbook` → "Search: handbook", `chat` → "AI: chat", `invoke_agent x` → "Agent: x"), with the raw id as its small technical label. |
 | content attributes present (`gen_ai.input/output.messages`, `system_instructions`, tool args/results, `retrieval.documents`/`query.text`, `input.value`/`output.value`, `pydantic_ai.all_messages`) | `content_mode: "full"`; none at all: `"absent"`; a `bench.content_mode` span/resource attribute overrides. Never inferred as `redacted`. |
 | `gen_ai.operation.name = retrieval`, `gen_ai.data_source.id`, `gen_ai.retrieval.query.text`, `gen_ai.retrieval.documents` (JSON string or structured) | `retrieval` with `source`, `query`, `hits[]` (`id`, `title`, `score`, `text` from `content`/`text`) |
 | `gen_ai.evaluation.result` span events; OpenInference GUARDRAIL/EVALUATOR spans | `check_result` (unverified against a real emitter, 10-03-26) |
@@ -340,7 +340,7 @@ The conventions define **no cost attribute**. If the span carries `gen_ai.usage.
 - Metrics and aggregation across runs (cost per day, p95 latency). The bench shows runs; evals stay in each app.
 - Writing back to the app. Read-only by design.
 - Forwarding to other backends (Langfuse, Logfire, Phoenix...): an OpenTelemetry Collector in front of both does this (README, "What it isn't"), so the bench never sits on the path to a team's real tracing. On the roadmap's Later list.
-- Reading Agent Spec flow files directly as maps: the vocabulary is aligned, the importer isn't written.
+- Reading Agent Spec Tracing spans: Agent Spec flow files are read as maps (section 8.5), but its in-process tracing API isn't OpenTelemetry and isn't mapped.
 - Streaming chunk rendering beyond appending text; no app sends `chunk` yet.
 
 ## 8. Agent Lab on OpenTelemetry (the `agentlab` library)
