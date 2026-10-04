@@ -1510,3 +1510,33 @@ export function recap(topo, events, finished, seq) {
     never: (topo && topo.never) || []
   };
 }
+
+// ---- small presentation helpers ---------------------------------------------------------------
+/* A " · "-separated list of "name: value" pairs (an app's by-hand baseline, for one) as
+   [{k, v}], so it can be shown as a labelled list; null when any part isn't such a pair (the text
+   is then shown as it is). */
+export function labelledPairs(text) {
+  var parts = String(text || '').split(/\s+·\s+/).map(function (x) { return x.trim(); }).filter(Boolean);
+  if (!parts.length) return null;
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {
+    var m = /^([^:]{1,40}?)\s*:\s*(\S.*)$/.exec(parts[i]);
+    if (!m) return null;
+    out.push({ k: m[1], v: m[2] });
+  }
+  return out;
+}
+/* A source item's short face (a tile too small for its title): the number its title starts with
+   ("5. Software…" → "5"); among numbered siblings an unnumbered item (a preamble) shows the first
+   word of its title, at most 8 letters, so it never reads as a stray letter or collides with a
+   real number; otherwise its position. */
+export function tileFace(item, idx, items) {
+  var NUM = /^\s*(\d+)/, title = String((item && (item.title || item.id)) || ''), own = title.match(NUM);
+  if (own) return own[1];
+  var numbered = (items || []).some(function (x) { return NUM.test(String((x && x.title) || '')); });
+  if (numbered) {
+    var w = (title.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/u) || [''])[0];
+    if (w) return w.length > 8 ? w.slice(0, 7) + '…' : w;
+  }
+  return idx != null ? String(idx + 1) : String((item && item.id) || '').slice(0, 3);
+}

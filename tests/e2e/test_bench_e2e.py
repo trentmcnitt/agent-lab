@@ -82,11 +82,28 @@ def test_no_horizontal_scroll_at_390(phone, site, name, mode):
 def test_mode_toggle_switches_and_is_remembered(page, site):
     p = open_replay(page, site, "hello-answer", "presentation")
     wait_done(p, "presentation")
-    p.click(".pres .viewtoggle button[data-v=engineering]")
+    p.click(".topbar .viewtoggle button[data-v=engineering]")
     p.wait_for_selector("#bench.mode-engineering")
     assert p.is_visible(".eng") and p.evaluate("localStorage.getItem('bench.mode')") == "engineering"
-    p.click(".eng .viewtoggle button[data-v=presentation]")
+    p.click(".topbar .viewtoggle button[data-v=presentation]")
     p.wait_for_selector("#bench.mode-presentation")
+    p.evaluate("localStorage.removeItem('bench.mode')")
+
+
+@pytest.mark.parametrize("width", [1920, 960])
+def test_mode_switch_is_one_and_never_moves(page, site, width):
+    # One switch, in the bar on top, at the same spot in both modes (a narrow Engineering header
+    # used to wrap its own copy to the left of a second row).
+    p = open_replay(page, site, "req-012-approved", "presentation")
+    p.set_viewport_size({"width": width, "height": 900})
+    assert p.locator(".viewtoggle").count() == 1
+    box = lambda: p.locator(".viewtoggle").bounding_box()
+    pres = box()
+    p.click(".topbar .viewtoggle button[data-v=engineering]")
+    p.wait_for_selector("#bench.mode-engineering")
+    eng = box()
+    assert abs(pres["x"] - eng["x"]) < 1 and abs(pres["y"] - eng["y"]) < 1, (pres, eng)
+    assert pres["x"] + pres["width"] > width - 40, "the switch sits at the right"
     p.evaluate("localStorage.removeItem('bench.mode')")
 
 
@@ -185,7 +202,7 @@ def test_shell_side_by_side_follows_the_app(page, site):
     assert "Approved" in bench.locator("[data-p=bubble]").inner_text()
     bench.locator(".ps-key[data-act=recap]").click()
     # The app's replay keeps the recording's times: the work reads as the bench's own replay does (7.x s).
-    assert re.search(r"AI work: 7\.\d s", bench.locator("[data-p=bottom]").inner_text())
+    assert re.search(r"AI work\s+7\.\d s", bench.locator("[data-p=bottom]").inner_text())
     # Step through it here, paced like a recording, then back to following the app.
     bench.locator("[data-p=transport] [data-act=stepthrough]").click()
     bench.locator("[data-p=bubble] [data-act=play]").wait_for(timeout=20_000)     # paused at the first moment
@@ -223,9 +240,9 @@ def test_level0_pydantic_ai_draws_an_inferred_map(page, live_bench):
     io = p.locator(".eng .panel", has_text="Model I/O")
     io.locator(".pbody", has_text="reset my VPN password").wait_for(timeout=10_000)
     # And Presentation draws the same inferred map with the request on top.
-    p.click(".eng .viewtoggle button[data-v=presentation]")
+    p.click(".topbar .viewtoggle button[data-v=presentation]")
     p.wait_for_selector("#bench.mode-presentation")
-    assert p.locator(".pres [data-p=inferred]").is_visible()
+    assert p.locator(".topbar [data-p=inferred]").is_visible()
     assert "reset my VPN password" in p.inner_text("[data-p=req]")
     p.wait_for_function("() => (document.querySelector(\"[data-p=bubble] .bb-name\") || {}).textContent", timeout=10_000)
     assert "didn’t come this way" not in p.inner_text("[data-p=bubble]")
@@ -267,7 +284,7 @@ def test_a_langgraph_app_live_draws_the_map_its_run_carried(page, live_bench):
     said = r.stdout.strip().splitlines()[-1]
     assert " ".join(reply.inner_text().split()) == " ".join(said.split()), (reply.inner_text(), said)
     # Engineering: the map's own checks (from the app's verify, and from this run) are clean.
-    p.click(".pres .viewtoggle button[data-v=engineering]")
+    p.click(".topbar .viewtoggle button[data-v=engineering]")
     checks = p.locator(".eng .panel", has_text="Checks on this map")
     checks.wait_for()
     assert checks.locator(".mc-error, .mc-warning").count() == 0, checks.inner_text()
@@ -362,3 +379,30 @@ def test_try_another_starts_the_new_request_at_its_first_step(page, site):
     assert "at=" not in p.url and "recap=" not in p.url
     p.wait_for_selector("[data-p=bubble] .bb-num")
     assert p.inner_text("[data-p=bubble] .bb-num") == "1"
+
+
+@pytest.mark.parametrize("size", [(1920, 1080), (960, 720)])
+def test_stage_boxes_fit_their_words_and_edges_show_a_shaft(page, site, size):
+    # Every box holds its name and its footer (actor chip, badge) without clipping either, every
+    # badge fits whole, and an edge between stacked boxes is longer than its arrowhead.
+    p = page.page
+    p.set_viewport_size({"width": size[0], "height": size[1]})
+    p.goto(f"{site}/bench/?replay={RECORDINGS['req-012-approved']}&mode=presentation&at=end")
+    p.wait_for_selector("[data-p=transport] button.main[data-act=restart]", timeout=30_000)
+    bad = p.evaluate("""() => [...document.querySelectorAll('.ps-map .snode')].filter(n => {
+        const gl = n.querySelector('.gl'), ft = n.querySelector('.s-foot'), gp = n.querySelector('.gp');
+        return gl.scrollHeight > gl.clientHeight + 1 || ft.getBoundingClientRect().bottom > n.getBoundingClientRect().bottom + 0.5
+          || (!gp.hidden && gp.scrollWidth > gp.clientWidth + 1);
+      }).map(n => n.dataset.node)""")
+    assert bad == [], bad
+    # The straight edge from the first step to the second: its length on screen beats the arrowhead's.
+    shaft = p.evaluate("""() => {
+        const a = document.querySelector('.ps-map .gnode[data-node=ingest]').getBoundingClientRect();
+        const b = document.querySelector('.ps-map .gnode[data-node=retrieve]').getBoundingClientRect();
+        const m = document.querySelector('.ps-map marker#parr-t'), k = a.height / document.querySelector('.ps-map .gnode[data-node=ingest]').offsetHeight;
+        return (b.top - a.bottom) - Number(m.getAttribute('markerWidth')) * k;
+      }""")
+    assert shaft >= 8, f"edge shaft {shaft:.1f}px"
+    # The footer's words are never under its controls.
+    facts, ctl = p.locator("[data-p=bottom]").bounding_box(), p.locator(".ps-ctl").bounding_box()
+    assert facts["x"] + facts["width"] <= ctl["x"] + 1 or facts["y"] + facts["height"] <= ctl["y"] + 1

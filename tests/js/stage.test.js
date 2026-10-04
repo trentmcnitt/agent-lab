@@ -275,3 +275,18 @@ test('helpdesk: the recap counts only the checks that ran, and a hand-off says w
   const ok = desk('req-012-approved');
   assert.equal(L.recap(ok.topo, ok.events, true, seqOf(ok.events)).did.why, null, 'no "why" on an approval');
 });
+
+test('labelledPairs: a baseline as a labelled list, or null when it is plain text', () => {
+  assert.deepEqual(L.labelledPairs('answer: ~3–5 min · ticket: ~10–15 min · hand-off: human judgment required'),
+    [{ k: 'answer', v: '~3–5 min' }, { k: 'ticket', v: '~10–15 min' }, { k: 'hand-off', v: 'human judgment required' }]);
+  assert.equal(L.labelledPairs('about ten minutes of a person'), null);
+  assert.equal(L.labelledPairs(''), null);
+});
+
+test('tileFace: a number, else a word among numbered items, else a position', () => {
+  const items = [{ title: 'Preamble' }, { title: '1. Scope' }, { title: '12. Software Requests' }, { title: 'Acknowledgements and thanks' }];
+  assert.equal(L.tileFace(items[0], 0, items), 'Preamble');
+  assert.equal(L.tileFace(items[2], 2, items), '12');
+  assert.equal(L.tileFace(items[3], 3, items), 'Acknowl…');
+  assert.equal(L.tileFace({ title: 'Glossary' }, 4, [{ title: 'Glossary' }, { title: 'Intro' }]), '5');
+});

@@ -28,8 +28,11 @@
   // Presentation's stage (the map beside one callout, Build spec v3): boxes big enough for a
   // two-line plain name at projector size plus one badge, and a smaller one for a ~960 px pane.
   // lane/clear: channel spacing and clearance, scaled with the boxes so long edges stay distinct.
-  var STAGE_GEOM = { w: 300, h: 92, gx: 64, gy: 24, pad: 18, routedLabels: false, lane: 14, clear: 10 };
-  var PANE_GEOM = { w: 196, h: 70, gx: 30, gy: 18, pad: 12, routedLabels: false, lane: 10, clear: 7 };
+  // ortho: edges run in straight lines with rounded corners (down, across in a gap, down), so a
+  // dashed path reads as one calm line rather than a run of S-curves; turns sit in the gaps.
+  // gy leaves every edge between stacked boxes a visible shaft above its arrowhead.
+  var STAGE_GEOM = { w: 356, h: 84, gx: 56, gy: 36, pad: 18, routedLabels: false, lane: 16, clear: 28, ortho: true, radius: 6 };
+  var PANE_GEOM = { w: 240, h: 64, gx: 24, gy: 24, pad: 10, routedLabels: false, lane: 9, clear: 12, ortho: true, radius: 5 };
   var CLEAR_DEFAULT = 6;   // a channel keeps at least this far from any box (geom.clear overrides)
   var LANE_DEFAULT = 9;    // spacing between parallel channels (geom.lane overrides)
   var CHAR_W = 5.9;   // the edge label font (9.5px monospace), per character
@@ -42,6 +45,35 @@
     var u = 1 - t;
     return [u * u * u * p[0][0] + 3 * u * u * t * p[1][0] + 3 * u * t * t * p[2][0] + t * t * t * p[3][0],
             u * u * u * p[0][1] + 3 * u * u * t * p[1][1] + 3 * u * t * t * p[2][1] + t * t * t * p[3][1]];
+  }
+  /* A polyline through `pts` with each corner rounded (radius r, or less where a leg is short), as
+     cubic pieces: straight legs are cubics too, so a test samples exactly what's drawn. */
+  function rounded(pts, r) {
+    var P = [];
+    pts.forEach(function (q) {
+      var l = P[P.length - 1];
+      if (l && Math.abs(l[0] - q[0]) < 0.01 && Math.abs(l[1] - q[1]) < 0.01) return;      // repeated point
+      if (P.length >= 2) {                                                                  // collinear: extend
+        var a = P[P.length - 2];
+        if ((Math.abs(a[0] - l[0]) < 0.01 && Math.abs(l[0] - q[0]) < 0.01) || (Math.abs(a[1] - l[1]) < 0.01 && Math.abs(l[1] - q[1]) < 0.01)) { P[P.length - 1] = q; return; }
+      }
+      P.push(q);
+    });
+    if (P.length < 2) return [line([pts[0][0], pts[0][1]], [pts[pts.length - 1][0], pts[pts.length - 1][1]])];
+    function len(a, b) { return Math.hypot(b[0] - a[0], b[1] - a[1]); }
+    function toward(a, b, d) { var L = len(a, b) || 1; return [a[0] + (b[0] - a[0]) * d / L, a[1] + (b[1] - a[1]) * d / L]; }
+    // Every piece gets its own point arrays: the layout shifts each point in place afterwards.
+    function cp(q) { return [q[0], q[1]]; }
+    var out = [], cur = P[0], K = 0.5523;
+    for (var i = 1; i < P.length - 1; i++) {
+      var c = P[i], rr = Math.min(r, len(P[i - 1], c) / 2, len(c, P[i + 1]) / 2);
+      var pin = toward(c, P[i - 1], rr), pout = toward(c, P[i + 1], rr);
+      if (len(cur, pin) > 0.01) out.push(line(cp(cur), cp(pin)));
+      out.push(cubic(cp(pin), toward(pin, c, rr * K), toward(pout, c, rr * K), cp(pout)));
+      cur = pout;
+    }
+    out.push(line(cp(cur), cp(P[P.length - 1])));
+    return out;
   }
   function r1(v) { return Math.round(v * 10) / 10; }
   function pathD(pieces) {
@@ -150,6 +182,12 @@
     function route(e, a, b, text) {
       var x1 = a.x + G.w / 2, y1 = a.y + G.h, x2 = b.x + G.w / 2, y2 = b.y;
       var ls = row[e.from], lt = row[e.to];
+      if (lt === ls + 1 && G.ortho) {
+        // Down from the source, across 40% of the way through the gap, down into the target.
+        var ym = y1 + (y2 - y1) * 0.4;
+        var op = Math.abs(x1 - x2) < 0.5 ? [line([x1, y1], [x2, y2])] : rounded([[x1, y1], [x1, ym], [x2, ym], [x2, y2]], G.radius || 8);
+        return { from: e.from, to: e.to, pieces: op, routed: false, label: null };
+      }
       if (lt === ls + 1) {
         var dy = Math.max(G.gy > 20 ? 18 : 12, (y2 - y1) / 2);
         var p = cubic([x1, y1], [x1, y1 + dy], [x2, y2 - dy], [x2, y2]);
@@ -191,7 +229,14 @@
       var cx = best;
       verticals.push({ x: cx, y0: y0v, y1: y1v });
       var pieces;
-      if (down) {
+      if (G.ortho) {
+        // Leave across the upper part of the gap below the source, run the channel, arrive across
+        // the lower part of the gap above the target: the two turns never share a height with a
+        // short edge's (40%), and the last leg is long enough to show a shaft above the arrowhead.
+        var gb = down ? yA - y1 : G.gy, ga = down ? y2 - yC : G.gy;
+        var hy1 = y1 + gb * 0.22, hy2 = y2 - ga * 0.5;
+        pieces = rounded([[x1, y1], [x1, hy1], [cx, hy1], [cx, hy2], [x2, hy2], [x2, y2]], G.radius || 8);
+      } else if (down) {
         var hA = yA - y1, hC = y2 - yC;
         pieces = [cubic([x1, y1], [x1, y1 + hA / 2], [cx, y1 + hA / 2], [cx, yA]), line([cx, yA], [cx, yC]),
                   cubic([cx, yC], [cx, yC + hC / 2], [x2, yC + hC / 2], [x2, y2])];

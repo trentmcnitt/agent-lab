@@ -89,6 +89,16 @@ for (const [name, file] of Object.entries(MAPS)) {
       assert.deepEqual(crossings(topo, L), []);
       assert.deepEqual(labelsInBoxes(topo, L), []);
       assert.deepEqual(boxesOverlap(topo, L), []);
+      // Each drawn line is one continuous curve: every piece starts where the one before it ended.
+      L.edges.forEach((r) => r && r.pieces.forEach((pc, k) => {
+        if (k) assert.ok(Math.hypot(pc[0][0] - r.pieces[k - 1][3][0], pc[0][1] - r.pieces[k - 1][3][1]) < 0.01, `${r.from}->${r.to} breaks at piece ${k}`);
+      }));
+      // Orthogonal routing: every piece is a straight leg or a quarter turn no bigger than the radius
+      // (a point shifted twice by the layout's final move shows up as a slanted leg).
+      if (G.ortho) L.edges.forEach((r) => r && r.pieces.forEach((pc) => {
+        const dx = Math.abs(pc[3][0] - pc[0][0]), dy = Math.abs(pc[3][1] - pc[0][1]);
+        assert.ok(dx < 0.01 || dy < 0.01 || (Math.abs(dx - dy) < 0.01 && dx <= G.radius + 0.01), `${r.from}->${r.to} has a slanted piece ${dx.toFixed(1)}x${dy.toFixed(1)}`);
+      }));
       // Everything drawn is inside the canvas.
       for (const n of topo.nodes) { const p = L.pos[n.id]; assert.ok(p.x >= 0 && p.y >= 0 && p.x + G.w <= L.W && p.y + G.h <= L.H, n.id + ' off canvas'); }
       L.edges.forEach((r) => r && r.pieces.forEach((pc) => pc.forEach(([x, y]) => assert.ok(x >= 0 && y >= 0 && x <= L.W && y <= L.H, 'edge off canvas'))));

@@ -90,17 +90,27 @@
     var toggle = '<span class="viewtoggle" role="group" aria-label="View mode">' +
       '<button data-v="presentation" title="For a room: plain words, what it looked at, how it was checked, who signed off">Presentation</button>' +
       '<button data-v="engineering" title="Everything: tokens, ids, every field, the raw event log">Engineering</button></span>';
+    /* ONE bar on top in both modes: the app's name, the run's status (Presentation), "Try another",
+       and the mode switch, always in the same place. (The switch used to be drawn twice, once in
+       each mode's own header; Engineering's header wraps on a narrow window, so its copy dropped to
+       the left of a second row while Presentation's stayed on the right.) */
     r.innerHTML =
+      '<header class="topbar">' +
+        '<span class="tb-app" data-p="appname"></span>' +
+        '<span class="tb-status" data-p="status"></span>' +
+        '<span class="tb-spacer"></span>' +
+        '<span class="p-inferred" data-p="inferred" hidden>map inferred from the trace</span>' +
+        '<span class="tb-pick" data-p="picker"></span>' + toggle +
+      '</header>' +
       '<div class="eng">' +
       '<header class="bh">' +
-        '<span class="app" data-f="app">bench</span>' +
+        '<span class="app" data-f="app" hidden>bench</span>' +
         '<span class="badge" data-f="mode">–</span>' +
         '<span class="badge" data-f="content" title="Whether prompts and outputs are shown here exactly as sent, with personal details masked in this record (not necessarily for the model), or not captured at all. The app decides.">–</span>' +
         '<span class="badge" data-f="inferred" hidden title="No map was registered for this app, so the bench drew one from the steps it has seen.">map inferred from the trace</span>' +
         '<button class="badge dl" data-f="download" hidden title="Download this inferred map as a starting topology.json for Level 1: its node ids are the ones your spans produce. Add plain_label and description, then PUT it to /apps/<id>.">⤓ map as topology.json</button>' +
         '<span class="badge" data-f="session" title="Live, the bench follows only this session.">session –</span>' +
         '<select data-f="runs" title="Every run the bench has seen"></select>' +
-        '<span class="bh-spacer"></span>' + toggle +
       '</header>' +
       '<div class="meterbar mono" data-f="meters"></div>' +
       '<div class="bgrid">' +
@@ -120,12 +130,8 @@
       '<div class="pres">' +
         // Presentation (Build spec v3, the A+B hybrid): the map is the stage; ONE callout bubble,
         // joined to the step it explains by a wedge, says what happened there. A quiet footer.
-        '<header class="ps-head">' +
-          '<div class="ps-brand"><span class="p-appname" data-p="appname"></span><span class="ps-modename">Presentation</span></div>' +
-          '<div class="ps-ask"><div class="ps-who" data-p="who"></div><div class="ps-req" data-p="req"></div></div>' +
-          '<div class="ps-right"><span class="ps-status" data-p="status"></span>' +
-            '<div class="ps-tools"><span class="p-inferred" data-p="inferred" hidden>map inferred from the trace</span><span data-p="picker"></span>' + toggle + '</div></div>' +
-        '</header>' +
+        // Who asked and what, with the room to read it (the status, picker and switch are in the bar above).
+        '<header class="ps-head"><div class="ps-ask"><span class="ps-who" data-p="who"></span><span class="ps-req" data-p="req"></span></div></header>' +
         '<div class="ps-stage" data-p="stage">' +
           '<svg class="ps-wedge" data-p="wedge" aria-hidden="true"></svg><svg class="ps-seam" data-p="seam" aria-hidden="true"></svg>' +
           '<section class="ps-map"><div class="graphwrap" data-p="graph"></div><div class="edgetip" data-p="tip" hidden></div></section>' +
@@ -133,8 +139,8 @@
         '</div>' +
         '<footer class="ps-foot"><div class="ps-facts" data-p="bottom"></div>' +
           '<div class="ps-ctl"><div class="p-transport" data-p="transport"></div>' +
-            '<button class="ps-key" data-act="maponly" title="The map alone, for the whole-system view (M)"><kbd>M</kbd> Map</button>' +
-            '<button class="ps-key" data-act="recap" title="The run in four answers (R)"><kbd>R</kbd> Recap</button></div></footer>' +
+            '<button class="ps-key" data-act="maponly" title="The map alone, for the whole-system view (M)"><kbd>M</kbd><span class="kl">Map</span></button>' +
+            '<button class="ps-key" data-act="recap" title="The run in four answers (R)"><kbd>R</kbd><span class="kl">Recap</span></button></div></footer>' +
         '<div class="p-overlay" data-p="overlay" hidden></div>' +
       '</div>';
     this.f = {}; this.p = {};
@@ -176,6 +182,12 @@
     if (this.opts.onmode) this.opts.onmode(this.mode);
     if (this.topo) { this._drawGraph(); this._buildPanels(); }
     this.render();
+  };
+  /* The page's own replay controls (index.html's #controls) belong to Engineering: they sit under
+     the shared bar, so the mode switch is the first row's in both modes. */
+  Bench.prototype.mountControls = function (el) {
+    var eng = this.root.querySelector('.eng');
+    if (el && eng) eng.insertBefore(el, eng.firstChild);
   };
   // Kept for callers of the 09-29 API: overview/detailed map onto the new modes.
   Bench.prototype.setView = function (v) { this.setViewMode(v === 'detailed' ? 'engineering' : v === 'overview' ? 'presentation' : v); };
@@ -278,6 +290,7 @@
     this.f.inferred.hidden = this.p.inferred.hidden = this.f.download.hidden = !topo.inferred;
     // Beside a live app its own pane names it; elsewhere the room should know which app this is.
     this.p.appname.textContent = this.source === 'parent' ? '' : topo.app.name;
+    this.p.appname.hidden = !this.p.appname.textContent;
     this.p.appname.title = topo.app.description || '';
     this._drawGraph();
     this._buildPanels();
@@ -739,14 +752,9 @@
     }).join('');
   };
 
-  // A tile is labelled by the number its title starts with ("5. Software…"), else its position.
-  /* A tile's face: the title's own number ("5. Software…" → 5); among numbered siblings an
-     unnumbered item (e.g. a preamble) shows its initial instead of a position that would
-     collide with a real number; otherwise its position. */
+  // A tile's face is logic.tileFace: its title's number, else a word of its title, else its position.
   function tile(it, sel, idx, items) {
-    var NUM = /^\s*(\d+)/, own = String(it.title || it.id).match(NUM);
-    var numbered = (items || []).some(function (x) { return NUM.test(String(x.title || '')); });
-    var n = own || [null, numbered ? String(it.title || it.id).trim().charAt(0).toUpperCase() : idx != null ? idx + 1 : String(it.id).slice(0, 3)];
+    var n = [null, lg().tileFace(it, idx, items)];
     return '<button class="tile st-' + esc(it.state) + (it.relied ? ' relied' : '') + (sel ? ' sel' : '') + '" data-item="' + esc(it.id) + '" title="' +
       esc((it.title || it.id) + ' · ' + ({ could: 'could look at, not read this run', found: 'found by the search', given: 'given to the AI', relied: 'relied on' }[it.state] || it.state) + (it.relied ? ' · its answer rests on this' : '')) + '">' +
       esc(n[1]) + '</button>';
@@ -844,6 +852,15 @@
     return (sp > max * 0.5 ? cut.slice(0, sp) : cut).replace(/[\s,.;:–-]+$/, '') + '…';
   }
 
+  // A badge clipped (at a word, with "…") to the room its box has, measured at its own type.
+  function fitBadge(s, b) {
+    if (!s || !b || !_measure) return clipWords(s, 22);
+    _measure.font = '600 ' + b.font + 'px -apple-system, BlinkMacSystemFont, sans-serif';
+    if (_measure.measureText(s).width <= b.room) return s;
+    for (var n = s.length - 1; n > 6; n--) { var c = clipWords(s, n); if (_measure.measureText(c).width <= b.room) return c; }
+    return clipWords(s, 7);
+  }
+
   // ---- Presentation: the stage ------------------------------------------------------------
   /* The map is the stage (layout.js at a presentation geometry), the run's path lit and numbered
      in run order, past steps keeping a one-line badge. ONE callout bubble beside it, joined to the
@@ -853,6 +870,24 @@
      from the map and the events; nothing here knows any app. */
   var ACTOR_WORDS_P = { ai: 'The AI', rule: 'A rule', person: 'A person', app: 'The app' };
   var STAGE_BREAK = 600;   // map column width (px) below which the pane geometry is used
+
+  /* The stage's box size for this map: one line of name when every name fits the box's width at
+     the stage's type, else two (measured, so a long-named app gets taller boxes, never clipped
+     names or a badge pressed against them). Box padding and type are index.html's .snode rules. */
+  var BOX_TYPE = { stage: { font: 22, badge: 21, line: 1.18, padX: 24 + 16 }, pane: { font: 16, badge: 14, line: 1.18, padX: 17 + 10 } };
+  var _measure = null;
+  function boxGeom(topo, G, which) {
+    var T = BOX_TYPE[which] || BOX_TYPE.stage, ctx;
+    try { _measure = _measure || document.createElement('canvas').getContext('2d'); ctx = _measure; } catch (e) { ctx = null; }
+    if (!ctx) return G;
+    ctx.font = '600 ' + T.font + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    var room = G.w - T.padX - 8;   // a margin: the page's text runs a little wider than the canvas's
+    var two = topo.nodes.some(function (n) { return ctx.measureText(lg().plainLabel(n)).width > room; });
+    if (!two) return G;
+    var out = {}; Object.keys(G).forEach(function (k) { out[k] = G[k]; });
+    out.h = G.h + Math.round(T.font * T.line);
+    return out;
+  }
 
   Bench.prototype._pickStageGeom = function () {
     var side = this.p.side, stage = this.p.stage;
@@ -868,9 +903,31 @@
     var which = this._stageGeom = this._pickStageGeom();
     this.root.classList.toggle('ps-pane', which === 'pane');
     var G = which === 'stage' ? global.BenchLayout.STAGE_GEOM : global.BenchLayout.PANE_GEOM;
-    var Lay = this.layout = layout(topo, G), g = this.p.graph;
+    // Two box shapes: wide (names on one line, a shorter map) and narrow (names may take two lines,
+    // a taller map). The one drawn larger in the room the map has wins: a short wide stage takes
+    // wide boxes, a tall narrow pane beside an app takes narrow ones.
+    var sec0 = this.p.graph.parentNode, aw = Math.max(1, sec0.clientWidth - 8), ahh = Math.max(1, sec0.clientHeight - 8);
+    var best = null;
+    [G, Object.assign({}, G, { w: Math.round(G.w * 0.8) })].forEach(function (cand) {
+      var gc = boxGeom(topo, cand, which), lc = layout(topo, gc);
+      var kc = Math.min(aw / lc.W, global.innerWidth > 640 && ahh > 80 ? ahh / lc.H : Infinity);
+      if (!best || kc > best.k + 0.01) best = { k: kc, g: gc, lay: lc };
+    });
+    G = best.g;
+    // How many characters of badge fit beside the actor chip (in the pane the chip gives way to a
+    // badge: the box's stripe still says who does the step).
+    var T = BOX_TYPE[which] || BOX_TYPE.stage;
+    this._badge = { room: G.w - T.padX - (which === 'pane' ? 0 : 3.4 * T.font) - 24, font: T.badge };
+    var Lay = this.layout = best.lay, g = this.p.graph;
+    // Arrowheads in px (not stroke widths, which made the lit path's heads fill the whole gap),
+    // one per edge state so each head takes its line's colour.
+    var ah = which === 'stage' ? 12 : 9;
+    function head(id) {
+      return '<marker id="' + id + '" class="' + id + '" viewBox="0 0 10 10" refX="9.6" refY="5" markerUnits="userSpaceOnUse" markerWidth="' + ah + '" markerHeight="' + ah + '" orient="auto">' +
+        '<path d="M0.6,0.8 L9.6,5 L0.6,9.2 L2.8,5 z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linejoin="round"/></marker>';
+    }
     var svg = '<svg class="edges" width="' + Lay.W + '" height="' + Lay.H + '" viewBox="0 0 ' + Lay.W + ' ' + Lay.H + '">' +
-      '<defs><marker id="parr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>';
+      '<defs>' + head('parr') + head('parr-t') + head('parr-u') + '</defs>';
     topo.edges.forEach(function (e, i) {
       var r = Lay.edges[i];
       if (!r) return;
@@ -883,8 +940,9 @@
       var p = Lay.pos[n.id], actor = L.actorOf(n);
       return '<div class="gnode snode a-' + esc(actor) + ' kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" style="left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px" title="' + esc(L.plainLabel(n) + (n.description ? ': ' + n.description : '')) + '">' +
         '<span class="s-num" hidden></span>' +
-        '<div class="s-top"><div class="gl">' + esc(L.plainLabel(n)) + '</div><span class="actor actor-' + esc(actor) + '">' + esc(ACTOR_CHIP[actor] || actor) + '</span></div>' +
-        '<div class="s-badge"><span class="gp"></span></div></div>';
+        // The name gets the box's whole width; under it, who does the step and (once it has run) one badge.
+        '<div class="gl">' + esc(L.plainLabel(n)) + '</div>' +
+        '<div class="s-foot"><span class="actor actor-' + esc(actor) + '">' + esc(ACTOR_CHIP[actor] || actor) + '</span><span class="gp" hidden></span></div></div>';
     }).join('');
     g.innerHTML = '<div class="graph" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + boxes + '</div>';
     var gr = g.querySelector('.graph'), sec = g.parentNode;
@@ -971,9 +1029,13 @@
       if (steps.length && focus !== id && !S.starting[id]) badge = L.stepBadge(topo, S.events, id, steps, counts);
       // Finished: every box the run didn't reach says so, so none reads as still to come.
       else if (!steps.length && finished) badge = '– not needed';
-      var gp = n.querySelector('.gp'), shown = clipWords(badge, self._stageGeom === 'pane' ? 20 : 25);
+      // The badge's room: its box's footer, less the actor chip beside it (the pane hides the chip
+      // for a badge), less the badge's own padding.
+      var gp = n.querySelector('.gp'), foot = gp.parentNode, chipW = self._stageGeom === 'pane' ? 0 : chip.offsetWidth + 10;
+      var shown = fitBadge(badge, self._badge && foot.clientWidth ? { font: self._badge.font, room: foot.clientWidth - chipW - 24 } : self._badge);
       if (gp.textContent !== shown) { gp.textContent = shown; gp.title = shown === badge ? '' : badge; }
-      gp.parentNode.hidden = !badge;
+      gp.hidden = !badge;
+      gp.parentNode.classList.toggle('has-badge', !!badge);
     });
     g.querySelectorAll('.edge').forEach(function (e) {
       var i0 = +e.getAttribute('data-edge'), ed = topo.edges[i0], r = self.layout && self.layout.edges[i0];
@@ -1112,7 +1174,7 @@
       : /^Waiting/.test(oc.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' }
       : (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping') ? { cls: 'paused', text: 'Paused · → or PageDown: next step · ? keys' }
       : { cls: 'running', text: oc.text === 'Something went wrong' ? oc.text : 'Running' };
-    setHTML(p.status, '<span class="ps-pill st-' + st.cls + '"><i></i>' + esc(st.text) + '</span>');
+    setHTML(p.status, '<span class="ps-pill st-' + st.cls + '" title="' + esc(st.text) + '"><i></i><b>' + esc(st.text) + '</b></span>');
     setHTML(p.transport, this._transportHTML(finished, run, S));
     setHTML(p.bottom, run ? this._bottomHTML(run, events, finished) : '');
     this.root.querySelectorAll('.ps-key').forEach(function (b) {
@@ -1228,7 +1290,7 @@
       (s.asked ? '<i>→</i><span class="c-relied"><b>' + s.relied + '</b> relied on</span>' : '') + '</div>';
     var compact = s.items.length > 24;
     var tiles = '<div class="bb-tiles' + (compact ? ' compact' : '') + '">' + s.items.map(function (it, i) {
-      var face = tileFace(it, i, s.items);
+      var face = lg().tileFace(it, i, s.items);
       return '<button class="bb-tile st-' + esc(it.state) + (it.relied ? ' relied' : '') + (self.presItem === it.id ? ' sel' : '') + '" data-act="item" data-arg="' + esc(it.id) + '" title="' + esc(it.title) + '">' +
         '<span class="t-face">' + esc(face) + '</span><span class="t-title">' + esc(it.title) + '</span>' + (it.rank ? '<span class="t-rank">#' + it.rank + '</span>' : '') + '</button>';
     }).join('') + '</div>';
@@ -1242,14 +1304,6 @@
       (sel.text ? '<pre class="io">' + esc(sel.text) + '</pre>' : '') + '</div>' : '';
     return sec(s.title, nums + tiles + legend + item, 'bb-source');
   };
-  // A tile's short face: the number its title starts with ("5. …" → 5), else an initial among
-  // numbered siblings, else its position.
-  function tileFace(it, idx, items) {
-    var NUM = /^\s*(\d+)/, own = String(it.title || it.id).match(NUM);
-    if (own) return own[1];
-    var numbered = items.some(function (x) { return NUM.test(String(x.title || '')); });
-    return numbered ? String(it.title || it.id).trim().charAt(0).toUpperCase() : String(idx + 1);
-  }
 
   Bench.prototype._bubbleHTML = function (run, events, id, finished, S) {
     var L = lg(), topo = this.topo, self = this;
@@ -1382,24 +1436,37 @@
       '</div></div>';
   };
 
-  // The footer: time, cost in words, and the by-hand baseline (finished) or what it can never do.
+  /* The footer: two labelled rows. "This run": its time and cost in words. Then, once it's
+     finished, "By hand": the app's own baseline (a "name: value · …" list shown as one), or before
+     that "It can never": the map's never list. */
   Bench.prototype._bottomHTML = function (run, events, finished) {
-    var L = lg(), topo = this.topo, bits = [];
+    var L = lg(), topo = this.topo;
     // Live, an open gate keeps waiting by the wall clock; a replay's times are the recorded ones.
     var nowTs = null;
     if (this.source !== 'replay' && !this._local && !finished && run.gate && run.gate.state === 'waiting' && run.gate.seenAt != null)
       nowTs = run.gate.since + (wallNow() - run.gate.seenAt) / 1000;
     var split = events.length ? L.timeSplit(events, nowTs) : null;
-    if (split) bits.push(esc(finished || split.gated ? L.timeLine(split) : 'So far: ' + L.timeLine(split).replace(/^Took /, '')));
-    var cl = L.costLine(L.costInfo(events));
-    if (cl) bits.push(esc(cl));
+    function item(k, v) { return '<span class="fi">' + (k ? '<span class="fk">' + esc(k) + '</span> ' : '') + '<span class="fv">' + esc(v) + '</span></span>'; }
+    var facts = [];
+    if (split) {
+      if (split.gated) facts.push(item('AI work', L.secsWords(split.work)), item('Waiting for a person', L.secsWords(split.waiting)));
+      else facts.push(item(finished ? 'Took' : 'So far', L.secsWords(split.total)));
+    }
+    var info = L.costInfo(events);
+    if (info.calls) {
+      if (!info.priced) facts.push(item('AI cost', 'not known'));
+      else facts.push(item('AI cost', (info.known ? '' : 'at least ') + L.costWords(info.usd) + (info.known ? '' : ' (some calls carry no price)')));
+    }
+    function row(label, items) { return '<div class="frow"><span class="flabel">' + esc(label) + '</span><span class="fitems">' + items.join('') + '</span></div>'; }
+    var rows = facts.length ? [row('This run', facts)] : [];
     var base = finished ? L.baselineOf(events, topo) : null;
     var never = topo.never || [];
-    if (base) bits.push('<span class="muted">A person doing this by hand takes</span> ' + esc(base));
-    else if (never.length) bits.push('<span class="muted">It can never:</span> ' + never.map(esc).join(' · '));
-    var line = bits.join(' <span class="sep">·</span> ');
-    // The footer keeps room for two lines (index.html), so its growing never moves the stage.
-    return '<div class="p-bline">' + line + '</div>';
+    if (base) {
+      var pairs = L.labelledPairs(base);
+      rows.push(row('By hand', pairs ? pairs.map(function (x) { return item(x.k.replace(/^./, function (c) { return c.toUpperCase(); }), x.v); }) : [item('', base)]));
+    } else if (never.length) rows.push(row('It can never', never.map(function (x) { return item('', x); })));
+    // The footer keeps room for two rows (index.html), so its growing never moves the stage.
+    return rows.join('');
   };
 
   // "What the AI was given": the run's model calls, as plain blocks, with retrieved text marked.
