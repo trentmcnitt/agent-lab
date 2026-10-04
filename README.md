@@ -9,8 +9,7 @@
 
 <p align="center">
   <em>Debugging and presentation for AI apps</em><br>
-  <strong>Watch an AI app work, step by step, right beside it.</strong><br>
-  Its flowchart, the path each run takes, and the exact prompt behind each model call. Live on your machine, or replayed from a recording.
+  <strong>Watch an AI app work, step by step, right beside it.</strong>
 </p>
 
 <p align="center">
