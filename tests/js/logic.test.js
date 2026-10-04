@@ -230,8 +230,8 @@ test('time split separates AI work from waiting for a person', () => {
   assert.equal(s.gated, true);
   assert.ok(Math.abs(s.waiting - 2.4) < 0.01, String(s.waiting));
   assert.ok(Math.abs(s.work + s.waiting - s.total) < 1e-9);
-  assert.match(L.timeLine(s), /^AI work: .* · waiting for a person: 2\.4 s$/);
-  assert.match(L.timeLine(L.timeSplit(hello('hello-answer').events)), /^Took 1\.9 s$/);
+  assert.match(L.timeLine(s), /^AI work: .* · waiting for a person: 2\.4s$/);
+  assert.match(L.timeLine(L.timeSplit(hello('hello-answer').events)), /^Took 1\.9s$/);
   const open = e.events.filter((x) => x.event_type !== 'gate_resolved' && x.event_type !== 'run_finished' && x.node !== 'reply' && !(x.node === 'escalate' && x.event_type === 'step_finished'));
   const t1 = Math.max(...open.map((x) => x.ts));
   assert.ok(Math.abs(L.timeSplit(open, t1 + 30).waiting - (t1 + 30 - open.find((x) => x.event_type === 'gate_waiting').ts)) < 1e-6);

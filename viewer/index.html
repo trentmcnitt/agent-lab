@@ -507,22 +507,28 @@
   /* Calls inside a step: Presentation's numbered sequence */
   .bb-axis, .bb-call { display: grid; grid-template-columns: 44px minmax(0, 1fr) 210px 64px; gap: 14px; }
   .bb-axis { padding: 0 16px 6px; font: 400 13px/1 var(--mono); color: var(--text-3); }
-  .bb-axis .ax { display: flex; justify-content: space-between; }
+  .bb-axis .ax { position: relative; height: 14px; }
+  .bb-axis .ax span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .bb-axis .ax span:first-child { transform: none; } .bb-axis .ax span.end { transform: translateX(-100%); }
   .bb-seq { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .bb-call { align-items: center; padding: 8px 16px; border-top: 1px solid var(--border); }
   .bb-call:first-child { border-top: 0; }
   .bb-call .no { font: 600 17px/1 var(--mono); width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--k);
                  background: color-mix(in srgb, var(--k) 13%, transparent); border: 1px solid color-mix(in srgb, var(--k) 45%, transparent); }
-  .bb-call .w { font-size: 18px; color: var(--text); line-height: 1.3; overflow-wrap: anywhere; }
+  .bb-call .wd { min-width: 0; }
+  .bb-call .w { font-size: 18px; color: var(--text); line-height: 1.3; display: flex; align-items: baseline; gap: 0 8px; min-width: 0; }
+  .bb-call .wt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bb-call code { font: 400 .9em var(--mono); color: var(--text); background: rgba(255,255,255,.05); border-radius: 4px; padding: 0 4px; }
+  .bb-call .w .same { margin-left: auto; flex: none; }
   .bb-call .who2 { font: 400 13px/1 var(--mono); letter-spacing: .06em; color: var(--k); margin-right: 8px; vertical-align: 1px; text-transform: uppercase; }
-  .bb-call .r { font-size: 15.5px; color: var(--text-2); margin-top: 3px; line-height: 1.35; overflow-wrap: anywhere; }
+  .bb-call .r { font-size: 15.5px; color: var(--text-2); margin-top: 3px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bb-call .r .tk2 { font: 400 13.5px var(--mono); color: var(--text-3); }
   .bb-call .tk { position: relative; height: 12px; border-radius: 3px; background: #161A22; box-shadow: inset 0 0 0 1px #20242E; }
   .bb-call .tk span { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: var(--k); min-width: 3px; opacity: .95; }
   .bb-call .d { font: 400 15px/1 var(--mono); color: var(--text); text-align: right; }
   .bb-call.par { background: linear-gradient(90deg, rgba(125,180,255,.07), transparent 70%); box-shadow: inset 3px 0 0 var(--app); }
   .bb-call.d1 .w { padding-left: 18px; }
-  .same { font: 400 13px/1 var(--mono); color: var(--app); border: 1px solid color-mix(in srgb, var(--app) 40%, transparent); border-radius: 5px; padding: 2px 6px; margin-left: 8px; white-space: nowrap; display: inline-block; }
+  .same { font: 400 13px/1 var(--mono); color: var(--app); border: 1px solid color-mix(in srgb, var(--app) 40%, transparent); border-radius: 5px; padding: 3px 6px; white-space: nowrap; display: inline-block; align-self: center; }
   /* The recap */
   .rc .bb-body { margin-top: 18px; } .rc .bb-quote { font-size: 17px; }
   .rc .rc-k { font: 500 13px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--path); }
@@ -548,6 +554,8 @@
   .ps-facts .fi { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .ps-facts .fi + .fi { border-left: 1px solid var(--border); padding-left: 22px; }
   .ps-facts .fk { color: var(--text-3); } .ps-facts .fv { color: var(--text); font-weight: 500; }
+  .ps-facts .fv.unk { color: var(--text-2); font-weight: 400; font-style: italic; }
+  .bb-fp .mono { font-size: 15px; color: var(--text-2); } .bb-fp .muted { font-size: 15px; color: var(--text-3); }
   .ps-facts .fi.base { max-width: 22em; }
   .ps-strip { display: flex; align-items: center; gap: 10px; flex: 1 1 200px; min-width: 120px; padding-left: 22px; border-left: 1px solid var(--border); white-space: nowrap; }
   .ps-strip:empty { display: none; }
@@ -627,6 +635,9 @@
     .ps-map { flex: none; overflow: visible; }
     .ps-flowhead { padding-left: 0; padding-right: 8px; }
     .ps-map .graphwrap { flex: none; }
+    /* Stacked (beside an app, ~954 px): the panel first, so a step's story is on screen without a
+       scroll or a click as the run moves; the map follows under it. */
+    .ps-side { order: -1; }
     .ps-bubble { flex: none; overflow: visible; }
     .ps-bubble::before { position: absolute; }
     .ps-divider, .ps-notch, .ps-mk .wire { display: none !important; }
@@ -640,7 +651,6 @@
     .bb-call .d { grid-row: 1; grid-column: 3; }
     .bb-call .tk { grid-column: 2 / span 2; grid-row: 2; }
     .bb-axis { display: none; }
-    .ps-key .kl { display: none; }
     .p-pick > span { display: none; }
     .p-pick select { max-width: 14em; }
   }

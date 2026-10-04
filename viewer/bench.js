@@ -1027,6 +1027,17 @@
     var labels = this._edgeLabels(Lay, G);
     g.innerHTML = '<div class="graph" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + labels + boxes + '</div>';
     var gr = g.querySelector('.graph');
+    /* Lines that meet on their way into one step share their last runs: their dashes are measured from
+       that end, so where they overlap the dashes coincide (out of phase, they'd fill in to a solid line). */
+    var into = {};
+    Lay.edges.forEach(function (r) { if (r) into[r.to] = (into[r.to] || 0) + 1; });
+    g.querySelectorAll('svg.edges .edge').forEach(function (eg) {
+      var r = Lay.edges[+eg.getAttribute('data-edge')], ln = eg.querySelector('path.ln');
+      if (!r || !ln || into[r.to] < 2 || !ln.getTotalLength) return;
+      var P = 11, len = 0;
+      try { len = ln.getTotalLength(); } catch (e) { return; }
+      ln.style.strokeDashoffset = ((P - (len % P)) % P).toFixed(2);
+    });
     // Fit the whole map in its room, by width and height (stacked: by width only, up to its size).
     function fit() {
       var availW = g.clientWidth - 8 || Lay.W, availH = g.clientHeight - 8;
@@ -1046,7 +1057,11 @@
     fit();
     this._bindResize();
     g.querySelectorAll('.gnode').forEach(function (n) {
-      n.onclick = function () { var id = n.getAttribute('data-node'); self.selectedNode = self.selectedNode === id ? null : id; self.recapOpen = false; self.presItem = null; self.render(); };
+      n.onclick = function () {
+        var id = n.getAttribute('data-node'); self.selectedNode = self.selectedNode === id ? null : id; self.recapOpen = false; self.presItem = null; self.render();
+        // Stacked, the panel is above the map: bring it into view to say what was clicked.
+        if (self._stacked() && self.selectedNode) { var side = self._E().bubble; if (side && side.scrollIntoView) side.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+      };
     });
     // A path's own words on hover or tap: on a dashed path, why it wasn't taken.
     var tip = E.tip, sec = g.parentNode;
@@ -1096,15 +1111,27 @@
         if (Math.abs(a[0] - b[0]) < 0.5 && Math.abs(a[1] - b[1]) > 20) runs.push({ v: true, x: a[0], y0: Math.min(a[1], b[1]), y1: Math.max(a[1], b[1]) });
         else if (Math.abs(a[1] - b[1]) < 0.5 && Math.abs(a[0] - b[0]) > 20) runs.push({ v: false, y: a[1], x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]) });
       });
-      runs.sort(function (a, b) { return (a.v - b.v) || ((b.v ? b.y1 - b.y0 : b.x1 - b.x0) - (a.v ? a.y1 - a.y0 : a.x1 - a.x0)); });
+      // A run another line also draws (lines merging into one step) is a poor place for a label: it can't
+      // say which line it names. Runs of its own first.
+      runs.forEach(function (run) {
+        run.shared = Lay.edges.some(function (o, j) {
+          return o && j !== i && o.pieces.some(function (p) {
+            var a2 = p[0], b2 = p[3];
+            if (run.v) return Math.abs(a2[0] - b2[0]) < 0.5 && Math.abs(a2[0] - run.x) < 0.5 && Math.min(run.y1, Math.max(a2[1], b2[1])) - Math.max(run.y0, Math.min(a2[1], b2[1])) > 12;
+            return Math.abs(a2[1] - b2[1]) < 0.5 && Math.abs(a2[1] - run.y) < 0.5 && Math.min(run.x1, Math.max(a2[0], b2[0])) - Math.max(run.x0, Math.min(a2[0], b2[0])) > 12;
+          });
+        });
+      });
+      runs.sort(function (a, b) { return (a.shared - b.shared) || (a.v - b.v) || ((b.v ? b.y1 - b.y0 : b.x1 - b.x0) - (a.v ? a.y1 - a.y0 : a.x1 - a.x0)); });
       var spot = null;
       runs.some(function (run) {
         return [0.5, 0.35, 0.65, 0.22, 0.78].some(function (t) {
           var cands = [];
           if (run.v) {
             var y = run.y0 + (run.y1 - run.y0) * t;
-            cands.push({ x: run.x + 10, y: y, side: true, r: [run.x + 10, y - h / 2, run.x + 10 + w, y + h / 2] });
+            // On the line first (the plate breaks it, so the words belong to it), else beside it.
             cands.push({ x: run.x, y: y, side: false, r: [run.x - w / 2, y - h / 2, run.x + w / 2, y + h / 2] });
+            cands.push({ x: run.x + 10, y: y, side: true, r: [run.x + 10, y - h / 2, run.x + 10 + w, y + h / 2] });
           } else {
             var x = run.x0 + (run.x1 - run.x0) * t;
             if (run.x1 - run.x0 < w + 8) { if (t !== 0.5) return false; }
@@ -1306,11 +1333,11 @@
     setHTML(p.who, who.length ? '<b>' + esc(who[0]) + '</b>' + who.slice(1).map(function (x) { return ' · ' + esc(x); }).join('') : '');
     var oc = run ? L.outcome(topo, events) : { text: '', done: false };
     var st = !run ? { cls: 'idle', text: 'Waiting for a request' }
-      : oc.done ? { cls: /^Handed/.test(oc.text) ? 'handed' : /^(Stopped|Something)/.test(oc.text) ? 'bad' : 'ok', text: oc.text === 'Finished' ? 'Finished' : 'Finished · ' + oc.text }
+      : oc.done ? { cls: /^Handed/.test(oc.text) ? 'handed' : /^(Stopped|Something)/.test(oc.text) ? 'bad' : 'ok', text: pillWords(oc.text), full: oc.text }
       : /^Waiting/.test(oc.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' }
       : (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping') ? { cls: 'paused', text: 'Paused' + (S && S.focusNode && S.numbers && S.numbers[S.focusNode] ? ' at step ' + S.numbers[S.focusNode] : '') }
       : { cls: 'running', text: oc.text === 'Something went wrong' ? oc.text : 'Running' };
-    setHTML(p.status, '<span class="ps-pill st-' + st.cls + '" title="' + esc(st.text) + '"><i></i><b>' + esc(st.text) + '</b></span>');
+    setHTML(p.status, '<span class="ps-pill st-' + st.cls + '" title="' + esc(st.full || st.text) + '"><i></i><b>' + esc(st.text) + '</b></span>');
     // The map's heading: how many steps the app has, how many this run took.
     var nSteps = topo.nodes.length, took = S ? S.seq.length : 0;
     setHTML(p.flowhead, '<b>How it works</b><span>' + nSteps + ' steps' + (run ? ' · this run took ' + took : '') + '</span>' +
@@ -1538,17 +1565,25 @@
      words with a small bar on the step's own timeline; calls that ran at once marked. */
   Bench.prototype._sequenceHTML = function (seq) {
     var L = lg(), span = seq.span || 1;
+    // A tool's own name is set as code wherever the words name it.
+    var names = {};
+    seq.calls.forEach(function (c) { var t = (c.ev.data || {}).tool; if (c.kind === 'tool' && t) names[t] = true; (((c.ev.data || {}).tool_calls) || []).forEach(function (x) { if (x && x.name) names[x.name] = true; }); });
+    var nameRe = Object.keys(names).length ? new RegExp('(' + Object.keys(names).map(function (n) { return n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).sort(function (a, b) { return b.length - a.length; }).join('|') + ')', 'g') : null;
+    function coded(t) { var h = esc(t); return nameRe ? h.replace(nameRe, '<code>$1</code>') : h; }
     var rows = seq.calls.map(function (c) {
       var w = L.callWords(c, seq), k = c.kind === 'ai' ? 'var(--ai)' : 'var(--app)';
       var left = ((c.start - seq.start) / span * 100), width = c.timed ? ((c.end - c.start) / span * 100) : 0;
       return '<div class="bb-call' + (c.with.length ? ' par' : '') + (c.depth ? ' d1' : '') + '" style="--k:' + k + '"><div class="no">' + c.n + '</div>' +
-        '<div><div class="w"><span class="who2">' + (c.kind === 'ai' ? 'AI' : 'tool') + '</span>' + esc(w.title) + '</div>' +
-        '<div class="r">' + (w.result ? (c.kind === 'ai' ? '→ ' : '') + esc(w.result) : '') +
-        (c.with.length ? '<span class="same">same time as ' + c.with.join(', ') + '</span>' : '') + (w.tok ? ' · <span class="tk2">' + esc(w.tok) + '</span>' : '') + '</div></div>' +
+        '<div class="wd"><div class="w"><span class="who2">' + (c.kind === 'ai' ? 'AI' : 'tool') + '</span><span class="wt">' + coded(w.title) + '</span>' +
+        (c.with.length ? '<span class="same">same time as ' + c.with.join(', ') + '</span>' : '') + '</div>' +
+        '<div class="r">' + (w.result ? (c.kind === 'ai' ? '→ ' : '') + coded(w.result) : '') + (w.tok ? ' · <span class="tk2">' + esc(w.tok) + '</span>' : '') + '</div></div>' +
         '<div class="tk"><span style="left:' + left.toFixed(2) + '%;width:' + Math.max(0.6, width).toFixed(2) + '%"></span></div><div class="d">' + (c.timed ? L.fmtMs((c.end - c.start) * 1000) : '–') + '</div></div>';
     }).join('');
-    var mid = span / 2;
-    var axis = '<div class="bb-axis"><span></span><span></span><div class="ax"><span>0s</span><span>' + L.fmtMs(mid * 1000) + '</span><span>' + L.fmtMs(span * 1000) + '</span></div><span></span></div>';
+    var nt = niceTicks(span);
+    var axis = '<div class="bb-axis"><span></span><span></span><div class="ax">' + nt.ticks.map(function (t) {
+      var x = t / span * 100;
+      return x > 100.5 ? '' : '<span style="left:' + x.toFixed(2) + '%"' + (x > 90 ? ' class="end"' : '') + '>' + tickWord(t, nt.unit) + '</span>';
+    }).join('') + '</div><span></span></div>';
     // Calls that ran at once, and the answer that asked for them.
     var cap = '', groups = [], seen = {};
     seq.calls.forEach(function (c) {
@@ -1671,8 +1706,15 @@
       var pr = c.proposal;
       var stateW = pr.state === 'waiting' ? '<span class="wait">⏸ waiting for a person</span>' : pr.state === 'approved' ? '<span class="ok">✓ approved' + (pr.by ? ' by ' + esc(pr.by) : '') + '</span>' : '<span class="no">✕ not approved' + (pr.by ? ' by ' + esc(pr.by) : '') + '</span>';
       var fields = (pr.title ? [{ name: 'title', value: pr.title }] : []).concat(pr.description ? [{ name: 'description', value: pr.description }] : []).concat(pr.fields);
+      // The app's fingerprint of the exact action (a digest it sent with the proposal), when it sent one.
+      var gw = stepEvs.filter(function (e) { return e.event_type === 'gate_waiting'; })[0], fp = null;
+      (function find(o, d) {
+        if (fp || !o || typeof o !== 'object' || d > 2) return;
+        Object.keys(o).forEach(function (k) { var v = o[k]; if (!fp && /digest|sha256|fingerprint/i.test(k) && typeof v === 'string' && /^[0-9a-f]{16,}$/i.test(v)) fp = v; else find(v, d + 1); });
+      })(gw && gw.data, 0);
+      var fpRow = fp ? '<dt>fingerprint</dt><dd class="bb-fp"><span class="mono">sha256 ' + esc(fp.slice(0, 12)) + '…' + esc(fp.slice(-6)) + '</span><span class="muted"> the app’s digest of exactly this action</span></dd>' : '';
       var card = '<div class="bb-proposal' + (pr.state === 'waiting' ? ' waiting' : '') + '"><div class="th"><b>' + esc(pr.kicker || 'What it would do') + '</b>' + stateW + '</div>' +
-        (fields.length ? '<dl class="bb-fields">' + fields.map(function (f) { return '<dt>' + esc(String(f.name).toLowerCase()) + '</dt><dd>' + (f.name === 'description' ? foldText(f.value, self.moreOpen) : esc(f.value)) + '</dd>'; }).join('') + '</dl>' : '') + '</div>';
+        (fields.length || fpRow ? '<dl class="bb-fields">' + fields.map(function (f) { return '<dt>' + esc(String(f.name).toLowerCase()) + '</dt><dd>' + (f.name === 'description' ? foldText(f.value, self.moreOpen) : esc(f.value)) + '</dd>'; }).join('') + fpRow + '</dl>' : '') + '</div>';
       var lead = pr.state === 'waiting' ? 'What a person is asked to approve' : pr.state === 'approved' ? 'What a person approved' : 'What a person turned down';
       var foot = pr.state === 'waiting' ? '<div class="bb-inapp"><b>Approve</b> / <b>Deny</b> is pressed in the app, not here.</div>' +
         (c.ifNext.length ? '<div class="bb-next">' + c.ifNext.map(function (x) { return '<div><span>Next, if ' + (x.label ? '“' + esc(x.label) + '”' : 'it goes ahead') + ':</span> ' + esc(x.to) + '</div>'; }).join('') + '</div>' : '')
@@ -1840,7 +1882,7 @@
     if (seq) {
       var n = S.numbers[S.focus];
       return item('step ' + (n || ''), L.fmtMs(seq.span * 1000)) +
-        plain('<span class="fk">AI cost' + (seq.priced ? '' : '') + '</span> <span class="fv">' + (seq.priced ? esc(L.fmtUsd(seq.cost)) : 'not known') + '</span> · ' + seq.ai + ' call' + (seq.ai === 1 ? '' : 's') + ' + ' + seq.tools + ' tool' + (seq.tools === 1 ? '' : 's') +
+        plain('<span class="fk">AI cost</span> <span class="fv' + (seq.priced ? '' : ' unk') + '">' + (seq.priced ? esc(L.fmtUsd(seq.cost)) : 'not known') + '</span> · ' + seq.ai + ' call' + (seq.ai === 1 ? '' : 's') + ' + ' + seq.tools + ' tool' + (seq.tools === 1 ? '' : 's') +
               (seq.tokIn || seq.tokOut ? ' · ' + L.fmtNum(seq.tokIn) + '→' + L.fmtNum(seq.tokOut) + ' tok' : ''));
     }
     // Live, an open gate keeps waiting by the wall clock; a replay's times are the recorded ones.
@@ -1858,7 +1900,7 @@
       var tin = 0, tout = 0;
       events.forEach(function (e) { if (e.event_type === 'llm_call') { tin += (e.data || {}).input_tokens || 0; tout += (e.data || {}).output_tokens || 0; } });
       var tail = ' · ' + info.calls + ' call' + (info.calls === 1 ? '' : 's') + (tin || tout ? ' · ' + L.fmtNum(tin) + '→' + L.fmtNum(tout) + ' tok' : '');
-      if (!info.priced) out += plain('<span class="fk">AI cost</span> <span class="fv">not known</span>' + esc(tail));
+      if (!info.priced) out += plain('<span class="fk">AI cost</span> <span class="fv unk" title="The model calls carry no price, and the bench has none for this model: unknown, not free">not known</span>' + esc(tail));
       else out += plain('<span class="fk">AI cost</span> <span class="fv">' + (info.known ? '' : 'at least ') + esc(L.fmtUsd(info.usd)) + '</span>' + esc(tail));
     }
     // The app's by-hand estimate is in the recap (it's a sentence, not a number for this bar).

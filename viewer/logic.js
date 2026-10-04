@@ -713,8 +713,8 @@ export function timeSplit(events, nowTs) {
 export function secsWords(s) {
   if (s == null || isNaN(s)) return '–';
   if (s < 1) return 'under a second';
-  if (s < 10) return (Math.round(s * 10) / 10) + ' s';
-  if (s < 90) return Math.round(s) + ' s';
+  if (s < 10) return (Math.round(s * 10) / 10) + 's';
+  if (s < 90) return Math.round(s) + 's';
   if (s < 3600) return Math.round(s / 60) + ' min';
   return (Math.round(s / 360) / 10) + ' h';
 }
@@ -1813,15 +1813,21 @@ export function callWords(c, seq) {
   var d = c.ev.data || {};
   if (c.kind === 'ai') {
     var before = seq.calls.filter(function (x) { return x.kind === 'ai' && x.n < c.n; }).length;
-    var asked = (d.tool_calls || []).map(function (t) { return human(t.name || 'a tool'); });
+    var asked = (d.tool_calls || []).map(function (t) { return String(t.name || 'a tool'); });
     var last = !asked.length && !seq.calls.some(function (x) { return x.kind === 'ai' && x.n > c.n; });
     var title = before === 0 ? (asked.length ? 'Asked the AI what to do first' : 'Asked the AI') : last ? 'Asked the AI to finish' : 'Asked the AI again';
     var result = asked.length ? (asked.length > 1 ? 'it asked for ' + asked.length + ' things at once: ' : 'it asked for ') + asked.join(', ')
       : (last && seq.calls.length > 1 ? 'it wrote its answer and stopped' : 'it answered');
     return { title: title, result: result, tok: (d.input_tokens || d.output_tokens) ? fmtNum(d.input_tokens) + '→' + fmtNum(d.output_tokens) + ' tok' : '' };
   }
-  var args = shortValue(d.arguments, 48);
-  return { title: 'Used ' + human(d.tool || 'a tool') + (args ? ' ' + args : ''), result: d.result != null ? shortValue(d.result, 90) : (d.status ? String(d.status) : ''), tok: '' };
+  // A tool by its own name (or the first sentence of its description, when the app sent one), and
+  // its argument only when there is one plain value: never the arguments' names.
+  var a = d.arguments, one = null;
+  if (typeof a === 'string') { try { var j = JSON.parse(a); if (j && typeof j === 'object') a = j; } catch (e) { one = a; } }
+  if (a && typeof a === 'object' && !Array.isArray(a)) { var ks = Object.keys(a); if (ks.length === 1 && a[ks[0]] != null && typeof a[ks[0]] !== 'object') one = String(a[ks[0]]); }
+  var said = typeof d.description === 'string' && d.description.trim() ? d.description.trim().split(/(?<=[.!?])\s/)[0].replace(/[.\s]+$/, '') : null;
+  return { title: (said || 'Called ' + String(d.tool || 'a tool')) + (one != null ? ' “' + short(one.replace(/\s+/g, ' '), 40) + '”' : ''), tool: said ? null : String(d.tool || ''),
+           result: d.result != null ? shortValue(d.result, 90) : (d.status ? String(d.status) : ''), tok: '' };
 }
 
 // ---- a step's line on the map --------------------------------------------------------------------
@@ -1864,6 +1870,12 @@ export function stepMeta(topo, events, id, steps, opts) {
     var td = tool.data || {}, made = null;
     Object.keys(td).forEach(function (k) { var v = td[k]; if (!made && v && typeof v === 'object' && !Array.isArray(v) && v.id != null) made = v; });
     return { v: made ? String(made.id) : time, rest: [human(td.tool || 'tool')].concat(made ? [] : []) };
+  }
+  // A check: its mark and the short word for the way it went ("✓ holds up"), never its sentence.
+  var cr = node.kind === 'check' ? mine.filter(function (e) { return e.event_type === 'check_result'; }).pop() : null;
+  if (cr) {
+    var cst = checkEventState(cr), way = takenOut(topo, events, id).filter(function (ed) { return ed.from_branch || ed.when; })[0];
+    return { v: time, rest: [CHECK_SYM[cst] + ' ' + (way ? branchLabel(way) : { passed: 'passed', failed: 'didn’t pass', not_on_path: 'not needed' }[cst])] };
   }
   var badge = stepBadge(topo, events, id, steps);
   badge = String(badge || '').replace(/^→\s*/, '');

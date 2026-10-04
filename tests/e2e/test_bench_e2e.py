@@ -202,7 +202,7 @@ def test_shell_side_by_side_follows_the_app(page, site):
     assert "Approved" in bench.locator("[data-p=bubble]").inner_text()
     bench.locator(".ps-key[data-act=recap]").click()
     # The app's replay keeps the recording's times: the work reads as the bench's own replay does (7.x s).
-    assert re.search(r"AI work\s+7\.\d s", bench.locator("[data-p=bottom]").inner_text())
+    assert re.search(r"AI work\s+7\.\ds", bench.locator("[data-p=bottom]").inner_text())
     # Step through it here, paced like a recording, then back to following the app.
     bench.locator("[data-p=transport] [data-act=stepthrough]").click()
     bench.locator("[data-p=bubble] [data-act=play]").wait_for(timeout=20_000)     # paused at the first moment

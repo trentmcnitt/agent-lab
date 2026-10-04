@@ -405,7 +405,7 @@ def _content_events(span: dict, a: dict, node: str, t0: float, t1: float, failed
     elif op == "execute_tool":
         tc = {"tool": str(a.get("gen_ai.tool.name") or node), "latency_ms": round((t1 - t0) * 1000, 1)}
         for src, dst in (("gen_ai.tool.call.arguments", "arguments"), ("gen_ai.tool.call.result", "result"),
-                         ("gen_ai.tool.call.id", "call_id")):
+                         ("gen_ai.tool.call.id", "call_id"), ("gen_ai.tool.description", "description")):
             if a.get(src) is not None:
                 tc[dst] = _json(a[src]) if dst != "call_id" else a[src]
         out.append(ev(node, "tool_call", t1, tc))

@@ -27,8 +27,10 @@ test('agent loop: six calls on one step, by start, the two tools at once tied to
   assert.equal(s.ai, 3); assert.equal(s.tools, 3);
   const w = L.callWords(s.calls[2], s);
   assert.equal(w.title, 'Asked the AI again');
-  assert.match(w.result, /^it asked for 2 things at once: get user, create draft$/);
+  assert.match(w.result, /^it asked for 2 things at once: get_user, create_draft$/);
   assert.equal(L.callWords(s.calls[5], s).title, 'Asked the AI to finish');
+  assert.equal(L.callWords(s.calls[1], s).title, 'Called search_kb “vpn reset”');
+  assert.equal(L.callWords(s.calls[4], s).title, 'Called create_draft', 'never the arguments\' names');
   assert.match(L.callWords(s.calls[1], s).result, /^3 results · best: KB-114 “Resetting your SecureLink VPN profile”$/);
 });
 

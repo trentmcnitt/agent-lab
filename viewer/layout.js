@@ -206,6 +206,9 @@
       var x1 = a.x + G.w / 2, y1 = a.y + G.h, x2 = b.x + G.w / 2, y2 = b.y;
       var ls = row[e.from], lt = row[e.to];
       if (lt === ls + 1 && G.ortho) {
+        // snap: a branch to a step off to one side leaves the bottom on that side (above its target,
+        // as far as the box allows), so two branches out of one step don't share one stem.
+        if (G.snap) { var m = Math.max(2 * (G.radius || 8), G.w * 0.15); x1 = Math.min(Math.max(x2, a.x + m), a.x + G.w - m); }
         // Down from the source, across the middle of the gap, down into the target. Every line in a
         // gap turns at the same height, so the lines leaving one step share one trunk (and the lit
         // path is drawn over its own line, never beside it on a lane of its own).
