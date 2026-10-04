@@ -102,7 +102,11 @@
         '<span class="p-inferred" data-p="inferred" hidden>map inferred from the trace</span>' +
         '<span class="tb-pick" data-p="picker"></span>' + toggle +
       '</header>' +
+      // Engineering (S4): the same map as Presentation on the left; on the right a docked panel led by
+      // the step's card (its numbers, then every model and tool call inside it as a waterfall), the
+      // run's other panels folded under it; the event log is a drawer at the bottom.
       '<div class="eng">' +
+      '<div class="eng-top" data-f="top">' +
       '<header class="bh">' +
         '<span class="app" data-f="app" hidden>bench</span>' +
         '<span class="badge" data-f="mode">–</span>' +
@@ -113,17 +117,15 @@
         '<select data-f="runs" title="Every run the bench has seen"></select>' +
       '</header>' +
       '<div class="meterbar mono" data-f="meters"></div>' +
-      '<div class="bgrid">' +
-        '<section class="col graphcol">' +
-          '<div class="stitle"><b>Flow</b> <span>every step the app can take · lit = this run · dashed = not taken · click a step</span></div>' +
-          '<div class="graphwrap" data-f="graph"></div>' +
-          '<div class="stitle"><b>Timeline</b> <span>how long each step took</span></div>' +
-          '<div class="waterfall" data-f="waterfall"></div>' +
-        '</section>' +
-        '<section class="col panelcol" data-f="panels"></section>' +
       '</div>' +
-      '<section class="logcol">' +
-        '<div class="stitle"><b>Event log</b> <span>every event received, in order</span> <span class="muted" data-f="logcount"></span></div>' +
+      '<div class="bgrid" data-f="stage">' +
+        '<section class="col graphcol ps-map"><div class="ps-flowhead" data-f="flowhead"></div><div class="graphwrap" data-f="graph"></div><div class="edgetip" data-f="tip" hidden></div></section>' +
+        '<section class="col panelcol" data-f="panels"></section>' +
+        '<div class="ps-divider" data-f="divider" hidden></div><div class="ps-notch" data-f="notch" hidden></div>' +
+        '<div class="ps-mk" data-f="mk" hidden><div class="wire"></div><div class="tab"></div></div>' +
+      '</div>' +
+      '<section class="logcol" data-f="logcol">' +
+        '<button class="logtoggle" data-f="logtoggle" title="Every event received, in order"><b>Event log</b> <span data-f="logcount"></span><span class="lt-arrow" data-f="logarrow">▴ show</span></button>' +
         '<div class="log mono" data-f="log"></div>' +
       '</section>' +
       '</div>' +
@@ -154,6 +156,33 @@
     // Delegated clicks for everything Presentation redraws.
     this.root.querySelector('.pres').addEventListener('click', function (e) { self._presClick(e); });
     this.f.download.onclick = function () { self.downloadMap(); };
+    // The event log is a drawer: shut, it is one line; open, it takes the bottom third.
+    this.f.logtoggle.onclick = function () { self.logOpen = !self.logOpen; self._applyLog(); };
+    this._applyLog();
+    // Engineering's panel: a step's waterfall rows open and shut; a panel's title folds it.
+    this.engOpen = { _io: true };
+    this.f.panels.addEventListener('click', function (ev) {
+      var sm = ev.target.closest('.wfr > summary');
+      if (sm) {
+        ev.preventDefault();
+        var k = sm.parentNode.getAttribute('data-k');
+        self.wfOpen = self.wfOpen || {};
+        self.wfOpen[k] = !sm.parentNode.open;
+        sm.parentNode.open = self.wfOpen[k];
+        var body = sm.closest('.pbody'); if (body) body._h = null;
+        self._placeMarker();
+        return;
+      }
+      var pt = ev.target.closest('.ptitle');
+      if (pt && !ev.target.closest('.rawbtn')) {
+        var el = pt.parentNode, id = el.getAttribute('data-panel');
+        self.engOpen[id] = !el.classList.contains('open');
+        el.classList.toggle('open', self.engOpen[id]);
+        return;
+      }
+      if (ev.target.closest('[data-act=clearsel]')) { self.selectedNode = null; self.render(); }
+    });
+    this.f.panels.addEventListener('scroll', function () { self._placeMarker(); });
     document.addEventListener('keydown', function (e) { self._presKey(e); });
     var res = this._resolveMode();
     this.setViewMode(res.mode, false);
@@ -186,8 +215,13 @@
   /* The page's own replay controls (index.html's #controls) belong to Engineering: they sit under
      the shared bar, so the mode switch is the first row's in both modes. */
   Bench.prototype.mountControls = function (el) {
-    var eng = this.root.querySelector('.eng');
-    if (el && eng) eng.insertBefore(el, eng.firstChild);
+    var top = this.f.top;
+    if (el && top) top.insertBefore(el, top.firstChild);
+  };
+  Bench.prototype._applyLog = function () {
+    this.f.logcol.classList.toggle('open', !!this.logOpen);
+    this.f.logarrow.textContent = this.logOpen ? '▾ hide' : '▴ show';
+    if (this._fit && this.mode === 'engineering') { this._fit(); this._placeMarker(); }
   };
   // Kept for callers of the 09-29 API: overview/detailed map onto the new modes.
   Bench.prototype.setView = function (v) { this.setViewMode(v === 'detailed' ? 'engineering' : v === 'overview' ? 'presentation' : v); };
@@ -400,83 +434,54 @@
     this._raf = (global.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(function () { self._raf = null; self.render(); });
   };
 
+  /* Both modes draw the same map (the stage): Presentation's in .pres, Engineering's in .eng. Only the
+     mode on screen has one, so the SVG ids (#parr-t, #pglow) are never on the page twice. */
   Bench.prototype._drawGraph = function () {
-    if (this.mode === 'presentation') { this.f.graph.innerHTML = ''; this._drawStage(); return; }
-    var G = global.BenchLayout.GEOM;
-    var Lay = this.layout = layout(this.topo, G), topo = this.topo, self = this;
-    var g = this.f.graph;
-    this.p.graph.innerHTML = '';
-    var svg = '<svg class="edges" width="' + Lay.W + '" height="' + Lay.H + '" viewBox="0 0 ' + Lay.W + ' ' + Lay.H + '">' +
-      '<defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>';
-    // Every edge comes routed from the layout: short ones curve through the gap between rows,
-    // long ones run down a channel clear of every box (layout.js).
-    topo.edges.forEach(function (e, i) {
-      var r = Lay.edges[i];
-      if (!r) return;
-      var name = global.BenchLayout.edgeText(topo, r, false);   // parallel branches: one line, joined names
-      svg += '<g class="edge' + (r.routed ? ' routed' : '') + '" data-edge="' + i + '"><path d="' + r.d + '" marker-end="url(#arr)"/>' +
-        (name && r.label ? '<text x="' + r.label.x + '" y="' + r.label.y + '"' + (r.label.anchor === 'end' ? ' text-anchor="end"' : '') + '>' + esc(name) + '</text>' : '') + '</g>';
-    });
-    svg += '</svg>';
-    var boxes = topo.nodes.map(function (n) {
-      var p = Lay.pos[n.id];
-      var style = 'left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px';
-      return '<div class="gnode kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" style="' + style + '" title="' + esc((n.label || n.id) + (n.description ? ': ' + n.description : '')) + '">' +
-        '<div class="gl">' + esc(n.label || n.id) + '</div><div class="gm mono"></div><div class="gp"></div></div>';
-    }).join('');
-    g.innerHTML = '<div class="graph" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + boxes + '</div><div class="unmapped" data-f="unmapped"></div>';
-    var gr = g.querySelector('.graph');
-    // Shrink the whole flow to fit the column's width rather than scroll.
-    function fit() {
-      var availW = g.clientWidth || Lay.W, k = Math.max(0.35, Math.min(1, availW / Lay.W));
-      gr.style.transform = k < 1 ? 'scale(' + k + ')' : '';
-      gr.style.transformOrigin = 'top left';
-      gr.style.marginLeft = Math.max(0, (availW - Lay.W * k) / 2) + 'px';
-      gr.style.marginBottom = k < 1 ? (-(1 - k) * Lay.H) + 'px' : '';
-    }
-    this._fit = fit;
-    fit();
-    this._bindResize();
-    this._unmapped = g.querySelector('.unmapped');
-    g.querySelectorAll('.gnode').forEach(function (n) {
-      n.onclick = function () { var id = n.getAttribute('data-node'); self.selectedNode = self.selectedNode === id ? null : id; self.ioPick = null; self.render(); };
-    });
+    (this.mode === 'presentation' ? this.f.graph : this.p.graph).innerHTML = '';
+    this._drawStage();
   };
   Bench.prototype._bindResize = function () {
     var self = this;
     if (this._fitBound) return;
     this._fitBound = true;
     global.addEventListener('resize', function () {
-      // Presentation picks its geometry from the stage's size: crossing a breakpoint redraws the map.
-      if (self.mode === 'presentation' && self.topo && self._stageGeom !== self._pickStageGeom()) { self._drawStage(); self.render(); return; }
+      // The geometry is picked from the map's room: crossing a breakpoint redraws the map.
+      if (self.topo && self._stageGeom !== self._pickStageGeom()) { self._drawStage(); self.render(); return; }
       if (self._fit) self._fit();
-      if (self.mode === 'presentation') self._placeMarker();
+      self._placeMarker();
     });
   };
 
+  /* Engineering's panels, in the docked panel under the step's card: what the AI was given (open),
+     then the sources, the checks, the map's own checks, the run, the step timeline and the app's own
+     panels, each folded until its title is clicked. */
   Bench.prototype._buildPanels = function () {
     var box = this.f.panels;
     box.innerHTML = '';
     this.panelEls = {};
     if (!this.topo) return;
     var panels = (this.topo.panels || []).slice();
+    panels.unshift({ id: '_timeline', title: 'Timeline · how long each step took', event_types: [] });
+    panels.unshift({ id: '_run', title: 'This run · the request and the final output', event_types: ['run_started', 'run_finished'] });
+    panels.unshift({ id: '_mapchecks', title: 'Checks on this map · do the map’s words still match the code?', event_types: [] });
     panels.unshift({ id: '_checks', title: 'Checks · how it was checked, with evidence', event_types: ['check_result'] });
     panels.unshift({ id: '_sources', title: 'Sources · could look at / given to the model / relied on', event_types: ['retrieval'] });
     panels.unshift({ id: '_io', title: 'Model I/O · exactly what the model was given, and what it returned', event_types: ['llm_call'] });
     panels.unshift({ id: '_node', title: 'Selected step', event_types: ['*'], mode: 'append' });
-    panels.unshift({ id: '_mapchecks', title: 'Checks on this map · do the map’s words still match the code?', event_types: [] });
-    panels.unshift({ id: '_run', title: 'This run', event_types: ['run_started', 'run_finished'] });
     var self = this;
     panels.forEach(function (p) {
       var custom = p.story || p.fields;
-      var e = el('div', 'panel' + (p.story ? ' storied' : ''), '<div class="ptitle"><span>' + esc(p.title) + (p.audience && p.audience !== 'both' ? ' <span class="aud">' + esc(p.audience) + '</span>' : '') + '</span><span class="pright">' +
+      var open = p.id === '_node' || !!self.engOpen[p.id];
+      var e = el('div', 'panel' + (p.id === '_node' ? ' stepcard' : '') + (p.story ? ' storied' : '') + (open ? ' open' : ''), '<div class="ptitle"><span class="pt"><i class="chev"></i>' + esc(p.title) + (p.audience && p.audience !== 'both' ? ' <span class="aud">' + esc(p.audience) + '</span>' : '') + '</span><span class="pright">' +
         (custom ? '<button class="rawbtn" title="Show every field of every event this panel collects">raw</button>' : '') +
         '<span class="pcount mono"></span></span></div><div class="pbody"><span class="muted">–</span></div>');
+      e.setAttribute('data-panel', p.id);
       box.appendChild(e);
       var P = self.panelEls[p.id] = { spec: p, el: e, body: e.querySelector('.pbody'), count: e.querySelector('.pcount'), raw: false };
       var rb = e.querySelector('.rawbtn');
       if (rb) rb.onclick = function () { P.raw = !P.raw; rb.classList.toggle('on', P.raw); self.render(); };
     });
+    this.f.waterfall = this.panelEls._timeline.body;
   };
 
   Bench.prototype.render = function () {
@@ -504,11 +509,13 @@
     // The bar's status pill is the same in both modes (Engineering reads it from every event it has).
     var oc0 = run ? lg().outcome(this.topo, run.events) : null;
     var st0 = !run ? { cls: 'idle', text: 'Waiting for a request' }
-      : oc0.done ? { cls: /^Handed/.test(oc0.text) ? 'handed' : /^(Stopped|Something)/.test(oc0.text) ? 'bad' : 'ok', text: oc0.text === 'Finished' ? 'Finished' : 'Finished · ' + oc0.text }
+      : oc0.done ? { cls: /^Handed/.test(oc0.text) ? 'handed' : /^(Stopped|Something)/.test(oc0.text) ? 'bad' : 'ok', text: pillWords(oc0.text), full: oc0.text }
       : /^Waiting/.test(oc0.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' } : { cls: 'running', text: 'Running' };
-    setHTML(this.p.status, '<span class="ps-pill st-' + st0.cls + '" title="' + esc(st0.text) + '"><i></i><b>' + esc(st0.text) + '</b></span>');
+    setHTML(this.p.status, '<span class="ps-pill st-' + st0.cls + '" title="' + esc(st0.full || st0.text) + '"><i></i><b>' + esc(st0.text) + '</b></span>');
+    var nSteps0 = this.topo.nodes.length;
     if (!run) {
       this.f.meters.textContent = 'waiting for events…';
+      setHTML(this.f.flowhead, '<b>How it works</b><span>' + nSteps0 + ' steps</span>');
       return;
     }
     var L = lg();
@@ -534,11 +541,30 @@
       (base ? m(esc(base), 'by hand (the app’s estimate)') : '') +
       '<span class="status st-' + esc(st) + '">' + esc(stTxt) + '</span>';
 
-    this._renderGraph(run);
+    var S = this._renderStage(run);
+    this._lastShown = S;
+    setHTML(this.f.flowhead, '<b>How it works</b><span>' + nSteps0 + ' steps · this run took ' + S.seq.length + '</span>' +
+      '<span class="ps-legend"><span><i class="lit"></i>this run</span><span><i class="dash"></i>not taken</span></span>');
     this._renderWaterfall(run);
-    this._renderPanels(run);
+    this._renderPanels(run, S);
     this._renderLog(run);
+    var fa = S.focus ? L.actorOf(L.nodeOf(this.topo, S.focus), S.events) : null;
+    this.f.stage.className = 'bgrid' + (fa ? ' a-' + fa : '');
+    if (this._fit) this._fit();
+    this._placeMarker();
   };
+  /* The status pill's words: short, so the bar never reflows when the run ends (the whole outcome is
+     its tooltip and the last step's headline). */
+  function pillWords(t) {
+    t = String(t || '');
+    if (/^Done\b.*approved by a person/.test(t)) return 'Finished · approved by a person';
+    if (/^Done\b/.test(t)) return 'Finished · done';
+    if (/^Stopped: a person said no/.test(t)) return 'Stopped · a person said no';
+    if (/^Something went wrong/.test(t)) return 'Something went wrong';
+    if (/^Stopped/.test(t)) return t;
+    if (t === 'Finished' || t.length > 28) return 'Finished';
+    return 'Finished · ' + t;
+  }
 
   // When each top-level step is shown starting and finishing (see MIN_LIT_MS), in wall time.
   function schedule(run) {
@@ -593,55 +619,6 @@
              starting: starting, finished: finished, caught: caught, events: events };
   };
 
-  Bench.prototype._renderGraph = function (run) {
-    var self = this, g = this.f.graph, L = lg();
-    var S = this._shown(run), now = S.now, ran = S.ran, finished = S.finished;
-    var taken = this._taken(S);
-    g.querySelectorAll('.gnode').forEach(function (n) {
-      var id = n.getAttribute('data-node'), steps = ran[id] || [];
-      var last = steps[steps.length - 1];
-      var node = L.nodeOf(self.topo, id) || {};
-      var cls = 'gnode kind-' + (node.kind || 'step');
-      var shownOpen = last && last.ve > now;
-      if (!steps.length) cls += finished ? ' untaken' : ' idle';
-      else if (last.status === 'error' && !shownOpen) cls += ' error';
-      else if (steps.every(function (s) { return s.status === 'skipped'; })) cls += ' skipped';
-      else if (run.gate && run.gate.node === id && run.gate.state === 'waiting' && !(run.status && finished)) cls += ' gatewait';
-      else if (shownOpen) cls += ' active';
-      else cls += ' done';
-      if (self.selectedNode === id) cls += ' selected';
-      if (n.className !== cls) n.className = cls;
-      var gm = n.querySelector('.gm');
-      if (gm) {
-        var m = '';
-        if (steps.length) {
-          var cost = 0, tokIn = 0, tokOut = 0;
-          steps.forEach(function (s) { s.events.forEach(function (e) { if (e.event_type === 'llm_call') { cost += Number(e.data.cost_usd || 0); tokIn += e.data.input_tokens || 0; tokOut += e.data.output_tokens || 0; } }); });
-          var ms;
-          if (last.arrEnd == null) ms = now - last.arr;   // still running: a live timer
-          else ms = steps.reduce(function (a, s) { return a + (s.latency != null ? s.latency : s.end != null ? (s.end - s.start) * 1000 : 0); }, 0);
-          m = fmtMs(ms) + (last.arrEnd == null ? '…' : '') + (steps.length > 1 ? ' ×' + steps.length : '') + (tokIn ? ' · ' + fmtTok(tokIn) + '→' + fmtTok(tokOut) + ' tok' : '') + (cost ? ' · ' + fmtUsd(cost) : '');
-        }
-        gm.textContent = m;
-      }
-      n.querySelector('.gp').textContent = shownOpen ? '' : L.preview(steps, 'engineering', null, node.kind === 'check', self.topo);
-    });
-    g.querySelectorAll('.edge').forEach(function (e) {
-      var i0 = +e.getAttribute('data-edge'), ed = self.topo.edges[i0], r = self.layout && self.layout.edges[i0];
-      var k = ed.from + '>' + ed.to;
-      var described = ((r && r.edges) || [i0]).some(function (j) { return self.topo.edges[j] && self.topo.edges[j].description; });
-      var c = 'edge' + (taken[k] ? ' taken' + (S.openNode === ed.to ? ' flowing' : '') : finished ? ' untaken' : '') + (described ? ' described' : '');
-      if (e.getAttribute('class') !== c) e.setAttribute('class', c);
-    });
-    var unm = Object.keys(ran).filter(function (n) { return !L.nodeOf(self.topo, n); });
-    if (this._unmapped) setHTML(this._unmapped, unm.length ? '<span class="muted">not in the manifest:</span> ' + unm.map(function (n) { return '<span class="tag">' + esc(n) + '</span>'; }).join(' ') : '');
-    // Keep drawing while anything is shown running (live timers) or waiting to be shown.
-    var busy = S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; });
-    clearTimeout(this._tick);
-    if (busy) this._tick = setTimeout(function () { self.render(); }, 100);
-    return S;
-  };
-
   // The edges this run is shown to have taken (a nested step lights the edge into it).
   Bench.prototype._taken = function (S) {
     var ran = S.ran, taken = lg().takenEdges(this.topo, S.events.filter(function (e) { return ran[e.node] || e.node === '_run'; }), S.seq);
@@ -669,15 +646,18 @@
     return { run: run, h: lg().helpersFor(mode), all: evs, mode: mode, topo: this.topo };
   };
 
-  Bench.prototype._renderPanels = function (run) {
+  Bench.prototype._renderPanels = function (run, S) {
     var self = this, L = lg();
     Object.keys(this.panelEls).forEach(function (pid) {
       var P = self.panelEls[pid], spec = P.spec, evs;
       if (pid === '_node') {
-        P.el.classList.toggle('empty', !self.selectedNode);
-        if (!self.selectedNode) { P.body.innerHTML = '<span class="muted">Click any step in the flow to see what it did.</span>'; P.count.textContent = ''; return; }
-        self._renderStep(P, run); return;
+        // The step the map points at: the one clicked, else the one the run is on.
+        var id = S && S.focus;
+        P.el.classList.toggle('empty', !id);
+        if (!id) { setHTML(P.body, '<span class="muted">Click any step in the map to see what it did.</span>'); P.count.textContent = ''; return; }
+        self._renderStep(P, run, id, S); return;
       }
+      if (pid === '_timeline') { P.count.textContent = ''; return; }
       if (pid === '_sources') { self._renderSourcesEng(P, run); return; }
       if (pid === '_checks') { self._renderChecksEng(P, run); return; }
       if (pid === '_mapchecks') { self._renderMapChecks(P, run); return; }
@@ -767,68 +747,106 @@
       esc(n[1]) + '</button>';
   }
 
-  // The Selected step panel: the step's own header (what its box shows), then its input and
-  // output, then every event it reported.
-  Bench.prototype._renderStep = function (P, run) {
-    var self = this, id = this.selectedNode, L = lg();
+  /* Engineering's step card, first in the docked panel: the step's badge and name, its numbers in one
+     strip (step and node ids, its model and tool calls, tokens, cost, time), what the step is for, then
+     every call inside it as a waterfall by start time; its input and output and every event it
+     reported fold under it. */
+  Bench.prototype._renderStep = function (P, run, id, S) {
+    var self = this, L = lg();
     var node = L.nodeOf(this.topo, id) || { id: id };
     var steps = (run.nodeSteps[id] || []).map(function (sid) { return run.steps[sid]; }).filter(function (s) { return !s.parent; });
     var evs = run.events.filter(function (e) { return e.node === id; });
+    var actor = L.actorOf(node, run.events), bn = badgeOf(S, id), fold = this.foldOpen || {};
     P.count.textContent = '';
+    var last = steps[steps.length - 1];
+    var waiting = run.gate && run.gate.node === id && run.gate.state === 'waiting' && !run.status;
+    var ms = steps.reduce(function (a, s) { return a + (s.latency != null ? s.latency : s.end != null ? (s.end - s.start) * 1000 : 0); }, 0);
+    var tag = !steps.length ? (run.status ? 'not reached this run' : 'not reached yet') : waiting ? 'waiting for a person' : last && last.end == null ? 'running' : 'done · ' + fmtMs(ms);
+    var head = '<div class="es-head a-' + esc(actor) + '"><span class="bb-num' + (S.numbers && S.numbers[id] ? '' : ' off') + '">' + esc(bn || '·') + '</span>' +
+      '<span class="es-name">' + esc(L.plainLabel(node, id)) + '</span><span class="bb-who">' + esc(ACTOR_CHIP[actor] || actor) + '</span>' +
+      '<span class="bb-tag t-' + (!steps.length ? 'not_needed' : waiting ? 'waiting' : last && last.end == null ? 'now' : 'done') + '"><i></i>' + esc(tag) + '</span>' +
+      (this.selectedNode ? '<button class="p-x" data-act="clearsel" title="Follow the run again (Esc)">✕</button>' : '') + '</div>';
+    var desc = node.description ? '<p class="es-desc">' + esc(node.description) + '</p>' : '';
     if (!steps.length) {
-      P.body.innerHTML = '<div class="stephead"><b>' + esc(node.label || id) + '</b></div>' + (node.description ? '<div class="note">' + esc(node.description) + '</div>' : '') +
-        '<div class="note">' + (run.status ? 'This step didn’t run this time.' : 'Not reached yet.') + '</div>';
+      setHTML(P.body, head + metas(['node <b>' + esc(id) + '</b>', '<b>' + esc(node.kind || 'step') + '</b>']) + desc +
+        '<p class="es-none">' + (run.status ? 'This step didn’t run this time.' : 'Not reached yet.') + '</p>');
       return;
     }
-    var ms = steps.reduce(function (a, s) { return a + (s.latency != null ? s.latency : s.end != null ? (s.end - s.start) * 1000 : 0); }, 0);
-    var cost = 0, tin = 0, tout = 0, model = null;
-    evs.forEach(function (e) { if (e.event_type === 'llm_call') { cost += Number(e.data.cost_usd || 0); tin += e.data.input_tokens || 0; tout += e.data.output_tokens || 0; model = e.data.model; } });
-    var head = '<div class="stephead"><b>' + esc(node.label || id) + '</b>' + (node.plain_label ? ' <span class="muted">' + esc(node.plain_label) + '</span>' : '') +
-      '<span class="tag">' + esc(node.kind || 'step') + ' · ' + esc(L.actorOf(node)) + '</span></div>' +
-      (node.description ? '<div class="note">' + esc(node.description) + '</div>' : '') +
-      '<div class="stepstats mono"><span><b>' + fmtMs(ms) + '</b> took</span>' + (steps.length > 1 ? '<span><b>' + steps.length + '</b> times</span>' : '') +
-      (model ? '<span><b>' + esc(model) + '</b></span><span><b>' + fmtNum(tin) + '</b> tokens in</span><span><b>' + fmtNum(tout) + '</b> out</span>' : '') +
-      (cost ? '<span><b>' + fmtUsd(cost) + '</b></span>' : '') + '</div>';
-    var pv = L.preview(steps, 'engineering');
-    if (pv) head += '<div class="stepresult">' + esc(pv) + '</div>';
-    // The model and tool calls inside the step, as a waterfall by start time (every row opens).
+    var seqs = steps.map(function (s) { return L.callSequence(run.events, s.id); });
+    var nAi = 0, nTool = 0, tin = 0, tout = 0, cost = 0, priced = false, model = null;
+    seqs.forEach(function (q) { nAi += q.ai; nTool += q.tools; });
+    evs.forEach(function (e) { var d = e.data || {}; if (e.event_type === 'llm_call') { tin += d.input_tokens || 0; tout += d.output_tokens || 0; if (d.cost_usd != null) { cost += Number(d.cost_usd); priced = true; } model = d.model || model; } });
+    var strip = metas(['step <b>' + esc(last.id) + '</b>' + (steps.length > 1 ? ' ×' + steps.length : ''), 'node <b>' + esc(id) + '</b>',
+      nAi || nTool ? '<b>' + nAi + '</b> chat · <b>' + nTool + '</b> tool' : '<b>' + esc(node.kind || 'step') + '</b> · no calls',
+      model && nAi === 1 ? '<b>' + esc(model) + '</b>' : '',
+      tin || tout ? '<b>' + fmtNum(tin) + '</b>→<b>' + fmtNum(tout) + '</b> tok' : '', priced ? '<b>' + fmtUsd(cost) + '</b>' : nAi ? 'cost <b>—</b>' : '',
+      '<b>' + fmtMs(ms) + '</b>']);
     var wf = steps.map(function (s) { return self._waterfallHTML(run, s); }).join('');
+    var pv = L.preview(steps, 'engineering');
+    var result = pv ? '<div class="es-result"><span>result</span>' + esc(pv) + '</div>' : '';
     var io = '';
     evs.forEach(function (e) {
       if (e.event_type === 'step_started' && e.data && e.data.input != null) io += ioBlock('input', L.ioText(e.data.input));
       if (e.event_type === 'step_finished' && e.data && e.data.output != null) io += ioBlock('output', L.ioText(e.data.output), 'out');
     });
-    if (model) io += '<div class="note">Its model call, word for word, is in <b>Model I/O</b> below.</div>';
-    var raw = '<div class="iolabel">every event it reported</div>' + evs.map(function (e) { return '<div class="pev">' + self.renderEvent(e, true) + '</div>'; }).join('');
-    setHTML(P.body, head + wf + io + raw);
-    if (!P.body._wfBound) {
-      P.body._wfBound = true;
+    function folded(k, label, body) {
+      return body ? '<details class="es-fold" data-fold="' + esc(k) + '"' + (fold[k] ? ' open' : '') + '><summary><i class="chev"></i>' + label + '</summary><div class="es-fbody">' + body + '</div></details>' : '';
+    }
+    var raw = evs.map(function (e) { return '<div class="pev">' + self.renderEvent(e, true) + '</div>'; }).join('');
+    setHTML(P.body, head + strip + desc + wf + result +
+      folded('io', 'Its input and output', io) + folded('events', 'Every event it reported <span class="n">' + evs.length + '</span>', raw) +
+      (nAi ? '<p class="es-note">Each model call, word for word: the next panel down.</p>' : ''));
+    if (!P.body._foldBound) {
+      P.body._foldBound = true;
       P.body.addEventListener('click', function (ev) {
-        var sm = ev.target.closest('.wfr > summary');
+        var sm = ev.target.closest('.es-fold > summary');
         if (!sm) return;
         ev.preventDefault();
-        var k = sm.parentNode.getAttribute('data-k');
-        self.wfOpen = self.wfOpen || {};
-        self.wfOpen[k] = !sm.parentNode.open;
-        sm.parentNode.open = self.wfOpen[k];
+        var d = sm.parentNode, k = d.getAttribute('data-fold');
+        self.foldOpen = self.foldOpen || {};
+        self.foldOpen[k] = !d.open;
+        d.open = self.foldOpen[k];
         P.body._h = null;
       });
     }
   };
 
+  /* Round ticks for a time axis `span` seconds long: 0, then a step of 1, 2 or 5 × a power of ten, at
+     most about six of them. */
+  function niceTicks(span) {
+    var raw = span / 6, p = Math.pow(10, Math.floor(Math.log10(raw || 1e-3))), unit = p;
+    [1, 2, 5, 10].some(function (m) { unit = m * p; return unit >= raw; });
+    var out = [];
+    for (var t = 0; t <= span + 1e-9; t += unit) out.push(Math.round(t / unit) * unit);
+    return { unit: unit, ticks: out };
+  }
+  function tickWord(t, unit) {
+    if (t === 0) return '0';
+    return unit >= 1 ? t + 's' : unit >= 0.1 ? (Math.round(t * 10) / 10) + 's' : Math.round(t * 1000) + 'ms';
+  }
+
   /* Engineering's look inside one step: its span, then every model and tool call by start time
-     (logic.callSequence), each on the step's own time axis with its duration and tokens; a row opens
-     to its step and call ids, arguments, result, tokens (cache reads included) and, for a model call,
-     the tools its answer asked for. */
+     (logic.callSequence), each on the step's own time axis (round ticks, a gridline each) with its
+     duration and tokens; a row opens (▸) to its step and call ids, arguments, result (a list one
+     item per line), tokens (cache reads included) and, for a model call, the tools its answer asked for. */
   Bench.prototype._waterfallHTML = function (run, step) {
-    var L = lg(), self = this, seq = L.callSequence(run.events, step.id);
+    var L = lg(), seq = L.callSequence(run.events, step.id);
     if (!seq.calls.length) return '';
-    var span = seq.span, ticks = '';
-    var unit = span >= 2 ? Math.ceil(span / 6) : span / 4;
-    for (var t = 0; t <= span + 1e-9; t += unit) ticks += '<span style="left:' + (t / span * 100).toFixed(2) + '%">' + L.fmtMs(t * 1000).replace(/\.0+s$/, 's') + '</span>';
+    var span = seq.span, nt = niceTicks(span);
+    var ticks = nt.ticks.map(function (t) {
+      var x = t / span * 100;
+      return x > 100.5 ? '' : '<span style="left:' + x.toFixed(2) + '%"' + (x > 92 ? ' class="end"' : '') + '>' + tickWord(t, nt.unit) + '</span>';
+    }).join('');
+    var grid = 'background-size:' + (nt.unit / span * 100).toFixed(3) + '% 100%';
     function pos(a, b) { return 'left:' + ((a - seq.start) / span * 100).toFixed(2) + '%;width:' + Math.max(0.4, (b - a) / span * 100).toFixed(2) + '%'; }
     var open = this.wfOpen || {}, firstTool = (seq.calls.filter(function (c) { return c.kind === 'tool'; })[0] || {}).n;
     function json(v) { return v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v); }
+    // A list result: one item per line, so each reads on its own.
+    function listed(v) {
+      if (typeof v === 'string') { try { var j = JSON.parse(v); if (j && typeof j === 'object') v = j; } catch (e) {} }
+      if (Array.isArray(v)) return v.map(function (x) { return esc(L.short(json(x), 300)); }).join('\n');
+      return esc(L.short(json(v), 800));
+    }
     var rows = seq.calls.map(function (c, i) {
       var d = c.ev.data || {}, last = i === seq.calls.length - 1, key = step.id + '#' + c.n;
       var isOpen = open[key] != null ? open[key] : c.n === firstTool;
@@ -842,16 +860,16 @@
         if (!(d.tool_calls || []).length && d.output != null) kv.push(['output', '<pre>' + esc(L.short(L.ioText(d.output), 600)) + '</pre>']);
       } else {
         if (d.arguments != null) kv.push(['arguments', '<pre class="s">' + esc(json(d.arguments)) + '</pre>']);
-        if (d.result != null) kv.push(['result', '<pre>' + esc(L.short(json(d.result), 800)) + '</pre>']);
+        if (d.result != null) kv.push(['result', '<pre>' + listed(d.result) + '</pre>']);
       }
       return '<details class="wfr ' + c.kind + '" data-k="' + esc(key) + '"' + (isOpen ? ' open' : '') + ' style="--k:var(--' + (c.kind === 'ai' ? 'ai' : 'app') + ')"><summary>' +
-        '<span class="nm"><span class="tw">' + (c.depth ? '│ └' : last ? '└' : '├') + '</span><span class="op">' + (c.kind === 'ai' ? 'chat' : 'tool') + '</span>' + label + '</span>' +
-        '<span class="lane"><span class="bar' + ((c.end - seq.start) / span > 0.7 ? ' inl' : '') + '" style="' + pos(c.start, c.timed ? c.end : c.start) + '">' + (c.kind === 'ai' && d.finish_reason ? '<i>' + esc(d.finish_reason) + '</i>' : '') + '</span></span>' +
-        '<span class="mt">' + meta + '</span></summary><div class="xp">' + kv.map(function (x) { return '<span class="k">' + x[0] + '</span><span>' + x[1] + '</span>'; }).join('') + '</div></details>';
+        '<span class="nm"><i class="chev"></i><span class="no">' + c.n + '</span><span class="tw">' + (c.depth ? '│ └' : last ? '└' : '├') + '</span><span class="op">' + (c.kind === 'ai' ? 'chat' : 'tool') + '</span>' + label + '</span>' +
+        '<span class="lane" style="' + grid + '"><span class="bar' + ((c.end - seq.start) / span > 0.7 ? ' inl' : '') + '" style="' + pos(c.start, c.timed ? c.end : c.start) + '">' + (c.kind === 'ai' && d.finish_reason ? '<i>' + esc(d.finish_reason) + '</i>' : '') + '</span></span>' +
+        '<span class="mt">' + (c.with.length ? '<span class="par">with ' + c.with.join(', ') + '</span>' : '') + meta + '</span></summary><div class="xp">' + kv.map(function (x) { return '<span class="k">' + x[0] + '</span><span>' + x[1] + '</span>'; }).join('') + '</div></details>';
     }).join('');
-    var nodeRow = '<div class="wfr node"><div class="sum"><span class="nm"><span class="op">step</span>' + esc(step.node) + '</span><span class="lane"><span class="bar node" style="' + pos(seq.start, seq.end) + '"></span></span><span class="mt"><b>' + L.fmtMs(span * 1000) + '</b></span></div></div>';
-    return '<div class="iolabel">calls inside this step · by start time · click a row</div><div class="wf"><div class="hd"><span>call</span><span class="ticks">' + ticks + '</span><span>took · tokens</span></div>' + nodeRow + rows + '</div>' +
-      '<div class="note">order: by start (ts − latency_ms), not by event ts (stamped at the end) · ' + seq.ai + ' chat · ' + seq.tools + ' tool</div>';
+    var nodeRow = '<div class="wfr node"><div class="sum"><span class="nm"><i class="chev none"></i><span class="op">step</span>' + esc(step.node) + '</span><span class="lane" style="' + grid + '"><span class="bar node" style="' + pos(seq.start, seq.end) + '"></span></span><span class="mt"><b>' + L.fmtMs(span * 1000) + '</b></span></div></div>';
+    return '<div class="es-lab">Calls inside this step · in the order they started · click a row</div><div class="wf"><div class="hd"><span>call</span><span class="ticks">' + ticks + '</span><span>took · tokens</span></div>' + nodeRow + rows + '</div>' +
+      '<div class="es-cap">order: by start (ts − latency_ms), not by event ts (stamped at the end) · ' + seq.ai + ' chat · ' + seq.tools + ' tool' + (seq.calls.some(function (c) { return c.with.length; }) ? ' · “with N”: ran at the same time as call N' : '') + '</div>';
   };
 
   function ioBlock(label, text, cls) {
@@ -915,6 +933,7 @@
   var ACTOR_WORDS_P = { ai: 'The AI', rule: 'A rule', person: 'A person', app: 'The app' };
   var STAGE_BREAK = 600;   // map column width (px) below which the pane geometry is used
   var STACK_BREAK = 1100;  // window width at or below which the map and panel stack (index.html)
+  var ENG_STACK_BREAK = 820;
 
   /* The box's type (index.html's .snode rules, in px): the name (one or two lines), the line under
      it, the badge before it and who does the step after it. The box's height is built from these,
@@ -946,20 +965,29 @@
     return out;
   }
 
+  /* The elements one mode draws its stage into: Presentation's (.pres) or Engineering's (.eng). */
+  Bench.prototype._E = function () {
+    var f = this.f, p = this.p;
+    return this.mode === 'engineering'
+      ? { eng: true, graph: f.graph, tip: f.tip, stage: f.stage, bubble: f.panels, divider: f.divider, notch: f.notch, mk: f.mk }
+      : { eng: false, graph: p.graph, tip: p.tip, stage: p.stage, bubble: p.bubble, divider: p.divider, notch: p.notch, mk: p.mk };
+  };
   Bench.prototype._pickStageGeom = function () {
-    var g = this.p.graph;
+    var g = this._E().graph;
     var W = (g && g.clientWidth) || global.innerWidth || 1200;
     return W >= STAGE_BREAK ? 'stage' : 'pane';
   };
-  Bench.prototype._stacked = function () { return (global.innerWidth || 1200) <= STACK_BREAK; };
+  // Stacked: the map above the panel, the page scrolling (index.html: Presentation at 1100 px, Engineering at 820).
+  Bench.prototype._stacked = function () { return (global.innerWidth || 1200) <= (this.mode === 'engineering' ? ENG_STACK_BREAK : STACK_BREAK); };
 
   Bench.prototype._drawStage = function () {
-    var self = this, topo = this.topo, L = lg();
-    this.root.classList.toggle('p-maponly', !!this.mapOnly);
+    var self = this, topo = this.topo, L = lg(), E = this._E();
+    var mapOnly = !E.eng && !!this.mapOnly;
+    this.root.classList.toggle('p-maponly', mapOnly);
     var which = this._stageGeom = this._pickStageGeom();
     this.root.classList.toggle('ps-pane', which === 'pane');
     var G = which === 'stage' ? global.BenchLayout.STAGE_GEOM : global.BenchLayout.PANE_GEOM;
-    var g = this.p.graph, aw = Math.max(1, g.clientWidth - 8), ahh = Math.max(1, g.clientHeight - 8), stacked = this._stacked();
+    var g = E.graph, aw = Math.max(1, g.clientWidth - 8), ahh = Math.max(1, g.clientHeight - 8), stacked = this._stacked();
     // Two box shapes: wide (names on one line, a shorter map) and narrow (names may take two lines,
     // a taller map). The one drawn larger in the room the map has wins.
     var best = null;
@@ -1001,13 +1029,14 @@
     // Fit the whole map in its room, by width and height (stacked: by width only, up to its size).
     function fit() {
       var availW = g.clientWidth - 8 || Lay.W, availH = g.clientHeight - 8;
-      var k = Math.min(self.mapOnly ? 1.5 : 1, availW / Lay.W);
+      var k = Math.min(mapOnly ? 1.5 : 1, availW / Lay.W);
       if (!self._stacked() && availH > 80) k = Math.min(k, availH / Lay.H);
       k = Math.max(k, 0.3);
       self._fitK = k;
       gr.style.transform = k !== 1 ? 'scale(' + k + ')' : '';
       gr.style.transformOrigin = 'top left';
-      var padX = Math.max(0, (availW - Lay.W * k) / 2), padY = !self._stacked() ? Math.max(0, (availH - Lay.H * k) / 2) : 0;
+      // Centred across, top-aligned: a short map starts under its heading, not mid-column.
+      var padX = Math.max(0, (availW - Lay.W * k) / 2), padY = 0;
       gr.style.marginLeft = padX + 'px';
       gr.style.marginTop = padY + 'px';
       gr.style.marginBottom = k !== 1 ? (-(1 - k) * Lay.H) + 'px' : '';
@@ -1019,7 +1048,7 @@
       n.onclick = function () { var id = n.getAttribute('data-node'); self.selectedNode = self.selectedNode === id ? null : id; self.recapOpen = false; self.presItem = null; self.render(); };
     });
     // A path's own words on hover or tap: on a dashed path, why it wasn't taken.
-    var tip = this.p.tip, sec = g.parentNode;
+    var tip = E.tip, sec = g.parentNode;
     g.querySelectorAll('.edge').forEach(function (eg) {
       var i0 = +eg.getAttribute('data-edge'), r = Lay.edges[i0];
       var eds = ((r && r.edges) || [i0]).map(function (k) { return topo.edges[k]; }).filter(function (x) { return x.description; });
@@ -1094,13 +1123,13 @@
 
   // The map's state for what's shown: lit path, numbers in run order, a line under each name.
   Bench.prototype._renderStage = function (run) {
-    var self = this, g = this.p.graph, L = lg(), topo = this.topo;
+    var self = this, E = this._E(), g = E.graph, L = lg(), topo = this.topo;
     var S = this._shown(run), now = S.now, ran = S.ran, finished = S.finished;
     var taken = this._taken(S), nums = L.stepNumbers(S.seq);
     var order = topo.nodes.map(function (n) { return n.id; });
     if (this.layout) order.sort(function (a, b) { var pa = self.layout.pos[a], pb = self.layout.pos[b]; return pa && pb ? (pa.y - pb.y) || (pa.x - pb.x) : 0; });
     var letters = finished ? L.stepLetters(topo, nums, order) : {};
-    var focus = this.recapOpen ? null : (this.selectedNode || S.focusNode);
+    var focus = this.recapOpen && !E.eng ? null : (this.selectedNode || S.focusNode);
     g.querySelectorAll('.gnode').forEach(function (n) {
       var id = n.getAttribute('data-node'), steps = ran[id] || [], last = steps[steps.length - 1];
       var node = L.nodeOf(topo, id) || {};
@@ -1326,32 +1355,35 @@
      another box sits between the step and the divider (it never crosses a box). Measured from the
      boxes as drawn (after the map's fit), in the stage's coordinates; redone on every render and resize. */
   Bench.prototype._placeMarker = function () {
-    var p = this.p, stage = p.stage, div = p.divider, notch = p.notch, mk = p.mk;
+    var E = this._E(), stage = E.stage, div = E.divider, notch = E.notch, mk = E.mk;
+    if (!stage || !div) return;
     var stacked = this._stacked();
-    var focusEl = this.recapOpen || this.mapOnly || this.keysOpen ? null : p.graph.querySelector('.gnode.focus');
-    var bubR = p.bubble.getBoundingClientRect(), sr = stage.getBoundingClientRect();
-    div.hidden = stacked || this.mapOnly || !bubR.height;
-    if (!div.hidden) {
-      var X = bubR.left - sr.left - 14;
-      div.style.left = X + 'px'; div.style.top = (bubR.top - sr.top) + 'px'; div.style.height = bubR.height + 'px';
-    }
-    if (!focusEl) { notch.hidden = mk.hidden = true; return; }
+    var off = !E.eng && (this.recapOpen || this.mapOnly || this.keysOpen);
+    var focusEl = off ? null : E.graph.querySelector('.gnode.focus');
+    var bubR = E.bubble.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+    div.hidden = stacked || (!E.eng && this.mapOnly) || !bubR.height;
+    var X = bubR.left - sr.left - 14;
+    if (!div.hidden) { div.style.left = X + 'px'; div.style.top = (bubR.top - sr.top) + 'px'; div.style.height = bubR.height + 'px'; }
+    // Stacked, the panel is under the map: a pointer to its right would point at nothing.
+    if (!focusEl || stacked) { notch.hidden = mk.hidden = true; return; }
     var nr = focusEl.getBoundingClientRect(), k = this._fitK || 1;
     var top = nr.top - sr.top, H = nr.height, R = nr.right - sr.left;
-    var Xd = bubR.left - sr.left - 14;
+    // A box scrolled out of the map's view gets no pointer.
+    var gr = E.graph.getBoundingClientRect();
+    if (nr.bottom < gr.top + 4 || nr.top > gr.bottom - 4) { notch.hidden = mk.hidden = true; return; }
     notch.hidden = div.hidden;
-    if (!notch.hidden) { notch.style.left = Xd + 'px'; notch.style.top = (top + H * 0.19) + 'px'; notch.style.height = (H * 0.62) + 'px'; }
+    if (!notch.hidden) { notch.style.left = X + 'px'; notch.style.top = (top + H * 0.19) + 'px'; notch.style.height = (H * 0.62) + 'px'; }
     var tabW = 58, inset = 46 * k;
     mk.hidden = false;
     mk.style.left = (R - inset) + 'px'; mk.style.top = (top + 1.5) + 'px'; mk.style.height = Math.max(8, H - 3) + 'px';
-    mk.style.width = (stacked ? tabW : Math.max(tabW, Xd - (R - inset))) + 'px';
+    mk.style.width = Math.max(tabW, X - (R - inset)) + 'px';
     var wire = mk.querySelector('.wire');
-    var blocked = [].slice.call(p.graph.querySelectorAll('.gnode:not(.focus)')).some(function (o) {
+    var blocked = [].slice.call(E.graph.querySelectorAll('.gnode:not(.focus)')).some(function (o) {
       var r = o.getBoundingClientRect();
       return r.left > nr.right && r.top < nr.bottom && r.bottom > nr.top;
     });
-    wire.hidden = stacked || div.hidden || blocked || Xd - (R - inset) <= tabW;
-    if (!wire.hidden) { wire.style.left = (tabW - 2) + 'px'; wire.style.width = Math.max(0, Xd - (R - inset) - tabW + 2) + 'px'; }
+    wire.hidden = div.hidden || blocked || X - (R - inset) <= tabW;
+    if (!wire.hidden) { wire.style.left = (tabW - 2) + 'px'; wire.style.width = Math.max(0, X - (R - inset) - tabW + 2) + 'px'; }
   };
 
   /* Replay: ◀ prev, play, next ▶, ↻ (keys: ← → or PageUp/PageDown, Space = next). Beside the app or

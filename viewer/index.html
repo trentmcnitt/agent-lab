@@ -96,77 +96,84 @@
   #controls button, #controls select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
   #controls button:hover { border-color: var(--accent); }
 
-  .bgrid { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(300px, 1fr); }
-  .col { overflow: auto; padding: 10px 12px; border-right: 1px solid var(--border); }
-  .col:last-child { border-right: none; }
-  .stitle { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 4px 0 6px; }
-  .stitle + * { margin-bottom: 12px; }
-
   .graphwrap { overflow-x: auto; }
   .graph { position: relative; margin: 0 auto; }
   .graph svg.edges { position: absolute; left: 0; top: 0; color: var(--off-line); overflow: visible; }
-  .eng .edge path { fill: none; stroke: currentColor; stroke-width: 1.4; }
-  /* A label sits on a plate of the background (a wide halo), so the line under it never strikes through it. */
-  .eng .edge text { fill: var(--muted); font: 9.5px ui-monospace, monospace; paint-order: stroke; stroke: var(--bg); stroke-width: 7px; stroke-linejoin: round; }
-  .eng .edge.taken { color: var(--accent); } .eng .edge.taken path { stroke-width: 2.2; } .eng .edge.taken text { fill: var(--accent); }
-  .eng .edge.flowing path { stroke-dasharray: 6 5; animation: flow .6s linear infinite; }
-  @keyframes flow { to { stroke-dashoffset: -11; } }
-  .eng .edge.untaken { opacity: .45; } .eng .edge.untaken path { stroke-dasharray: 3 3; }
-  /* Engineering's flow: the S4 boxes at Engineering's density (the same palette as Presentation). */
-  .eng .gnode { position: absolute; border: 1px solid var(--border-2); background: linear-gradient(180deg, var(--surface-2), var(--surface)); border-radius: 8px; padding: 4px 9px; cursor: pointer; transition: all .25s ease; color: var(--text-2); overflow: hidden; }
-  .eng .gnode .gl { font: 500 12.5px var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .eng .gnode .gm { font: 10.5px var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .eng .gnode .gp { font: 10.5px var(--mono); color: var(--path); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
-  .eng .gnode.kind-llm .gl::before { content: "◆ "; color: var(--ai); }
-  .eng .gnode.kind-gate .gl::before { content: "⏸ "; color: var(--person); }
-  .eng .gnode.kind-tool .gl::before { content: "⚙ "; color: var(--app); }
-  .eng .gnode.kind-retrieval .gl::before { content: "⌕ "; color: var(--app); }
-  .eng .gnode.kind-check .gl::before { content: "✓ "; color: var(--rule); }
-  .eng .gnode.idle { color: var(--text-3); }
-  .eng .gnode.done { color: var(--text); border-color: color-mix(in srgb, var(--path) 26%, var(--border-2)); }
-  .eng .gnode.done .gm { color: var(--text-2); }
-  .eng .gnode.active { color: var(--text); border-color: var(--path); box-shadow: 0 0 0 3px rgba(62,240,200,.16), 0 0 18px rgba(62,240,200,.25); }
-  .eng .gnode.gatewait { color: var(--text); border-color: var(--person); box-shadow: 0 0 14px rgba(255,200,87,.3); animation: pulse 1.4s ease-in-out infinite; }
-  .eng .gnode.error { color: var(--text); border-color: var(--bad); }
-  .eng .gnode.untaken { background: var(--off-bg); border: 1.5px dashed var(--off-b); color: var(--off-t); }
-  .eng .gnode.untaken .gm { color: var(--off-m); }
-  .eng .gnode.skipped { border-style: dotted; color: var(--muted); }
-  .eng .gnode.skipped .gl::after { content: "  · skipped"; font-size: 10px; }
-  .eng .gnode.selected { outline: 2px solid var(--path); outline-offset: 1px; }
   @keyframes pulse { 50% { box-shadow: 0 0 4px rgba(255,200,87,.2); } }
   @keyframes blink { 50% { opacity: .4; } }
   .unmapped { margin-top: 6px; font-size: 11.5px; }
-  /* Engineering's detail lines end in "…" inside the box's padding (the pill rule below makes .gp
-     an inline-flex, where text-overflow has no effect). */
-  .eng .graphcol .gnode .gp, .eng .graphcol .gnode .gm { display: block; line-height: 1.3; padding: 0 !important; text-box: none; }
 
-  /* Engineering: the calls inside one step, a waterfall by start time (rows open). */
-  .wf { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font: 11.5px/1.3 var(--mono); margin: 4px 0 6px; }
-  .wf .hd, .wf summary, .wf .sum { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr) 124px; align-items: center; }
-  .wf .hd { color: var(--text-3); background: var(--surface-2); border-bottom: 1px solid var(--border); padding: 5px 0; }
-  .wf .hd > span { padding: 0 8px; } .wf .hd > span:last-child { text-align: right; }
-  .wf .ticks { position: relative; height: 13px; }
-  .wf .ticks span { position: absolute; transform: translateX(-50%); }
-  .wf summary, .wf .sum { list-style: none; cursor: pointer; min-height: 26px; border-top: 1px solid #1B1F28; }
+  /* ---- Engineering (S4): the same map as Presentation on the left; a docked panel on the right led by
+     the step's card (its numbers, then a waterfall of every call inside it), the run's other panels
+     folded under it; the replay controls, badges and meters in one strip on top; the event log a drawer. */
+  .eng { position: relative; background: var(--bg); background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); background-size: 24px 24px; background-position: 12px 12px; }
+  .eng-top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 7px 16px; border-bottom: 1px solid var(--border); background: #0A0B0F; position: relative; z-index: 3; }
+  .eng-top #controls, .eng-top .bh, .eng-top .meterbar { border: 0; background: none; padding: 0; }
+  .eng-top .meterbar { flex: 1 1 auto; font-size: 12.5px; }
+  .bgrid { --acc: var(--path); position: relative; flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 50%); gap: 28px; padding: 16px 24px 12px 16px; }
+  .bgrid.a-app { --acc: var(--app); } .bgrid.a-ai { --acc: var(--ai); } .bgrid.a-rule { --acc: var(--rule); } .bgrid.a-person { --acc: var(--person); }
+  .col { min-width: 0; min-height: 0; }
+  .panelcol { position: relative; z-index: 2; overflow: auto; border: 1px solid var(--border-2); border-radius: 14px; background: linear-gradient(180deg, #0F1117, #0B0D12); box-shadow: 0 20px 60px rgba(0,0,0,.45); scrollbar-width: thin; scrollbar-color: #2A2F3B transparent; }
+  .panelcol::before { content: ""; position: sticky; display: block; top: 0; height: 3px; margin-bottom: -3px; z-index: 2; background: var(--acc); box-shadow: 0 0 18px var(--acc); }
+  .stitle { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 4px 0 6px; }
+
+  /* The step's card */
+  .stepcard .pbody { padding: 22px 26px 20px; font: 400 15px/1.45 var(--sans); }
+  .es-head { display: flex; align-items: center; gap: 14px; }
+  .es-head .bb-num { width: 40px; height: 40px; font-size: 18px; }
+  .es-name { min-width: 0; font: 600 26px/1.15 var(--sans); letter-spacing: -.02em; color: var(--text); }
+  .stepcard .bb-metas { margin-top: 14px; font-size: 13.5px; }
+  .stepcard .bb-metas span { padding: 7px 12px; }
+  .es-desc { margin: 12px 0 0; font-size: 15.5px; line-height: 1.5; color: var(--text-2); }
+  .es-none { margin: 14px 0 0; font-size: 16px; color: var(--text-3); }
+  .es-lab { margin: 20px 0 8px; font: 500 13px/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); display: flex; gap: 10px; align-items: center; }
+  .es-lab::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  .es-cap { font: 400 12.5px/1.5 var(--mono); color: var(--text-3); margin-top: 6px; }
+  .es-result { margin-top: 12px; font: 400 14px/1.45 var(--mono); color: var(--path); overflow-wrap: anywhere; }
+  .es-result span { color: var(--text-3); text-transform: uppercase; letter-spacing: .08em; font-size: 12px; margin-right: 10px; }
+  .es-fold { margin-top: 12px; }
+  .es-fold > summary { list-style: none; cursor: pointer; font: 500 13px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); padding: 6px 0; }
+  .es-fold > summary::-webkit-details-marker { display: none; }
+  .es-fold > summary:hover { color: var(--text-2); }
+  .es-fold .n { color: var(--text-2); }
+  .es-fbody { padding: 4px 0 0; font-size: 13px; }
+  .es-note { margin: 14px 0 0; font-size: 13.5px; color: var(--text-3); } .es-note b { color: var(--text-2); font-weight: 500; }
+  .chev { display: inline-block; width: 14px; flex: none; font-style: normal; color: var(--text-3); }
+  .chev::before { content: "▸"; }
+  details[open] > summary .chev::before, .panel.open > .ptitle .chev::before { content: "▾"; color: var(--text-2); }
+  .chev.none::before { content: ""; }
+  /* The calls inside one step: a waterfall by start time, round ticks with a gridline each; rows open. */
+  .wf { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; font: 13.5px/1.3 var(--mono); }
+  .wf .hd, .wf summary, .wf .sum { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr) 160px; align-items: center; }
+  .wf .hd { color: var(--text-3); background: var(--surface-2); border-bottom: 1px solid var(--border); padding: 7px 0 6px; font-size: 12.5px; }
+  .wf .hd > span { padding: 0 10px; } .wf .hd > span:last-child { text-align: right; }
+  .wf .hd .ticks { position: relative; height: 15px; padding: 0; margin: 0 10px; }
+  .wf .ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+  .wf .ticks span:first-child { transform: none; } .wf .ticks span.end { transform: translateX(-100%); }
+  .wf summary, .wf .sum { list-style: none; cursor: pointer; min-height: 32px; border-top: 1px solid #1B1F28; }
+  .wf .sum { cursor: default; }
   .wf summary::-webkit-details-marker { display: none; }
   .wf summary:hover { background: rgba(255,255,255,.025); }
   .wf .wfr:first-of-type .sum { border-top: 0; }
-  .wf .nm { padding: 0 8px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+  .wf .nm { padding: 0 10px 0 8px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+  .wf .nm .no { flex: none; width: 16px; text-align: right; color: var(--text-3); font-size: 12px; }
   .wf .nm .tw { color: #4A5163; flex: none; }
-  .wf .nm .op { font-size: 10.5px; padding: 1px 4px; border-radius: 4px; color: var(--k, var(--text-2)); border: 1px solid color-mix(in srgb, var(--k, var(--text-2)) 40%, transparent); flex: none; }
+  .wf .nm .op { font-size: 12px; padding: 1px 5px; border-radius: 4px; color: var(--k, var(--text-2)); border: 1px solid color-mix(in srgb, var(--k, var(--text-2)) 40%, transparent); flex: none; }
   .wf .nm .ar { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
-  .wf .lane { position: relative; height: 26px; }
-  .wf .bar { position: absolute; top: 7px; height: 12px; border-radius: 3px; background: var(--k); min-width: 3px; }
+  .wf .lane { position: relative; height: 32px; margin: 0 10px; background-image: linear-gradient(to right, rgba(255,255,255,.07) 1px, transparent 1px); background-repeat: repeat-x; background-position: 0 0; }
+  .wf .bar { position: absolute; top: 10px; height: 12px; border-radius: 3px; background: var(--k); min-width: 3px; }
   .wf .bar.node { --k: var(--text-3); background: color-mix(in srgb, var(--text-3) 18%, transparent); border: 1px solid color-mix(in srgb, var(--text-3) 50%, transparent); }
-  .wf .bar i { position: absolute; left: 100%; top: -1px; margin-left: 5px; font-style: normal; font-size: 10.5px; color: var(--text-2); white-space: nowrap; }
+  .wf .bar i { position: absolute; left: 100%; top: -1px; margin-left: 6px; font-style: normal; font-size: 12px; color: var(--text-2); white-space: nowrap; }
   .wf .bar.inl i { left: 6px; margin-left: 0; color: #0B0C10; font-weight: 600; }
-  .wf .mt { padding: 0 8px; color: var(--text-2); text-align: right; white-space: nowrap; }
+  .wf .mt { padding: 0 10px; color: var(--text-2); text-align: right; white-space: nowrap; }
   .wf .mt b { color: var(--text); font-weight: 500; }
-  .wf .xp { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 3px 12px; border-top: 1px dashed #262B36; background: #0B0D12; padding: 7px 10px 8px 28px; color: var(--text-2); line-height: 1.5; }
+  .wf .mt .par { color: var(--app); margin-right: 8px; font-size: 12px; }
+  .wf .xp { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 4px 14px; border-top: 1px dashed #262B36; background: #0B0D12; padding: 9px 12px 10px 38px; color: var(--text-2); line-height: 1.5; font-size: 13px; }
   .wf .xp .k { color: var(--text-3); }
-  .wf .xp pre { margin: 0; font: 11.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; color: #D6DBE4; }
+  .wf .xp pre { margin: 0; font: 13px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; color: #D6DBE4; }
   .wf .xp .s, .wf .xp pre.s { color: #9FE6CF; }
-  .wrow { display: grid; grid-template-columns: 118px 1fr 62px; gap: 6px; align-items: center; font-size: 11px; height: 17px; }
+  /* The step timeline (a folded panel) */
+  .wrow { display: grid; grid-template-columns: 150px 1fr 70px; gap: 8px; align-items: center; font-size: 12.5px; height: 20px; }
   .wrow.child .wl { padding-left: 10px; }
   .wl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .wtrack { position: relative; height: 9px; background: rgba(42,51,80,.45); border-radius: 3px; }
@@ -179,15 +186,22 @@
   .wv { text-align: right; color: var(--text); }
   .legend { font-size: 10.5px; margin-top: 4px; }
 
-  .panel { background: rgba(30,39,64,.68); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
-  .panel.empty { opacity: .55; }
-  .ptitle { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 5px; display: flex; justify-content: space-between; }
+  /* The run's other panels, folded under the step's card: a title row that opens and shuts each. */
+  .panel { border-top: 1px solid var(--border); }
+  .panel.stepcard { border-top: 0; }
+  .panel.stepcard > .ptitle { display: none; }
+  .panel:not(.open) > .pbody { display: none; }
+  .ptitle { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 22px; cursor: pointer; font: 500 12.5px/1.3 var(--mono); text-transform: uppercase; letter-spacing: .07em; color: var(--text-3); user-select: none; }
+  .ptitle:hover { color: var(--text-2); background: rgba(255,255,255,.015); }
+  .ptitle .pt { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .panel.empty > .ptitle { opacity: .6; }
+  .pbody { padding: 2px 22px 18px; font-size: 13px; }
   .pcount { color: var(--accent); }
   .pright { display: flex; gap: 6px; align-items: center; }
-  .rawbtn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; font: 9.5px ui-monospace, monospace; padding: 0 5px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .rawbtn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; font: 11px var(--mono); padding: 1px 6px; cursor: pointer; text-transform: none; letter-spacing: 0; }
   .rawbtn:hover { border-color: var(--accent); color: var(--text); }
   .rawbtn.on { color: var(--accent); border-color: var(--accent); }
-  .panel.storied { border-color: rgba(167,139,250,.45); }
+  .panel.storied > .ptitle { color: color-mix(in srgb, var(--ai) 70%, var(--text-3)); }
   .iolabel { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-2); margin: 8px 0 3px; }
   pre.io { margin: 0; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 11px/1.45 ui-monospace, monospace; background: #0B0D12; border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; color: var(--text); }
   pre.io.out { border-color: var(--accent); }
@@ -218,9 +232,16 @@
   .mc + .mc { border-top: 1px dashed var(--border); margin-top: 5px; padding-top: 5px; }
   .mc { font-size: 11.5px; } .mc-error b { color: var(--bad); } .mc-warning b { color: var(--warn); } .mc-info b { color: var(--muted); }
 
-  .logcol { flex: 0 0 26%; min-height: 110px; border-top: 1px solid var(--border); padding: 6px 12px; overflow: auto; background: var(--panel); }
-  .log { font-size: 10.5px; }
-  .lrow { display: grid; grid-template-columns: 28px 64px 120px 128px 1fr; gap: 6px; padding: 1px 0; border-bottom: 1px solid rgba(42,51,80,.5); }
+  /* The event log: a drawer, shut by default (one line), the bottom third when open. */
+  .logcol { flex: none; border-top: 1px solid var(--border); background: #0A0B0F; position: relative; z-index: 3; }
+  .logtoggle { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 16px; cursor: pointer; font: 400 13px/1.2 var(--mono); color: var(--text-3); }
+  .logtoggle b { color: var(--text-2); font-weight: 500; letter-spacing: .08em; text-transform: uppercase; }
+  .logtoggle:hover { color: var(--text-2); }
+  .logtoggle .lt-arrow { margin-left: auto; }
+  .logcol .log { display: none; height: 32vh; overflow: auto; padding: 0 16px 8px; }
+  .logcol.open .log { display: block; }
+  .log { font-size: 12px; }
+  .lrow { display: grid; grid-template-columns: 30px 70px 130px 140px 1fr; gap: 8px; padding: 2px 0; border-bottom: 1px solid rgba(42,51,80,.5); }
   .lrow span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lrow .ls, .lrow .lt { color: var(--muted); text-align: right; }
   .lrow .le { color: var(--accent-2); }
@@ -638,9 +659,16 @@
      three scroll boxes, so the graph and panels keep their natural height. */
   @media (max-width: 820px) {
     #bench.mode-engineering { height: auto; min-height: 100vh; }
-    .bgrid { display: block; }
-    .col { overflow: visible; border-right: none; border-bottom: 1px solid var(--border); }
-    .logcol { flex: none; max-height: none; overflow: visible; }
+    .bgrid { display: flex; flex-direction: column; gap: 18px; padding: 16px; flex: none; }
+    .eng .graphcol { flex: none; overflow: visible; }
+    .eng .graphcol .graphwrap { flex: none; }
+    .eng .ps-flowhead { padding-left: 0; }
+    .panelcol { overflow: visible; flex: none; }
+    .panelcol::before { position: absolute; left: 0; right: 0; border-radius: 14px 14px 0 0; }
+    .stepcard .pbody { padding: 18px 16px; }
+    .wf .hd, .wf summary, .wf .sum { grid-template-columns: minmax(0, 46%) minmax(0, 1fr) 96px; }
+    .wf .mt .par, .wf .bar i { display: none; }
+    .logcol { position: sticky; bottom: 0; }
     #bench > .eng { flex: none; }
     .lrow { grid-template-columns: 24px 52px 90px 1fr; } .lrow .ld { display: none; }
   }
