@@ -1364,7 +1364,13 @@ export function callout(topo, events, id, opts) {
               proposal: null, ifNext: [], did: null, wrote: null, reply: null, why: null, about: null, ran: evs.length > 0 };
   var about = node && node.description;
   out.about = about ? { label: kind === 'gate' ? 'Who can sign off' : 'About this step', text: about } : null;
-  function head(t) { out.headline = Array.prototype.slice.call(arguments).map(function (x) { return typeof x === 'string' ? { t: x } : x; }); }
+  function head(t) {
+    var segs = [];
+    Array.prototype.slice.call(arguments).forEach(function (x) { (Array.isArray(x) ? x : [x]).forEach(function (y) { segs.push(typeof y === 'string' ? { t: y } : y); }); });
+    out.headline = segs.filter(function (y) { return y.t !== ''; });
+  }
+  // The step it goes to next, marked (Presentation colours it as the path), the sentence ended once.
+  function nextSeg(label) { var e = endSentence(label); return [{ t: e.slice(0, e.length - (e.length > label.replace(/\s+$/, '').length ? 1 : 0)), next: true }, e.length > label.replace(/\s+$/, '').length ? '.' : '']; }
   var nx = nextOf(topo, id), nextWords = nx ? plainLabel(nodeOf(topo, nx), nx) : null;
 
   if (!evs.length) {
@@ -1450,24 +1456,24 @@ export function callout(topo, events, id, opts) {
     });
   } else if (resolved) {
     var rd = resolved.data || {};
-    head((rd.approved ? 'Approved by ' : 'Not approved: ') + (rd.by || 'a person'), taken ? ', so next: ' + endSentence(plainLabel(nodeOf(topo, taken.to), taken.to)) : '.');
+    head((rd.approved ? 'Approved by ' : 'Not approved: ') + (rd.by || 'a person'), taken ? [', so next: '].concat(nextSeg(plainLabel(nodeOf(topo, taken.to), taken.to))) : '.');
   } else if (taken) {
     out.sub = taken.description || null;
-    head(SUBJECT[actor] + ' ' + CHOSE[actor] + ' ', { t: branchLabel(taken), em: true }, ', so next: ' + endSentence(plainLabel(nodeOf(topo, taken.to), taken.to)));
+    head(SUBJECT[actor] + ' ' + CHOSE[actor] + ' ', { t: branchLabel(taken), em: true }, ', so next: ', nextSeg(plainLabel(nodeOf(topo, taken.to), taken.to)));
   } else if (out.choices.length) {
     head(SUBJECT[actor] + ' is choosing one of ' + out.choices.length + ' paths.');
   } else if (isLast) {
     // handled below: the run's ending is this step's headline
   } else if (search) {
     var many = search.sources.length > 1 ? ' in ' + search.sources.length + ' sources' : '';
-    head('Found ', { t: search.found + (search.of != null ? ' of ' + search.of : ''), em: true }, many + (nextWords ? '; next: ' + endSentence(nextWords) : '.'));
+    head('Found ', { t: search.found + (search.of != null ? ' of ' + search.of : ''), em: true }, many + (nextWords ? '; next: ' : '.'), nextWords ? nextSeg(nextWords) : '');
   } else if (out.did) {
     head(endSentence('Done: ' + (out.did.title || out.did.what)));
   } else if (calls.length) {
-    head(SUBJECT.ai + ' worked on this step' + (nextWords ? '; next: ' + endSentence(nextWords) : '.'));
+    head(SUBJECT.ai + ' worked on this step' + (nextWords ? '; next: ' : '.'), nextWords ? nextSeg(nextWords) : '');
   } else {
     var first = about ? String(about).split(/(?<=[.!?])\s+/)[0] : null;
-    head(first || (plainLabel(node, id) + (nextWords ? '; next: ' + endSentence(nextWords) : '.')));
+    head(first || (plainLabel(node, id) + (nextWords ? '; next: ' : '.')), !first && nextWords ? nextSeg(nextWords) : '');
     // The headline already says the whole description: don't say it again under "About this step".
     if (first && out.about && kind !== 'gate' && String(about).trim() === first.trim()) out.about = null;
   }
@@ -1539,4 +1545,327 @@ export function tileFace(item, idx, items) {
     if (w) return w.length > 8 ? w.slice(0, 7) + '…' : w;
   }
   return idx != null ? String(idx + 1) : String((item && item.id) || '').slice(0, 3);
+}
+
+// ---- the documents display: what a search step found, grouped by file ----------------------------
+/* One display model per source a step searched (examples/messy_docs/REPORT rules; display.py is the
+   reference this is ported from, and tests/js/documents.test.js holds the two to the same output).
+   Built only from the map's sources and the run's events; nothing app-specific, no model.
+   - Document: a hit's own `document` field, else an item id "<document>#<n>" belongs to <document>;
+     a declared source whose item ids carry no '#' is one document (the source) and its items its parts.
+   - Title: the item's title (the app's side picked it); a one-document source uses its own title.
+   - Location: "page p" (a numeric `page` on the hit), then "passage n of m" when m is known; a
+     one-passage document is "whole file"; a part of a one-document source is located by its title.
+   - Snippet: the sentence sharing the most words with the query (ties: the earlier), ≤ 200 chars.
+   - States: given / relied as sourceStates has them (given is verified against the prompts).
+   - Layout: "sections" (a numbered grid) only for a one-document source whose parts mostly start
+     with an ordinal ("5. …", never "2023-…"); else "documents" (grouped by file, best rank first). */
+var DOC_SNIPPET_MAX = 200, DOC_PER_CAP = 3;
+var DOC_ORDINAL = /^\s*(\d{1,3})[.)]\s/;
+var DOC_STOP = {};
+'a an the and or to of in on at for is are do does what how can i we you it my our with be that this from as by not'.split(' ').forEach(function (w) { DOC_STOP[w] = true; });
+function docWords(t) {
+  var out = {};
+  (String(t || '').toLowerCase().match(/[a-z0-9]+/g) || []).forEach(function (w) { if (!DOC_STOP[w]) out[w] = true; });
+  return out;
+}
+/* The passage's sentence (or line) that shares the most words with the query; with no overlap, its
+   opening. Cut at a word to 200 characters. */
+export function snippet(text, query) {
+  var flat = String(text || '').replace(/[ \t]+/g, ' ').trim();
+  var parts = flat.split(/(?<=[.!?])\s+|\n+/).map(function (p) { return p.trim(); }).filter(Boolean);
+  var qw = docWords(query), best = parts[0] || '', bestScore = 0;
+  parts.forEach(function (p) {
+    var pw = docWords(p), s = 0;
+    Object.keys(qw).forEach(function (w) { if (pw[w]) s++; });
+    if (s > bestScore) { best = p; bestScore = s; }
+  });
+  best = best.replace(/\s+/g, ' ');
+  if (best.length > DOC_SNIPPET_MAX) { var cut = best.slice(0, DOC_SNIPPET_MAX), sp = cut.lastIndexOf(' '); best = (sp >= 0 ? cut.slice(0, sp) : cut) + '…'; }
+  return best;
+}
+function docOfId(id) {
+  var s = String(id), i = s.lastIndexOf('#');
+  if (i <= 0) return { doc: null, n: null };
+  var tail = s.slice(i + 1);
+  return { doc: s.slice(0, i), n: /^\d+$/.test(tail) ? Number(tail) : null };
+}
+function docFace(title, idx, numbered) {
+  var m = DOC_ORDINAL.exec(title);
+  if (m) return m[1];
+  if (numbered) {
+    var w = (String(title).match(/[\p{L}\p{N}][\p{L}\p{N}_'’-]*/u) || [''])[0];
+    if (w) return w.length <= 8 ? w : w.slice(0, 7) + '…';
+  }
+  return String(idx + 1);
+}
+function plural(n, one, many) { return fmtNum(n) + ' ' + (n === 1 ? one : (many || one + 's')); }
+function normText(t) { return String(t || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+
+export function documentsStep(topo, events, node) {
+  var retrievals = events.filter(function (e) { return e.event_type === 'retrieval' && (node == null || e.node === node); });
+  var srcs = (topo && topo.sources) || [];
+  var docSources = srcs.filter(function (s) { return s.kind === 'documents'; });
+  var order = [];
+  retrievals.forEach(function (e) {
+    var d = e.data || {};
+    var sid = d.source || (docSources.length === 1 ? docSources[0].id : '_search');
+    if (order.indexOf(sid) < 0) order.push(sid);
+  });
+  var states = sourceStates(topo, events);
+  return order.map(function (sid) {
+    var src = srcs.filter(function (s) { return s.id === sid; })[0] || { id: sid, title: sid === '_search' ? 'What the search found' : human(sid), items: [] };
+    var st = states.filter(function (s) { return s.id === sid; })[0] || null;
+    var mine = retrievals.filter(function (e) { return ((e.data || {}).source || (docSources.length === 1 ? docSources[0].id : '_search')) === sid; });
+    return docSourceModel(src, mine, st, events);
+  });
+}
+
+function docSourceModel(src, retrievals, st, events) {
+  var items = src.items || [];
+  // Hits, first sighting wins (rank = its place in its search, 1 = best).
+  var hits = {}, hitOrder = [];
+  retrievals.forEach(function (e) {
+    var d = e.data || {};
+    (d.hits || []).forEach(function (h, i) {
+      if (hits[h.id]) return;
+      hits[h.id] = { hit: h, rank: i + 1, query: d.query };
+      hitOrder.push(h.id);
+    });
+  });
+  function hitDoc(id) {
+    var h = hits[id] && hits[id].hit;
+    if (h && typeof h.document === 'string' && h.document) return h.document;
+    return docOfId(id).doc;
+  }
+  var single = items.length ? !items.some(function (it) { return docOfId(it.id).doc; })
+                            : !hitOrder.some(function (id) { return hitDoc(id); });
+  var docItems = {}, docOrder = [];
+  items.forEach(function (it) {
+    var k = docOfId(it.id).doc || (single ? src.id : it.id);
+    if (!docItems[k]) { docItems[k] = []; docOrder.push(k); }
+    docItems[k].push(it);
+  });
+  var nDocs = items.length ? docOrder.length : null;
+  var nItems = src.count != null ? src.count : (items.length ? items.length : null);
+  var numbered = !!(single && items.length && items.filter(function (it) { return DOC_ORDINAL.test(it.title || ''); }).length * 2 > items.length);
+  var unit = numbered ? ['section', 'sections'] : ['passage', 'passages'];
+  var stItem = {};
+  ((st && st.items) || []).forEach(function (it) { stItem[it.id] = it; });
+  function given(id) { return !!(stItem[id] && stItem[id].state === 'given'); }
+  function relied(id) { return !!(stItem[id] && stItem[id].relied); }
+  var givenKnown = st ? st.givenKnown : !hitOrder.length;
+  // The same text in more than one hit (exact, ignoring whitespace and case).
+  var byText = {};
+  hitOrder.forEach(function (id) { var t = hits[id].hit.text; if (t && String(t).trim()) (byText[normText(t)] = byText[normText(t)] || []).push(id); });
+  var titleOf = {};
+  items.forEach(function (it) { titleOf[it.id] = it.title || it.id; });
+  function passageView(id) {
+    var v = hits[id], h = v.hit, k = hitDoc(id), n = docOfId(id).n;
+    var siblings = k && docItems[k] ? docItems[k] : [];
+    var m = siblings.length || (typeof h.passages === 'number' ? h.passages : null);
+    if (!(k && docItems[k]) && h.document) n = null;          // an id's "#n" is a passage number only on a declared map
+    n = n || (typeof h.passage === 'number' ? h.passage : null);
+    var page = typeof h.page === 'number' ? h.page : null;
+    var loc;
+    if (single) loc = titleOf[id] != null ? titleOf[id] : (h.title || id);
+    else if (m === 1) loc = 'whole file';
+    else loc = [page ? 'page ' + Math.trunc(page) : null, n && m ? 'passage ' + n + ' of ' + m : (n ? 'passage ' + n : null)].filter(Boolean).join(' · ');
+    var same = (byText[normText(h.text)] || []).filter(function (x) { return x !== id; });
+    return { id: id, rank: v.rank, state: given(id) ? 'given' : 'found', relied: relied(id), location: loc || null,
+             page: page ? Math.trunc(page) : null, n: n || null, of: m || null, score: h.score != null ? h.score : null,
+             snippet: snippet(h.text || '', v.query) || null, same_text_as: h.text && String(h.text).trim() ? same : [] };
+  }
+  var found = hitOrder.slice().sort(function (a, b) { return hits[a].rank - hits[b].rank; });
+  var nGiven = found.filter(given).length, nRelied = found.filter(relied).length;
+  var matched = {};
+  found.forEach(function (id) { matched[single ? src.id : (hitDoc(id) || id)] = true; });
+  var model = {
+    source: { id: src.id, title: src.title || src.id, kind: src.kind != null ? src.kind : null, description: src.description || '' },
+    layout: numbered ? 'sections' : 'documents',
+    counts: { documents: nDocs, items: nItems, unit: unit[1], found: found.length, given: givenKnown ? nGiven : null, relied: nRelied,
+              documents_matched: single ? (found.length ? 1 : 0) : Object.keys(matched).length }
+  };
+  var c = model.counts;
+  var searched = single && items.length ? 'Searched ' + model.source.title : nDocs != null ? 'Searched ' + plural(nDocs, 'document') : 'Searched';
+  model.line = [searched, nItems != null ? plural(nItems, unit[0], unit[1]) : '',
+                c.given != null ? c.given + ' given to the AI' : c.found + ' found · given to the AI: not known',
+                c.relied + ' relied on'].join(' · ').replace(' ·  · ', ' · ');
+  if (numbered) {
+    model.sections = items.map(function (it, i) {
+      return { id: it.id, face: docFace(it.title || '', i, true), title: it.title || it.id,
+               state: hits[it.id] ? (given(it.id) ? 'given' : 'found') : 'could', rank: hits[it.id] ? hits[it.id].rank : null, relied: relied(it.id) };
+    });
+  }
+  if (numbered || single) {
+    if (!numbered) model.document = { title: model.source.title, parts: items.length };
+    model.passages = found.map(function (id) { return Object.assign(passageView(id), { title: titleOf[id] != null ? titleOf[id] : id }); });
+    return model;
+  }
+  var docs = {}, shownOrder = [];
+  found.forEach(function (id) {
+    var k = hitDoc(id) || id;
+    if (!docs[k]) {
+      var its = docItems[k] || [];
+      docs[k] = { file: k, title: (its.length ? its[0].title : hits[id].hit.title) || k, passages_total: its.length || null,
+                  best_rank: hits[id].rank, relied: false, passages: [], more: 0 };
+      shownOrder.push(k);
+    }
+    var pv = passageView(id);
+    docs[k].relied = docs[k].relied || pv.relied;
+    if (docs[k].passages.length < DOC_PER_CAP) docs[k].passages.push(pv); else docs[k].more++;
+  });
+  var shown = shownOrder.map(function (k) { return docs[k]; });
+  shown.forEach(function (d) {
+    d.title_shared = shown.filter(function (o) { return o.title === d.title; }).length > 1;
+    var inn = {};
+    d.passages.forEach(function (p) { p.same_text_as.forEach(function (o) { var od = hitDoc(o) || o; if (od !== d.file) inn[od] = true; }); });
+    d.same_text_in = Object.keys(inn).sort();
+  });
+  model.documents = shown;
+  model.not_matched = nDocs != null ? nDocs - shown.length : null;
+  return model;
+}
+
+// ---- the calls inside one step ---------------------------------------------------------------------
+/* The model and tool calls one step made, in the order they STARTED (a call's event is stamped at its
+   end, so a long early call would otherwise sort after a short later one). Each call's start is
+   `ts − latency_ms`; a call with no duration is a point at its `ts` (`timed: false`). A nested step
+   (an event whose parent_step_id is this step) contributes its calls one level down (`depth: 1`).
+   Calls whose times overlap ran at the same time (`with`: the numbers of the calls it overlapped);
+   a tool call answers the model call whose `tool_calls` carried its `call_id` (`askedBy`).
+   Returns {calls, start, end, span (seconds), ai, tools, tokIn, tokOut, cost, priced}. */
+export function callSequence(events, stepId) {
+  var mine = {}, kids = {};
+  mine[stepId] = true;
+  events.forEach(function (e) { if (e.step_id && e.parent_step_id && mine[e.parent_step_id] && !mine[e.step_id]) { kids[e.step_id] = true; } });
+  var stepEvs = events.filter(function (e) { return e.step_id === stepId; });
+  var calls = events.filter(function (e) { return (e.event_type === 'llm_call' || e.event_type === 'tool_call') && (e.step_id === stepId || kids[e.step_id]); }).map(function (e) {
+    var d = e.data || {}, lat = typeof d.latency_ms === 'number' ? d.latency_ms / 1000 : null;
+    return { ev: e, kind: e.event_type === 'llm_call' ? 'ai' : 'tool', depth: e.step_id === stepId ? 0 : 1,
+             start: lat != null ? e.ts - lat : e.ts, end: e.ts, dur: lat, timed: lat != null, seq: e.seq != null ? e.seq : 0 };
+  });
+  calls.sort(function (a, b) { return (a.start - b.start) || (a.seq - b.seq); });
+  calls.forEach(function (c, i) { c.n = i + 1; c.with = []; });
+  var EPS = 0.0005;
+  calls.forEach(function (a) {
+    calls.forEach(function (b) {
+      if (a !== b && a.timed && b.timed && a.start < b.end - EPS && b.start < a.end - EPS && a.dur > EPS && b.dur > EPS) a.with.push(b.n);
+    });
+  });
+  var byCallId = {};
+  calls.forEach(function (c) {
+    if (c.kind !== 'ai') return;
+    ((c.ev.data || {}).tool_calls || []).forEach(function (t) { if (t && t.id != null) byCallId[String(t.id)] = c.n; });
+  });
+  calls.forEach(function (c) { var id = (c.ev.data || {}).call_id; c.askedBy = c.kind === 'tool' && id != null && byCallId[String(id)] ? byCallId[String(id)] : null; });
+  var started = stepEvs.filter(function (e) { return e.event_type === 'step_started'; })[0];
+  var fin = stepEvs.filter(function (e) { return e.event_type === 'step_finished'; })[0];
+  var start = started ? started.ts : calls.length ? Math.min.apply(null, calls.map(function (c) { return c.start; })) : null;
+  var end = fin ? fin.ts : calls.length ? Math.max.apply(null, calls.map(function (c) { return c.end; })) : null;
+  if (calls.length) { start = Math.min(start, Math.min.apply(null, calls.map(function (c) { return c.start; }))); end = Math.max(end, Math.max.apply(null, calls.map(function (c) { return c.end; }))); }
+  var tokIn = 0, tokOut = 0, cost = 0, priced = true;
+  calls.forEach(function (c) {
+    if (c.kind !== 'ai') return;
+    var d = c.ev.data || {};
+    tokIn += d.input_tokens || 0; tokOut += d.output_tokens || 0;
+    if (d.cost_usd != null) cost += Number(d.cost_usd); else priced = false;
+  });
+  return { calls: calls, start: start, end: end, span: start != null && end != null ? Math.max(0.001, end - start) : 0,
+           ai: calls.filter(function (c) { return c.kind === 'ai'; }).length, tools: calls.filter(function (c) { return c.kind === 'tool'; }).length,
+           tokIn: tokIn, tokOut: tokOut, cost: cost, priced: priced && calls.some(function (c) { return c.kind === 'ai'; }) };
+}
+/* Whether a step is worth showing as a sequence: it made more than one call and used a tool, or
+   asked the AI more than once (an agent loop inside one step). */
+export function isCallLoop(seq) { return !!seq && seq.calls.length > 1 && (seq.tools > 0 || seq.ai > 1); }
+
+function shortValue(v, n) {
+  if (v == null) return '';
+  if (typeof v === 'string') { var j = null; try { j = JSON.parse(v); } catch (e) {} if (j && typeof j === 'object') v = j; else return short(v.replace(/\s+/g, ' '), n || 60); }
+  if (Array.isArray(v)) {
+    var best = v[0] && typeof v[0] === 'object' ? v[0] : null, bt = best && (best.title || best.name);
+    return v.length + (v.length === 1 ? ' result' : ' results') + (bt ? ' · best: ' + (best.id != null && best.id !== bt ? best.id + ' ' : '') + '“' + short(String(bt), 60) + '”' : '');
+  }
+  if (typeof v === 'object') {
+    var ks = Object.keys(v);
+    if (ks.length === 1 && typeof v[ks[0]] !== 'object') return '“' + short(String(v[ks[0]]), n || 60) + '”';
+    var lead = v.name != null ? 'name' : v.title != null ? 'title' : null;
+    var rest = ks.filter(function (k) { return k !== lead && v[k] != null && typeof v[k] !== 'object'; }).slice(0, lead ? 2 : 3);
+    return short((lead ? [String(v[lead])] : []).concat(rest.map(function (k) { return human(k) + ' ' + String(v[k]); })).join(' · ') || ks.join(', '), n || 90);
+  }
+  return String(v);
+}
+/* A call in plain words, for Presentation: {title, result}. Nothing app-specific: the tool's own name
+   (humanised), its arguments and result in short, and for a model call what its answer asked for. */
+export function callWords(c, seq) {
+  var d = c.ev.data || {};
+  if (c.kind === 'ai') {
+    var before = seq.calls.filter(function (x) { return x.kind === 'ai' && x.n < c.n; }).length;
+    var asked = (d.tool_calls || []).map(function (t) { return human(t.name || 'a tool'); });
+    var last = !asked.length && !seq.calls.some(function (x) { return x.kind === 'ai' && x.n > c.n; });
+    var title = before === 0 ? (asked.length ? 'Asked the AI what to do first' : 'Asked the AI') : last ? 'Asked the AI to finish' : 'Asked the AI again';
+    var result = asked.length ? (asked.length > 1 ? 'it asked for ' + asked.length + ' things at once: ' : 'it asked for ') + asked.join(', ')
+      : (last && seq.calls.length > 1 ? 'it wrote its answer and stopped' : 'it answered');
+    return { title: title, result: result, tok: (d.input_tokens || d.output_tokens) ? fmtNum(d.input_tokens) + '→' + fmtNum(d.output_tokens) + ' tok' : '' };
+  }
+  var args = shortValue(d.arguments, 48);
+  return { title: 'Used ' + human(d.tool || 'a tool') + (args ? ' ' + args : ''), result: d.result != null ? shortValue(d.result, 90) : (d.status ? String(d.status) : ''), tok: '' };
+}
+
+// ---- a step's line on the map --------------------------------------------------------------------
+/* The one line under a step's name on Presentation's map: its time first, then what's worth knowing
+   at a glance (tokens and cost for the AI, "16 sections → 4" for a search, who approved, the record a
+   tool made, the calls an agent loop made). {v: the lead value, rest: [strings], pips: ['ai'|'tool']}. */
+export function stepMeta(topo, events, id, steps, opts) {
+  opts = opts || {};
+  var node = nodeOf(topo, id) || {};
+  if (!steps || !steps.length) return { v: opts.finished ? 'not reached' : '', rest: [], off: true };
+  var mine = [];
+  steps.forEach(function (s) { mine = mine.concat(s.events || []); });
+  var ms = steps.reduce(function (a, s) { return a + (s.latency != null ? s.latency : s.end != null && s.start != null ? (s.end - s.start) * 1000 : 0); }, 0);
+  var time = opts.running ? fmtMs(opts.runningMs || 0) + '…' : fmtMs(ms) + (steps.length > 1 ? ' ×' + steps.length : '');
+  var err = mine.filter(function (e) { return e.event_type === 'error'; })[0];
+  if (err && !opts.running) return { v: '✕ error', rest: [time] };
+  var resolved = mine.filter(function (e) { return e.event_type === 'gate_resolved'; }).pop();
+  var waiting = mine.filter(function (e) { return e.event_type === 'gate_waiting'; })[0];
+  if (resolved) { var rd = resolved.data || {}; return { v: rd.approved ? 'approved' : 'denied', rest: rd.by ? ['by ' + rd.by] : [] }; }
+  if (waiting) return { v: 'waiting', rest: ['for a person'] };
+  var sid = steps[steps.length - 1].id;
+  var seq = sid ? callSequence(events, sid) : null;
+  if (isCallLoop(seq)) return { v: seq.calls.length + ' calls', rest: [time], pips: seq.calls.map(function (c) { return c.kind; }) };
+  var calls = mine.filter(function (e) { return e.event_type === 'llm_call'; });
+  if (calls.length) {
+    var tin = 0, tout = 0, cost = 0;
+    calls.forEach(function (e) { var d = e.data || {}; tin += d.input_tokens || 0; tout += d.output_tokens || 0; cost += Number(d.cost_usd || 0); });
+    return { v: time, rest: [(tin || tout) ? fmtNum(tin) + '→' + fmtNum(tout) + ' tok' : null, cost ? fmtUsd(cost) : null].filter(Boolean) };
+  }
+  if (mine.some(function (e) { return e.event_type === 'retrieval'; })) {
+    var docs = documentsStep(topo, events, id), m = docs[0];
+    if (m) {
+      var c = m.counts;
+      var lead = c.documents && c.documents > 1 ? fmtNum(c.documents) + ' files · ' : '';
+      return { v: time, rest: [lead + (c.items != null ? fmtNum(c.items) + ' ' + c.unit + ' → ' : 'found ') + c.found] };
+    }
+  }
+  var tool = mine.filter(function (e) { return e.event_type === 'tool_call'; }).pop();
+  if (tool) {
+    var td = tool.data || {}, made = null;
+    Object.keys(td).forEach(function (k) { var v = td[k]; if (!made && v && typeof v === 'object' && !Array.isArray(v) && v.id != null) made = v; });
+    return { v: made ? String(made.id) : time, rest: [human(td.tool || 'tool')].concat(made ? [] : []) };
+  }
+  var badge = stepBadge(topo, events, id, steps);
+  badge = String(badge || '').replace(/^→\s*/, '');
+  return { v: time, rest: badge ? [badge] : [] };
+}
+
+/* Letters for the steps this run didn't take (A, B, C … in map order), so the panel can name one
+   ("goes to B · Check the answer"). Only once the run is over: before that, any step may still come. */
+export function stepLetters(topo, numbers, order) {
+  var out = {}, k = 0;
+  (order || ((topo && topo.nodes) || []).map(function (n) { return n.id; })).forEach(function (id) {
+    if (numbers && numbers[id]) return;
+    out[id] = String.fromCharCode(65 + (k % 26)) + (k >= 26 ? String(Math.floor(k / 26)) : '');
+    k++;
+  });
+  return out;
 }

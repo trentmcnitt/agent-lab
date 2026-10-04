@@ -198,7 +198,10 @@ def normalize(attrs: dict[str, Any]) -> dict[str, Any]:
     if "llm.output_messages" in groups:
         a.setdefault("gen_ai.output.messages", json.dumps(_oi_messages(groups["llm.output_messages"])[0]))
     if "retrieval.documents" in groups:
-        docs = [{"id": r.get("document.id"), "score": r.get("document.score"), "content": r.get("document.content")}
+        # document.metadata (a JSON string: stock LangChain loaders put the file in `source`, plus
+        # `page` for PDFs) is kept, so a Level 0 run's hits still say which file and page they are.
+        docs = [{"id": r.get("document.id"), "score": r.get("document.score"), "content": r.get("document.content"),
+                 "metadata": r.get("document.metadata")}
                 for _, r in sorted(groups["retrieval.documents"].items())]
         a.setdefault("gen_ai.retrieval.documents", [{k: v for k, v in d.items() if v is not None} for d in docs])
     if kind == "TOOL":
@@ -308,10 +311,22 @@ def _hits(docs: Any, source: str | None) -> list[dict]:
         text = _first(d, "content", "text")
         if text is not None:
             h["text"] = text if isinstance(text, str) else json.dumps(text)
+        # The loader's metadata (Level 0, OpenInference): the file a passage came from is its
+        # document, and a numeric page is kept (SPEC 2, `retrieval`).
+        meta = _json(d.get("metadata"))
+        if isinstance(meta, dict):
+            src = meta.get("source") if meta.get("source") not in (None, "") else meta.get("file_path")
+            if isinstance(src, str) and src:
+                h["document"] = src
+                if d.get("id") is None:
+                    h["id"] = f"{src}#{i}"
+            page = meta.get("page")
+            if isinstance(page, (int, float)) and not isinstance(page, bool) and math.isfinite(page):
+                h["page"] = page
         # Other numeric keys a retriever reports (e.g. bm25 beside a fused score) are kept, as the
         # library sends them (SPEC 8.3): an app's story may show them.
         for k, v in d.items():
-            if (k not in h and k not in ("id", "title", "score", "content", "text") and isinstance(v, (int, float))
+            if (k not in h and k not in ("id", "title", "score", "content", "text", "metadata") and isinstance(v, (int, float))
                     and not isinstance(v, bool) and math.isfinite(v)):
                 h[k] = v
         out.append(h)
@@ -366,6 +381,13 @@ def _content_events(span: dict, a: dict, node: str, t0: float, t1: float, failed
                 v = "\n".join(p if isinstance(p := _parts(m), str) else json.dumps(p, ensure_ascii=False)
                               for m in v if isinstance(m, dict)) if all(isinstance(m, dict) for m in v) else v
             llm[dst] = v
+        # The tools this call asked for (tool_call parts of its output): each one's id is the
+        # tool_call event's call_id, so a viewer can say which answer asked for which tool.
+        asked = [{k: p[k] for k in ("id", "name", "arguments") if p.get(k) is not None}
+                 for m in (_json(a.get("gen_ai.output.messages")) or []) if isinstance(m, dict)
+                 for p in (m.get("parts") or []) if isinstance(p, dict) and p.get("type") == "tool_call"]
+        if asked:
+            llm["tool_calls"] = asked
         if a.get("agentlab.request.json_schema") is not None:
             llm["params"] = {"json_schema": _json(a["agentlab.request.json_schema"])}
         if a.get("gen_ai.usage.cost") is not None:
@@ -381,7 +403,7 @@ def _content_events(span: dict, a: dict, node: str, t0: float, t1: float, failed
                 llm.update(cost_usd=round(est, 6), cost_source="estimated", cost_basis="bench price table")
         out.append(ev(node, "llm_call", t1, llm))
     elif op == "execute_tool":
-        tc = {"tool": str(a.get("gen_ai.tool.name") or node)}
+        tc = {"tool": str(a.get("gen_ai.tool.name") or node), "latency_ms": round((t1 - t0) * 1000, 1)}
         for src, dst in (("gen_ai.tool.call.arguments", "arguments"), ("gen_ai.tool.call.result", "result"),
                          ("gen_ai.tool.call.id", "call_id")):
             if a.get(src) is not None:

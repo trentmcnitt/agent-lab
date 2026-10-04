@@ -93,6 +93,7 @@ A step is open from `step_started` to `step_finished`. Any event whose `node` ha
 | `messages` | Optional. The input messages exactly as sent, in order: `[{role, content}]`, where `content` is a string or the provider's content blocks (OTel `gen_ai.input.messages`). |
 | `output` | Optional. The raw output exactly as returned: text, or the tool call / structured object (OTel `gen_ai.output.messages`). |
 | `params` | Optional. Request parameters that shaped the output: `max_tokens`, `temperature`, tools offered, and so on. |
+| `tool_calls` | Optional. The tools this call asked for, from its output: `[{id, name, arguments}]`. Each `id` is a later `tool_call`'s `call_id`, so a viewer can say which answer asked for which tool. |
 | `context_items` | Optional. Source item ids (as in `retrieval` hits) the app says went into this prompt. A hint only, for redacted prompts: when the prompt text is there, the bench checks hits against it instead. |
 
 **Prompt and response are the point of the bench.** Send `system`, `messages` and `output` whenever you can. With `content_mode: "redacted"`, send them masked rather than omitting them, so the structure still shows. The bench shows them in its built-in Model I/O panel: exactly what the model was given and what it returned.
@@ -105,9 +106,9 @@ A step is open from `step_started` to `step_finished`. Any event whose `node` ha
 |---|---|
 | `chunk` | `text` (a streamed delta), `index` (0-based position in the stream). Optional; non-streaming apps never send it. |
 | `decision` | A branch choice or classification. `branch`: the branch taken out of this node, matching an edge's `from_branch` in the map (Agent Spec `branch_selected`); when present it names the taken edge exactly. Recommended: `rationale`, `confidence`. Optional `cited`: source item ids the decision rests on. App-specific keys are fine. |
-| `retrieval` | `hits`: array of `{id, title, score, text?}` plus any app-specific score fields. Optional `query`, and `source`: the map's `sources[].id` it searched. A hit's `text` is the only place item text reaches the bench. |
+| `retrieval` | `hits`: array of `{id, title, score, text?}` plus any app-specific score fields, and optionally where the passage sits: `document` (the file it came from, when the id doesn't say it as `<document>#<n>`), `page`, `passage` / `passages` (n of m in its document). Optional `query`, and `source`: the map's `sources[].id` it searched. A hit's `text` is the only place item text reaches the bench. |
 | `check_result` | One check that guards the app. `name`, `passed` (boolean). Optional: `state` (`passed` \| `failed` \| `not_on_path`), `detail`, `evidence` (source item ids it relied on), `kind` (open set: `grounding`, `policy`, `permission`, `format`, ...). App-specific keys are fine. `check` is accepted on ingest as an alias and stored as `check_result`. Emit it *alongside* a node's `decision`, never instead: `decision.branch` is what lights edges. |
-| `tool_call` | `tool` (name). Optional: `arguments`, `result`, `status`, `transport`. |
+| `tool_call` | `tool` (name). Optional: `arguments`, `result`, `status`, `transport`, `call_id` (the id the model gave the call, `gen_ai.tool.call.id`), `latency_ms` (the call's own duration: with `ts` at its end, `ts − latency_ms` is when it started, so calls inside one step can be ordered by start and shown overlapping). |
 | `error` | `message`. Optional: `type`, `retryable`. The step it belongs to should also finish with `status: "error"`. |
 
 ### Gates (human-in-the-loop)

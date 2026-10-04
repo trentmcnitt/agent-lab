@@ -43,12 +43,13 @@ def test_example_recordings(path):
     assert not list(TOPO.iter_errors(head["topology"]))
     ids = {n["id"] for n in head["topology"]["nodes"]}
     assert all(e["from"] in ids and e["to"] in ids for e in head["topology"]["edges"])
-    assert "BenchStory.register('hello-agent'" in head["story"]
+    if head["topology"]["app"]["id"] == "hello-agent":       # the hand-written example ships a story
+        assert "BenchStory.register('hello-agent'" in head["story"]
     check_run(events, head["topology"])
 
 
 def test_example_files_match_the_recordings():
-    head, _ = load(RECORDINGS[0])
+    head, _ = load(ROOT / "examples/hello-answer.recording.jsonl")
     assert json.loads((ROOT / "examples/hello-agent.topology.json").read_text()) == head["topology"]
 
 

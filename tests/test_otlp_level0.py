@@ -358,3 +358,31 @@ def test_tool_call_output_is_json_not_a_python_repr():
           if e["event_type"] == "llm_call"][0]
     assert json.loads(ev["data"]["output"])[0]["name"] == "lookup_order"
     assert "'" not in ev["data"]["output"]
+
+
+def test_a_tool_call_carries_its_duration_and_a_model_call_the_tools_it_asked_for():
+    out = json.dumps([{"role": "assistant", "parts": [
+        {"type": "tool_call", "id": "t1", "name": "get_user", "arguments": {"handle": "g"}},
+        {"type": "tool_call", "id": "t2", "name": "create_draft", "arguments": {"body": "Hi"}}]}])
+    llm = [e for e in otlp.convert(body(span("chat m1", "ab" * 8, attrs={**CHAT, "gen_ai.output.messages": out})))
+           if e["event_type"] == "llm_call"][0]
+    assert llm["data"]["tool_calls"] == [{"id": "t1", "name": "get_user", "arguments": {"handle": "g"}},
+                                         {"id": "t2", "name": "create_draft", "arguments": {"body": "Hi"}}]
+    t = {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": "get_user", "gen_ai.tool.call.id": "t1"}
+    tool = next(e for e in otlp.convert(body(span("execute_tool get_user", "ab" * 8, attrs=t))) if e["event_type"] == "tool_call")
+    assert tool["data"]["call_id"] == "t1" and isinstance(tool["data"]["latency_ms"], float)
+    assert not list(EVENT.iter_errors(tool))
+
+
+def test_level0_retrieval_keeps_the_file_and_page_the_loader_reported():
+    """OpenInference sends each document's metadata as one JSON string; stock LangChain loaders put the
+    file in `source`, plus `page` for PDFs (examples/messy_docs/REPORT). No document id is sent."""
+    r = {"openinference.span.kind": "RETRIEVER", "input.value": "loaner?",
+         "retrieval.documents.0.document.content": "LOANER UNIT PROGRAM. Effective immediately we can offer a loaner.",
+         "retrieval.documents.0.document.metadata": json.dumps({"source": "scan_0042.pdf", "page": 1}),
+         "retrieval.documents.1.document.content": "Ask a lead.",
+         "retrieval.documents.1.document.metadata": json.dumps({"source": "faq.md"})}
+    hits = next(e for e in otlp.convert(body(span("retrieve", "ab" * 8, "cd" * 8, attrs=r))) if e["event_type"] == "retrieval")["data"]["hits"]
+    assert hits[0] == {"id": "scan_0042.pdf#0", "document": "scan_0042.pdf", "page": 1,
+                       "text": "LOANER UNIT PROGRAM. Effective immediately we can offer a loaner."}
+    assert hits[1]["document"] == "faq.md" and "page" not in hits[1] and hits[1]["id"] == "faq.md#1"
