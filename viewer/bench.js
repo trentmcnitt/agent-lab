@@ -934,6 +934,7 @@
   var ACTOR_WORDS_P = { ai: 'The AI', rule: 'A rule', person: 'A person', app: 'The app' };
   var STAGE_BREAK = 600;   // map column width (px) below which the pane geometry is used
   var STACK_BREAK = 1100;  // window width at or below which the map and panel stack (index.html)
+  var MIN_NAME_PX = 14;    // the smallest a step's name is drawn beside the panel (a scrolling map below that)
   var ENG_STACK_BREAK = 820;
 
   /* The box's type (index.html's .snode rules, in px): the name (one or two lines), the line under
@@ -1027,6 +1028,7 @@
     var labels = this._edgeLabels(Lay, G);
     g.innerHTML = '<div class="graph" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + labels + boxes + '</div>';
     var gr = g.querySelector('.graph');
+    if (!g._scrollBound) { g._scrollBound = true; g.addEventListener('scroll', function () { self._placeMarker(); }); }
     /* Lines that meet on their way into one step share their last runs: their dashes are measured from
        that end, so where they overlap the dashes coincide (out of phase, they'd fill in to a solid line). */
     var into = {};
@@ -1041,8 +1043,14 @@
     // Fit the whole map in its room, by width and height (stacked: by width only, up to its size).
     function fit() {
       var availW = g.clientWidth - 8 || Lay.W, availH = g.clientHeight - 8;
-      var k = Math.min(mapOnly ? 1.5 : 1, availW / Lay.W);
+      var k = Math.min(mapOnly ? 1.5 : 1, availW / Lay.W), kw = k;
       if (!self._stacked() && availH > 80) k = Math.min(k, availH / Lay.H);
+      // A floor for a projector: step names never drawn under 14 px. A map too tall for that scrolls
+      // in its column instead (the step the panel is on is kept in view); M still shows it whole.
+      var floor = MIN_NAME_PX / (BOX_TYPE[which] || BOX_TYPE.stage).font;
+      var scroll = !mapOnly && !self._stacked() && k < floor && kw > k;
+      if (scroll) k = Math.min(kw, floor);
+      g.classList.toggle('scrolly', scroll);
       k = Math.max(k, 0.3);
       self._fitK = k;
       gr.style.transform = k !== 1 ? 'scale(' + k + ')' : '';
@@ -1210,6 +1218,12 @@
     var busy = S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; });
     clearTimeout(this._tick);
     if (busy) this._tick = setTimeout(function () { self.render(); }, 100);
+    // A scrolling map keeps the step the panel is on in view when that step changes.
+    if (focus !== this._focusShown) {
+      this._focusShown = focus;
+      var fe = focus && g.classList.contains('scrolly') && g.querySelector('.gnode.focus');
+      if (fe) { var gb = g.getBoundingClientRect(), fb = fe.getBoundingClientRect(); if (fb.top < gb.top + 8 || fb.bottom > gb.bottom - 8) g.scrollTop += fb.top - gb.top - gb.height / 2 + fb.height / 2; }
+    }
     S.focus = focus;
     S.numbers = nums;
     S.letters = letters;

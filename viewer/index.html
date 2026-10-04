@@ -282,6 +282,9 @@
   .ps-legend .lit { width: 18px; height: 2px; background: var(--path); box-shadow: 0 0 6px var(--path); }
   .ps-legend .dash { width: 18px; height: 0; border-top: 2px dashed var(--off-line); }
   .ps-map .graphwrap { position: relative; flex: 1 1 auto; min-height: 0; overflow: visible; }
+  .ps-map .graphwrap.scrolly { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2A2F3B transparent; }
+  /* Below 1600 px the panel gives the map a little more room. */
+  @media (max-width: 1600px) { .ps-stage { grid-template-columns: minmax(0, 1fr) minmax(0, 46%); } .bb-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); } .bb-card .why { font-size: 14px; } .bb-name { font-size: 26px; } }
   .ps-side { position: relative; z-index: 2; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
   .ps-bubble { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: none; border: 1px solid var(--border-2); border-radius: 14px;
                background: linear-gradient(180deg, #0F1117, #0B0D12); box-shadow: 0 20px 60px rgba(0,0,0,.45); }
