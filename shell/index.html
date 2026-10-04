@@ -33,7 +33,8 @@
   .bar .what:empty { display: none; }
   .bar .hint { min-width: 0; display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 11px 0 10px; border-radius: 99px; white-space: nowrap; overflow: hidden;
                font: 400 12.5px/1 var(--mono); color: color-mix(in srgb, var(--path) 82%, var(--text)); background: rgba(62,240,200,.06); border: 1px solid rgba(62,240,200,.22); }
-  .bar .hint[hidden] { display: none; }
+  .bar .hint[hidden], .bar .sep[hidden] { display: none; }
+  .bar .sep { flex: none; width: 1px; height: 22px; background: var(--border); margin: 0 6px 0 8px; }
   .bar .hint .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--path); box-shadow: 0 0 8px rgba(62,240,200,.8); }
   .bar .hint .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .bar .spacer { flex: 1; }
@@ -60,7 +61,7 @@
     .bar { flex-wrap: wrap; height: auto; row-gap: 8px; column-gap: 8px; padding: 9px 12px; }
     .bar .legend, .bar .brand .nm, .bar .brand .sub { display: none; }
     .bar .brand { padding-right: 10px; margin-right: 0; }
-    .bar #home, .bar .back .lg { display: none; }   /* the mark links home */
+    .bar #home, .bar .back .lg, .bar .sep { display: none !important; }   /* the mark links home */
     .bar .back .sm { display: inline; }
     .bar .spacer { display: none; }
     .bar .back { padding: 0 9px; gap: 5px; }
@@ -84,7 +85,7 @@
   <a class="back" id="back" hidden><span class="ic">←</span><span class="lg">All scenarios</span><span class="sm">Scenarios</span></a>
   <a class="back" id="home" hidden>Home</a>
   <span class="what" id="what"></span>
-  <span class="hint" id="hint" hidden><i class="dot"></i><span class="tx" id="hintTx"></span></span>
+  <span class="sep" id="hintSep" hidden></span><span class="hint" id="hint" hidden><i class="dot"></i><span class="tx" id="hintTx"></span></span>
   <span class="spacer"></span>
   <span class="muted legend">left: the app · right: what the AI did (read-only)</span>
 </div>
@@ -140,7 +141,7 @@
     if (!r.ok) document.getElementById('appPane').innerHTML = '<div class="missing"><b>This app isn\u2019t here.</b><span>The link may be out of date.</span>' +
       (q.get('back') ? '<a href="' + q.get('back') + '">← Back to all scenarios</a>' : '') + '</div>';
   }).catch(function () {});
-  if (q.get('hint')) { var h = document.getElementById('hint'); document.getElementById('hintTx').textContent = q.get('hint'); h.title = q.get('hint'); h.hidden = false; }
+  if (q.get('hint')) { var h = document.getElementById('hint'); document.getElementById('hintTx').textContent = q.get('hint'); h.title = q.get('hint'); h.hidden = false; document.getElementById('hintSep').hidden = false; }
 
   // One layout, always side by side (Trent, 09-29). The bench picks its own mode (Presentation
   // for the shell's sources) and migrates any old view choice itself, so nothing is cleared here.

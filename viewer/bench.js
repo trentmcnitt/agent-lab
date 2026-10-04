@@ -143,7 +143,7 @@
         '<div class="ps-stage" data-p="stage">' +
           '<section class="ps-map" data-p="map"><div class="ps-flowhead" data-p="flowhead"></div><div class="graphwrap" data-p="graph"></div>' +
             '<div class="ps-cue" data-p="cue" hidden></div><div class="edgetip" data-p="tip" hidden></div></section>' +
-          '<section class="ps-side" data-p="side"><div class="ps-now" data-p="now" aria-live="polite"></div>' +
+          '<section class="ps-side" data-p="side"><button class="ps-grab" data-act="mapview" title="Back to the whole map (M)" aria-label="Back to the whole map"><svg viewBox=\"0 0 16 16\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 6l4 4 4-4\"/></svg></button><div class="ps-now" data-p="now" aria-live="polite"></div>' +
             '<div class="ps-bubble" data-p="bubble" aria-live="polite"></div><div class="ps-more" data-p="more" hidden><span>▾ more below</span></div>' +
             '<div class="ps-drawer" data-p="drawer" aria-hidden="true"></div></section>' +
         '</div>' +
@@ -1808,7 +1808,8 @@
     var head = '<div class="bb-head"><span class="bb-num' + (S.numbers[id] ? '' : ' off') + '">' + esc(bn || '·') + '</span>' +
       '<span class="bb-name">' + esc(c.title) + '</span>' +
       '<span class="bb-who">' + esc(ACTOR_CHIP[c.actor] || c.actor) + '</span>' +
-      '<span class="bb-tag t-' + esc(c.status) + '"><i></i>' + esc(tagText) + '</span></div>';
+      '<span class="bb-tag t-' + esc(c.status) + '"><i></i>' + esc(tagText) + '</span>' +
+      '<button class="bb-min" data-act="mapview" title="Back to the whole map (M)"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg><span>Map</span></button></div>';
     // A step clicked while the run goes on: one press back to following it.
     var live = this.selectedNode && !finished && S.focusNode && S.focusNode !== id;
     if (live) head += '<button class="p-follow" data-act="clearsel" title="The detail follows the run again">↻ follow the run · step ' + esc(badgeOf(S, S.focusNode)) + '</button>';

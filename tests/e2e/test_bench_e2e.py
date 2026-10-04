@@ -514,7 +514,7 @@ def test_the_pane_keeps_the_map_on_top_and_one_marker(page, site):
     # The ringed step is the way back: no "whole map" button; on hover it says so, a click goes back.
     bench.locator(".pres .gnode[data-node=classify]").click()
     bench.locator("#bench.v-detail").wait_for()
-    assert bench.locator(".ps-mapbtn, [data-act=mapview]").count() == 0
+    assert bench.locator(".ps-mapbtn, [data-p=flowhead] [data-act=mapview]").count() == 0
     p.wait_for_timeout(600)
     ring = bench.locator(".pres .gnode.focus")
     ring.hover()
@@ -541,3 +541,13 @@ def test_the_pane_keeps_the_map_on_top_and_one_marker(page, site):
     bench.locator("#bench.v-map").wait_for()
     p.wait_for_timeout(300)
     assert bench.locator("[data-p=status]").inner_text() == status
+    # The sheet's own ways back: the tab on its top edge, and the button at the end of its header.
+    for ctl in ["[data-p=side] .ps-grab", "[data-p=bubble] .bb-min"]:
+        bench.locator(".pres .gnode[data-node=classify]").click()
+        bench.locator("#bench.v-detail").wait_for()
+        p.wait_for_timeout(500)
+        assert bench.locator(ctl).is_visible()
+        bench.locator(ctl).click()
+        bench.locator("#bench.v-map").wait_for()
+        p.wait_for_timeout(500)
+        assert not bench.locator("[data-p=side] .ps-grab").is_visible()

@@ -434,16 +434,16 @@
   .ps-map .edge .glow, .ps-map .edge .flow { display: none; }
   .ps-map .edge.untaken path.ln { opacity: .8; }
   .ps-map .edge.taken path.ln { stroke: var(--path); stroke-width: 2.4; stroke-dasharray: none; marker-end: none; }
-  .ps-map .edge.taken .glow { display: inline; fill: none; stroke: var(--path); stroke-width: 6; opacity: .42; filter: url(#pglow); }
-  .t-compact .edge.taken .glow { stroke-width: 4.5; }
+  .ps-map .edge.taken .glow { display: inline; fill: none; stroke: var(--path); stroke-width: 7; opacity: .6; filter: url(#pglow); }
+  .t-compact .edge.taken .glow { stroke-width: 5.5; }
   /* A finished run's path keeps a little energy: a soft halo in the path colour that breathes slowly,
      and a faint bloom on the line itself. Untaken (dashed) lines get none. */
-  .run-done .edge.taken path.ln { filter: drop-shadow(0 0 2px rgba(62,240,200,.45)); }
-  .run-done .edge.taken .glow { opacity: .5; animation: pbreathe 4s ease-in-out infinite; }
-  @keyframes pbreathe { 0%, 100% { opacity: .34; } 50% { opacity: .62; } }
+  .run-done .edge.taken path.ln { filter: drop-shadow(0 0 3px rgba(62,240,200,.6)); }
+  .run-done .edge.taken .glow { opacity: .7; animation: pbreathe 4s ease-in-out infinite; }
+  @keyframes pbreathe { 0%, 100% { opacity: .52; } 50% { opacity: .88; } }
   /* The line being travelled reads as travel: the lit line under it dimmed, bright dashes marching on it. */
   .ps-map .edge.flowing path.ln { stroke-opacity: .4; }
-  .ps-map .edge.flowing .glow { opacity: .26; }
+  .ps-map .edge.flowing .glow { opacity: .36; }
   .ps-map .edge.flowing .flow { display: inline; fill: none; stroke: #E6FFF9; stroke-width: 2.8; stroke-linecap: round; stroke-dasharray: 6 8; opacity: 1; animation: pflow .5s linear infinite; filter: drop-shadow(0 0 3px rgba(62,240,200,.9)); }
   .ps-map .edge.flowing.to-person .flow { stroke: #FFE3A6; }
   @keyframes pflow { to { stroke-dashoffset: -14; } }
@@ -462,7 +462,7 @@
   @media (prefers-reduced-motion: reduce) {
     .ps-map .edge.flowing .flow { animation: none; stroke-dasharray: none; opacity: .45; }
     .ps-map .edge.flowing path.ln { stroke-opacity: 1; }
-    .run-done .edge.taken .glow { animation: none; opacity: .5; }
+    .run-done .edge.taken .glow { animation: none; opacity: .7; }
     .v-detail .pres .snode.focus .s-back, .fh-back { animation: none !important; }
     .snode.active::after, .snode.starting::after { animation: none; display: none; }
     .snode.gatewait { animation: none; box-shadow: 0 0 0 1px rgba(255,200,87,.55), 0 0 22px rgba(255,200,87,.3); }
@@ -474,6 +474,18 @@
   /* ---- the panel ---- */
   .bb { padding: 22px 32px 26px; font: 400 18px/1.5 var(--sans); color: var(--text); }
   .bb-head { display: flex; align-items: center; gap: 16px; }
+  /* Two ways back to the whole map from a step's detail (besides clicking the ringed step, or M):
+     a tab on the sheet's top edge, and a quiet button at the end of the step's header. */
+  .bb-min { all: unset; box-sizing: border-box; flex: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px 0 8px; border-radius: 7px;
+            font: 400 13px/1 var(--mono); color: var(--text-3); border: 1px solid var(--border-2); background: transparent; transition: color .15s, border-color .15s, background-color .15s; }
+  .bb-min:hover { color: var(--text); border-color: color-mix(in srgb, var(--path) 55%, var(--border-2)); background: var(--surface-2); }
+  .bb-min:focus-visible, .ps-grab:focus-visible { outline: 2px solid var(--path); outline-offset: 2px; }
+  .ps-grab { display: none; }
+  .v-detail .pres .ps-grab { all: unset; box-sizing: border-box; position: absolute; z-index: 5; top: 0; left: 50%; transform: translate(-50%, -50%); cursor: pointer;
+            display: grid; place-items: center; width: 46px; height: 18px; border-radius: 99px; color: var(--text-3);
+            background: var(--surface-2); border: 1px solid var(--border-2); box-shadow: 0 4px 12px rgba(0,0,0,.45); transition: color .15s, border-color .15s, width .15s; }
+  .v-detail .pres .ps-grab:hover { color: var(--text); border-color: color-mix(in srgb, var(--path) 55%, var(--border-2)); width: 54px; }
+  .v-detail .pres .ps-grab:focus-visible { outline: 2px solid var(--path); outline-offset: 2px; }
   .bb-num { flex: none; width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; font: 600 20px/1 var(--mono); background: var(--acc); color: #0B0C10; box-shadow: 0 0 22px color-mix(in srgb, var(--acc) 50%, transparent); }
   .bb-num.off { background: color-mix(in srgb, var(--acc) 22%, #0B0D12); color: var(--text); border: 1.5px solid color-mix(in srgb, var(--acc) 60%, transparent); box-shadow: none; }
   .bb-name { min-width: 0; font: 600 30px/1.1 var(--sans); letter-spacing: -.02em; }
@@ -621,6 +633,8 @@
   .p-given:hover { color: var(--text); border-color: var(--ai); }
   /* The detail at pane width (the bench beside an app): the same card, its type a size down. */
   @container (max-width: 900px) {
+    .bb-min { width: 30px; height: 30px; padding: 0; justify-content: center; }
+    .bb-min span { display: none; }
     .bb { padding: 16px 18px 22px; font-size: 16px; }
     .bb-head { gap: 12px; }
     .bb-num { width: 36px; height: 36px; font-size: 17px; border-radius: 9px; }
