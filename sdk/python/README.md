@@ -5,7 +5,7 @@ The library an app uses to show up on the Agent Lab bench with nothing typed twi
 ```toml
 # the app's pyproject.toml
 [tool.uv.sources]
-agentlab = { path = "../agent-lab-bench/sdk/python", editable = true }
+agentlab = { path = "../agent-lab/sdk/python", editable = true }   # a clone of trentmcnitt/agent-lab beside your app
 ```
 
 ## Three kinds of information, each with one home

@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <a href="https://agentlab.trentmcnitt.com">Try the lab</a> · <a href="#quickstart">Quickstart</a> · <a href="SPEC.md">Spec</a> · <a href="ROADMAP.md">Roadmap</a>
+  <a href="https://agentlab.trentmcnitt.com">Try the lab</a> · <a href="#-quickstart">Quickstart</a> · <a href="SPEC.md">Spec</a> · <a href="ROADMAP.md">Roadmap</a>
 </p>
 
 <p align="center">
@@ -131,7 +131,7 @@ The library sends, with every run, the map of everything the app *could* do, rea
 dependencies = ["agentlab[langgraph]"]
 
 [tool.uv.sources]
-agentlab = { path = "../agent-lab-bench/sdk/python", editable = true }
+agentlab = { path = "../agent-lab/sdk/python", editable = true }   # a clone of trentmcnitt/agent-lab beside your app
 ```
 
 **The quickstart.** This is all an existing LangGraph app needs to show its whole flow:
