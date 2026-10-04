@@ -193,6 +193,13 @@ export function reduce(run, ev, now) {
   var t = ev.event_type;
   if (t === 'step_started') run.explicit = true;
   if (t === 'run_started') { run.label = d.label || (d.input ? short(d.input, 90) : null); run.input = d.input; run.started = d; return; }
+  // What the bench learned about the run after opening it (an agentlab run's input arrives on its
+  // run span, which ends last; a map can arrive after the first steps): merged into run_started.
+  if (t === 'run_updated') {
+    run.started = Object.assign({}, run.started || {}, d);
+    if (d.input !== undefined) { run.input = d.input; if (!(run.started && run.started.label)) run.label = d.input ? short(d.input, 90) : run.label; }
+    return;
+  }
   if (t === 'run_finished') {
     run.status = d.status; run.output = d.output != null ? d.output : run.output;
     Object.keys(run.open).forEach(function (sid) { var s = run.steps[sid]; s.end = ev.ts; s.inferred = true; s.status = s.status || 'ok'; s.arrEnd = now; });
@@ -318,12 +325,12 @@ export function visits(events) {
    pauses on its own: after each moment node's visit, at a gate's "waiting" too, and at the end. */
 export function cursorStops(events, topo) {
   var vs = visits(events), m = momentNodes(topo), last = events.length - 1;
-  var steps = vs.map(function (v) { return v.last; });
+  var steps = vs.map(function (v, i) { return visitStop(vs, i, events, topo); });
   var moments = [];
-  vs.forEach(function (v) {
+  vs.forEach(function (v, i) {
     if (!m[v.node]) return;
     if (v.gateAt != null && v.gateAt < v.last) moments.push(v.gateAt);
-    moments.push(v.last);
+    moments.push(visitStop(vs, i, events, topo));
   });
   function fin(a) {
     if (last >= 0 && a.indexOf(last) < 0) a.push(last);
@@ -378,7 +385,7 @@ export function preview(steps, mode, sourceCount, isCheck, topo) {
       else if (e.event_type === 'gate_resolved') out = d.approved ? '✓ approved' : '✕ denied';
       else if (e.event_type === 'gate_waiting') out = out || (pres ? '⏸ waiting for a person' : '⏸ waiting for a human');
       else if (e.event_type === 'check_result' && ((pres && isCheck) || !out)) {
-        var st = checkEventState(e), w = checkWord(topo, isCheck ? e.node : d.name, st);
+        var st = checkEventState(e), w = checkWord(topo, isCheck ? e.node : d.name, st, d.words);
         checked = true;
         out = w ? CHECK_SYM[st] + ' ' + w : st === 'passed' ? '✓ passed' : st === 'failed' ? '✕ didn’t pass' : '– not needed';
       }
@@ -408,12 +415,19 @@ var CHECK_SYM = { passed: '✓', failed: '✕', not_on_path: '–' };
 /* A check's own words for its states, from the map's `check_words` (keyed by the check's name, or
    a check node's id): {"passed": "Didn't trigger", "failed": "Triggered: sent to a person"}.
    Missing states fall back to Passed / Didn't pass / Not needed this time. */
-export function checkWord(topo, key, state) {
+export function checkWord(topo, key, state, words) {
+  // The check's own words, sent with it by the code that ran it (check_result.data.words), win
+  // over the map's check_words, which only hand-written maps carry.
+  if (words && typeof words[state] === 'string' && words[state]) return words[state];
   var w = topo && topo.check_words && topo.check_words[key];
   return w && typeof w[state] === 'string' && w[state] ? w[state] : null;
 }
-function stateHead(topo, key, state) {
-  var w = checkWord(topo, key, state);
+function eventWords(evs) {
+  for (var i = evs.length - 1; i >= 0; i--) { var w = (evs[i].data || {}).words; if (w && typeof w === 'object') return w; }
+  return null;
+}
+function stateHead(topo, key, state, words) {
+  var w = checkWord(topo, key, state, words);
   return w ? CHECK_SYM[state] + ' ' + w.replace(/[.\s]+$/, '') + '.' : CHECK_WORDS[state];
 }
 function fillCopy(s, d) {
@@ -445,7 +459,7 @@ export function checkStates(topo, events, finished) {
       var done = nodeEvents(events, n.id).some(function (e) { return e.event_type === 'step_finished'; });
       state = errored ? 'failed' : done || finished ? 'ran' : 'running';
     } else state = finished ? 'not_on_path' : 'pending';
-    rows.push(checkRow(n.id, plainLabel(n), n.description || '', state, detail, evidence, stateCopy(n), topo));
+    rows.push(checkRow(n.id, plainLabel(n), n.description || '', state, detail, evidence, stateCopy(n), topo, eventWords(evs)));
     evs.forEach(function (e) { byName[(e.data || {}).name] = true; });
   });
   var named = {};
@@ -460,12 +474,12 @@ export function checkStates(topo, events, finished) {
     var evs = named[name], states = evs.map(checkEventState);
     var state = states.indexOf('failed') >= 0 ? 'failed' : states.every(function (s) { return s === 'not_on_path'; }) ? 'not_on_path' : 'passed';
     var d = evs[evs.length - 1].data || {};
-    rows.push(checkRow(name, d.label || human(name), d.description || '', state, d.detail || null, d.evidence || [], null, topo));
+    rows.push(checkRow(name, d.label || human(name), d.description || '', state, d.detail || null, d.evidence || [], null, topo, eventWords(evs)));
   });
   return rows;
 }
-function checkRow(id, label, description, state, detail, evidence, copy, topo) {
-  var line = copy && copy[state] ? fillCopy(copy[state], { detail: detail }) : stateHead(topo, id, state) + (detail && state !== 'passed' ? ' ' + detail : '');
+function checkRow(id, label, description, state, detail, evidence, copy, topo, words) {
+  var line = copy && copy[state] ? fillCopy(copy[state], { detail: detail }) : stateHead(topo, id, state, words) + (detail && state !== 'passed' ? ' ' + detail : '');
   return { id: id, label: label, description: description, state: state, detail: detail, evidence: evidence, line: line.trim() };
 }
 
@@ -487,10 +501,18 @@ function hitSource(topo, ev, hit) {
   var docs = srcs.filter(function (s) { return s.kind === 'documents'; });
   return docs.length === 1 ? docs[0].id : '_search';
 }
+/* A hit's text, if it can be looked for in a prompt: masked text ("[redacted]" in place of the
+   whole document) would match any masked prompt, so it counts only with 12 or more characters
+   left once placeholders are taken out. */
+function matchText(h) {
+  var t = h && typeof h.text === 'string' ? h.text.trim() : '';
+  return t && t.replace(new RegExp(PLACEHOLDER.source, 'gi'), '').replace(/\s+/g, '').length >= 12 ? t : '';
+}
 /* Per declared source (plus a "_search" pseudo-source for hits no declared source owns):
    every item with its state, and the count line. "given" is verified, not trusted: the hit's
    text must appear in a later model call's prompt in the same run. Without prompt text to
-   check against, it stays "found by the search" (context_items, if sent, is noted as a hint). */
+   check against, it stays "found by the search" (context_items, if sent, is noted as a hint),
+   and `givenKnown` is false: the count is unknown, never zero. */
 export function sourceStates(topo, events) {
   var srcs = ((topo && topo.sources) || []).map(function (s) { return s; });
   var prompts = promptTexts(events);
@@ -525,7 +547,7 @@ export function sourceStates(topo, events) {
     var f = found[s.id] || {};
     var items = (s.items || []).map(function (it) { return { id: it.id, title: it.title }; });
     Object.keys(f).forEach(function (id) { if (!items.some(function (it) { return it.id === id; })) items.push({ id: id, title: f[id].hit.title || id }); });
-    var given = 0, nfound = 0, nrelied = 0, hinted = 0;
+    var given = 0, nfound = 0, nrelied = 0, hinted = 0, withText = 0;
     items.forEach(function (it) {
       var h = f[it.id];
       it.state = 'could';
@@ -534,7 +556,8 @@ export function sourceStates(topo, events) {
         it.state = 'found';
         it.text = h.hit.text || null;
         it.hit = h.hit;
-        var txt = h.hit.text && h.hit.text.trim();
+        var txt = matchText(h.hit);
+        if (txt) withText++;
         if (txt && prompts.some(function (p) { return p.ts >= h.ts && p.text.indexOf(txt) >= 0; })) { it.state = 'given'; given++; }
         else if (prompts.some(function (p) { return p.context.indexOf(it.id) >= 0; })) { it.hinted = true; hinted++; }
       }
@@ -548,10 +571,23 @@ export function sourceStates(topo, events) {
       else parts.push((checkable ? 'Found ' : 'Search found ') + nfound + (total != null ? ' of ' + total : '') + (checkable ? ', none of it given to the AI' : ''));
       if (nrelied) parts.push((given ? 'its answer rests on ' : 'rests on ') + nrelied);
     }
+    // Whether "given" is a measured number: nothing found (nothing to give), or prompt text and
+    // hit text to compare. Content not captured, or masked whole, leaves it unknown.
+    var givenKnown = nfound === 0 || given > 0 || (checkable && withText > 0);
     return { id: s.id, title: s.title, kind: s.kind, description: s.description || '', count: total, items: items,
-             found: nfound, given: given, relied: nrelied, hinted: hinted, verified: verified, undeclared: !!s._undeclared,
-             line: parts.join(' · ') };
+             found: nfound, given: given, givenKnown: givenKnown, relied: nrelied, hinted: hinted, verified: verified,
+             undeclared: !!s._undeclared, line: parts.join(' · ') };
   }).concat([]).filter(function (s) { return !s.undeclared || s.found; }).map(function (s) { s.anyRetrieval = anyRetrieval; return s; });
+}
+/* One source in the universal form, the same for every app: what it holds, what the AI was given
+   from it, what the answer rests on. "N available · M given to the AI · K relied on". */
+export function sourceCountsLine(s) {
+  var parts = [];
+  if (s.count != null) parts.push(fmtNum(s.count) + ' available');
+  if (s.found && !s.givenKnown) parts.push(fmtNum(s.found) + ' found · given to the AI: not known');
+  else parts.push(fmtNum(s.given) + ' given to the AI');
+  parts.push(fmtNum(s.relied) + ' relied on');
+  return parts.join(' · ');
 }
 export function sourcesLine(states, finished) {
   var used = states.filter(function (s) { return s.found; });
@@ -568,6 +604,7 @@ export function clock(ts) {
 }
 function proposedTitle(p) {
   if (!p || typeof p !== 'object') return p ? String(p) : '';
+  p = proposalObject(p) || p;
   return p.title || p.summary || p.action_type && human(p.action_type) || p.route_to && ('route to ' + p.route_to) || '';
 }
 export function gateState(topo, events, finished) {
@@ -647,9 +684,11 @@ export function costLine(info) {
   if (!info.priced) return 'AI cost not known';
   return (info.known ? '' : 'at least ') + costWords(info.usd) + (info.usd > 0 ? ' of AI' : '') + (info.known ? '' : ' (some calls carry no price)');
 }
-export function baselineOf(events) {
+export function baselineOf(events, topo) {
   var b = null;
   events.forEach(function (e) { if (e.event_type === 'run_finished' && e.data && typeof e.data.baseline === 'string') b = e.data.baseline; });
+  // A map built by the agentlab library carries the app's baseline (app.baseline).
+  if (!b && topo && topo.app && typeof topo.app.baseline === 'string') b = topo.app.baseline;
   return b ? b.replace(/^\s*manual\s*:\s*/i, '').trim() : null;
 }
 
@@ -688,9 +727,11 @@ export function outcome(topo, events) {
   if (fd.status === 'error' || err) text = 'Something went wrong' + (err ? ': ' + err : '');
   else if (gate && gate.approved === false) text = 'Stopped: a person said no, so nothing was done';
   else if (named && OUTCOME[named] === 'Done' || (!named && gate && gate.approved)) {
-    var acts = (topo && topo.actions) || [], t = action && (action.action_type || action.type);
+    // The proposal may be nested ({proposed_action: {...}, ...}): read the object that has the title.
+    var po = proposalObject(action) || action;
+    var acts = (topo && topo.actions) || [], t = po && (po.action_type || po.type);
     var act = acts.filter(function (a) { return a.id === t; })[0];
-    var what = act ? act.title : proposedTitle(action);
+    var what = act ? act.title : proposedTitle(po);
     text = 'Done' + (what ? ': ' + what : '') + (gate && gate.approved ? ', approved by a person' : '');
   }
   // An outcome word ("handed_off") is put in plain words; free text (an answer) is the app's, verbatim.
@@ -735,7 +776,7 @@ export function narrate(topo, events, id, opts) {
       // With the map's own words for this state: those words, then the detail. Without: the
       // symbol and the detail (an app's detail says the verdict itself), else Passed / Didn't pass.
       var key = node && node.kind === 'check' ? id : d.name;
-      var said = checkWord(topo, key, st) ? stateHead(topo, key, st) + (d.detail ? ' ' + d.detail : '')
+      var said = checkWord(topo, key, st, d.words) ? stateHead(topo, key, st, d.words) + (d.detail ? ' ' + d.detail : '')
         : d.detail ? CHECK_WORDS[st].split(' ')[0] + ' ' + d.detail : CHECK_WORDS[st];
       lines.push({ kind: 'state', cls: st, text: copy && copy[st] ? who + fillCopy(copy[st], d) : who + said });
     } else if (t === 'gate_waiting') {
@@ -766,7 +807,7 @@ export function narrate(topo, events, id, opts) {
       if (!s.anyRetrieval || !s.found) return;
       var txt = mine.map(function (e) { var d = e.data || {}; return [evText(d.system)].concat((d.messages || []).map(function (m) { return evText(m && m.content); })).join('\n'); }).join('\n');
       if (!txt.trim()) return;
-      var n = s.items.filter(function (it) { return it.text && it.text.trim() && txt.indexOf(it.text.trim()) >= 0; }).length;
+      var n = s.items.filter(function (it) { var t = matchText(it); return t && txt.indexOf(t) >= 0; }).length;
       lines.push({ kind: 'given', text: s.title + ': ' + (n ? 'this step was given ' + n + (s.count != null ? ' of ' + s.count : '') + '.'
                                                          : 'this step was given none of it.') });
     });
@@ -944,5 +985,404 @@ export function inferMap(events, appId, appName) {
     app: { id: appId || 'app', name: appName || appId || 'app', description: 'map inferred from the trace' },
     nodes: nodes.map(function (n) { return { id: n, label: n, plain_label: inferredLabel(n, kinds[n]), kind: kinds[n] || 'step' }; }),
     edges: edges, panels: []
+  };
+}
+
+// ---- the map a run carried, and the checks on it (SPEC.md 8.6, 8.7) ------------------------------
+/* The hash of the map this run carried (run_started.data.map_hash, or a run_updated that brought
+   it later). The bench serves that map at /maps/<hash>; a run without one is drawn with the
+   registered map, else one inferred from its trace. */
+export function runMapHash(events) {
+  var h = null;
+  (events || []).forEach(function (e) {
+    if ((e.event_type === 'run_started' || e.event_type === 'run_updated') && e.data && typeof e.data.map_hash === 'string') h = e.data.map_hash;
+  });
+  return h;
+}
+/* Which map to draw a run with: the one it carried (`maps` is hash -> map, what the viewer has
+   fetched), else the app's registered map, else an inferred one. `wait` is true when the run
+   names a map the viewer doesn't have yet (fetch it, then draw). */
+export function chooseMap(events, maps, registered, inferred) {
+  var h = runMapHash(events);
+  if (h && maps && maps[h]) return { map: maps[h], from: 'run', hash: h, wait: false };
+  if (registered) return { map: registered, from: 'registered', hash: h, wait: !!h };
+  return { map: inferred || null, from: 'inferred', hash: h, wait: !!h };
+}
+
+var SEVERITY = { error: 0, warning: 1, info: 2 };
+/* "Checks on this map", for Engineering: the findings the app's own `agentlab.verify` wrote into the
+   map (derived.warnings, R0-R6 and R12), then what this run shows (R7-R11, R13). Every rule checks
+   that a hand-written or reported name exists in the structure the code produced; none of them
+   judges whether the words are right. Returns [{code, severity, node?, branch?, message, from}],
+   errors first. */
+export function mapChecks(topo, events) {
+  events = events || [];
+  var out = [], seen = {};
+  function add(f) {
+    var k = f.code + '|' + (f.node || '') + '|' + (f.branch || '') + '|' + f.message;
+    if (seen[k]) return;
+    seen[k] = true;
+    out.push(f);
+  }
+  ((topo && topo.derived && topo.derived.warnings) || []).forEach(function (w) {
+    add({ code: w.code, severity: w.severity, node: w.node, branch: w.branch, message: w.message, from: 'map' });
+  });
+  events.forEach(function (e) {
+    var d = e.data || {};
+    if ((e.event_type === 'run_started' || e.event_type === 'run_updated') && typeof d.map_error === 'string')
+      add({ code: 'R13', severity: 'error', message: d.map_error.replace(/^R13:\s*/, '') + ' This run is drawn with a map inferred from its trace.', from: 'run' });
+  });
+  // The run-time rules need a map the app stands behind; an inferred one is made from these events.
+  if (topo && !topo.inferred) {
+    var nodes = {}, edges = (topo.edges || []), items = {}, sources = {};
+    (topo.nodes || []).forEach(function (n) { nodes[n.id] = n; });
+    (topo.sources || []).forEach(function (src) { sources[src.id] = true; (src.items || []).forEach(function (it) { items[it.id] = true; }); });
+    var hasItems = Object.keys(items).length > 0;
+    var unknownNodes = {}, uncited = {}, llmNodes = {};
+    events.forEach(function (e) {
+      var d = e.data || {};
+      if (e.node !== '_run' && !nodes[e.node]) unknownNodes[e.node] = true;                                      // R7
+      if (e.event_type === 'decision' && d.branch != null && nodes[e.node]) {                                    // R8
+        var outs = edges.filter(function (ed) { return ed.from === e.node; });
+        if (!outs.some(function (ed) { return ed.from_branch === String(d.branch); }))
+          add({ code: 'R8', severity: 'error', node: e.node, branch: String(d.branch), from: 'run',
+                message: 'reported branch "' + d.branch + '", which ' + e.node + ' doesn’t have' +
+                  (outs.length ? ' (its branches: ' + outs.map(function (ed) { return ed.from_branch || ed.to; }).join(', ') + ')' : '') + '.' });
+      }
+      if (hasItems && (e.event_type === 'decision' || e.event_type === 'check_result')) {                       // R9
+        ((e.event_type === 'decision' ? d.cited : d.evidence) || []).forEach(function (id) { if (!items[id]) uncited[id] = e.node; });
+      }
+      if (e.event_type === 'retrieval') {
+        if (d.source && !sources[d.source])
+          add({ code: 'R9', severity: 'warning', node: e.node, from: 'run', message: 'searched "' + d.source + '", which the map lists no source for.' });
+        if (d.stale_index)
+          add({ code: 'R9', severity: 'warning', node: e.node, from: 'run',
+                message: 'stale index: the search ran on a different version of "' + (d.source || 'its source') + '" than the one this run’s map lists (the index was rebuilt elsewhere?).' });
+      }
+      if (e.event_type === 'llm_call' && nodes[e.node]) {                                                         // R11
+        var who = actorOf(nodes[e.node]);
+        if (who === 'rule' || who === 'app') llmNodes[e.node] = who;
+      }
+    });
+    Object.keys(unknownNodes).forEach(function (n) {
+      add({ code: 'R7', severity: 'warning', node: n, from: 'run', message: 'events name "' + n + '", which isn’t a step on this map (shown in the unmapped row).' });
+    });
+    Object.keys(uncited).forEach(function (id) {
+      add({ code: 'R9', severity: 'warning', node: uncited[id], from: 'run', message: 'cites "' + id + '", which no source on the map lists.' });
+    });
+    Object.keys(llmNodes).forEach(function (n) {
+      add({ code: 'R11', severity: 'warning', node: n, from: 'run', message: n + ' is marked as done by ' + (llmNodes[n] === 'rule' ? 'a rule' : 'the app') + ', but it called the AI.' });
+    });
+    // R10: a node whose path map sends two branches to the same step can't be read from what ran
+    // next; the run must say which branch it took.
+    var manyToOne = {};
+    edges.forEach(function (ed) {
+      if (ed.from_branch == null) return;
+      var k = ed.from + '>' + ed.to;
+      manyToOne[k] = (manyToOne[k] || 0) + 1;
+    });
+    var seq = [];
+    topLevel(events).forEach(function (e) { if (seq[seq.length - 1] !== e.node) seq.push(e.node); });
+    for (var i = 1; i < seq.length; i++) {
+      var k = seq[i - 1] + '>' + seq[i];
+      if ((manyToOne[k] || 0) < 2) continue;
+      var said = events.some(function (e) { return e.node === seq[i - 1] && e.event_type === 'decision' && e.data && e.data.branch != null; });
+      if (!said) add({ code: 'R10', severity: 'warning', node: seq[i - 1], from: 'run',
+                      message: seq[i - 1] + ' went to ' + seq[i] + ', which more than one of its branches leads to, and didn’t report which: the path isn’t lit.' });
+    }
+  }
+  return out.sort(function (a, b) { return (SEVERITY[a.severity] - SEVERITY[b.severity]) || String(a.code).localeCompare(String(b.code), 'en', { numeric: true }); });
+}
+
+// ---- Presentation: the stage (map + one callout) and the recap --------------------------------------
+/* Everything below builds plain view models for Presentation's callout and recap from the map and
+   the run's events. Nothing here knows any app: words come from the map (plain_label, description,
+   edges' plain_label/description, x-not-needed, never, actions) and facts from standard events.
+   bench.js only turns these objects into HTML. */
+
+/* The run's request and reply. A run's input/output may be a string or the app's own state object
+   (an agentlab run carries the graph's input and final state). For an object, the request text is
+   the first string field named like a message, the reply the first named like a response; failing
+   that, the longest string field. This key-name reading is a stopgap until the run declares which
+   field is the request and which the reply (see the 10-03 UI report's handoffs). */
+var REQUEST_KEY = /(^|_)(message|text|query|question|prompt|input|request|content|task)$/i;
+var REPLY_KEY = /(^|_)(reply|response|answer|output|result|completion)$/i;
+var WHO_KEY = /^(requester|user|sender|author|customer|from|caller|asker)(_?name)?$/i;
+var ROLE_KEY = /(^|_)(role|access|tier)$/i;
+function stringFields(o) {
+  return Object.keys(o).filter(function (k) { return typeof o[k] === 'string' && o[k].trim(); });
+}
+function pickText(v, re) {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.trim() || null;
+  if (typeof v !== 'object' || Array.isArray(v)) return null;
+  var keys = stringFields(v);
+  var named = keys.filter(function (k) { return re.test(k); });
+  if (named.length) return v[named[0]].trim();
+  var longest = keys.sort(function (a, b) { return v[b].length - v[a].length; })[0];
+  return longest ? v[longest].trim() : null;
+}
+/* {text, who}: who is "<name> · <role>" when the input or run_started.data names them. */
+export function requestOf(events) {
+  var started = null;
+  events.forEach(function (e) { if (e.event_type === 'run_started' || e.event_type === 'run_updated') started = Object.assign({}, started || {}, e.data || {}); });
+  var input = started && started.input;
+  var who = requesterOf(events);
+  if (!who && input && typeof input === 'object' && !Array.isArray(input)) {
+    var keys = stringFields(input);
+    var name = keys.filter(function (k) { return WHO_KEY.test(k); })[0];
+    var role = keys.filter(function (k) { return ROLE_KEY.test(k); })[0];
+    who = [name && input[name], role && input[role]].filter(Boolean).join(' · ');
+  }
+  return { text: pickText(input, REQUEST_KEY) || (started && started.label) || null, who: who || '' };
+}
+// The reply the run ended with, as text (a string output, or the response-named field of an object).
+export function replyOf(output) {
+  if (output == null) return null;
+  if (typeof output === 'string') return output.trim() || null;
+  if (typeof output !== 'object' || Array.isArray(output)) return null;
+  var keys = stringFields(output).filter(function (k) { return REPLY_KEY.test(k); });
+  return keys.length ? output[keys[0]].trim() : null;
+}
+
+/* Run-order numbers: the first time each node ran is its number (1, 2, 3 …), the way the map
+   labels the lit path. `seq` is the shown node order (bench.js's _shown().seq). */
+export function stepNumbers(seq) {
+  var out = {}, n = 0;
+  (seq || []).forEach(function (id) { if (out[id] == null) out[id] = ++n; });
+  return out;
+}
+
+/* Where the presenter's cursor can stop for one node: a gate's "waiting" first, else the end of
+   that node's first visit (with a branching node's lookahead, see cursorStops). -1 if it never ran. */
+export function stopAt(events, topo, node) {
+  var vs = visits(events);
+  var i = vs.findIndex(function (v) { return v.node === node; });
+  if (i < 0) return -1;
+  var v = vs[i];
+  if (v.gateAt != null) return v.gateAt;
+  return visitStop(vs, i, events, topo);
+}
+/* A visit's stop. A node whose next step depends on a branch only shows which way it went once
+   the next step has started (the branch is derived from what ran next, A7), so its stop includes
+   the next visit's step_started. The callout stays on the branching node (see focus in bench.js). */
+function visitStop(vs, i, events, topo) {
+  var v = vs[i], nx = vs[i + 1];
+  if (nx && hasBranches(topo, v.node) && events[nx.first] && events[nx.first].event_type === 'step_started') return nx.first;
+  return v.last;
+}
+
+var SUBJECT = { ai: 'The AI', rule: 'The rules', person: 'A person', app: 'The app' };
+var CHOSE = { ai: 'chose', rule: 'said', person: 'chose', app: 'went with' };
+function nextOf(topo, id) {
+  var outs = ((topo && topo.edges) || []).filter(function (e) { return e.from === id; });
+  return outs.length === 1 && !outs[0].from_branch ? outs[0].to : null;
+}
+function branchLabel(ed) { return ed.plain_label || human(ed.from_branch || ed.when || ''); }
+
+/* The branch cards for a node with two or more named paths: each path's own words, where it goes,
+   and whether this run took it (null until the run shows it). [] for a node with no branches. */
+export function choiceCards(topo, events, id) {
+  var outs = ((topo && topo.edges) || []).filter(function (e) { return e.from === id && (e.from_branch || e.when); });
+  if (outs.length < 2) return [];
+  var taken = takenEdges(topo, events);
+  var any = outs.some(function (e) { return taken[e.from + '>' + e.to]; });
+  return outs.map(function (e) {
+    return { branch: e.from_branch || e.when, label: branchLabel(e), description: e.description || '', to: e.to,
+             toLabel: plainLabel(nodeOf(topo, e.to), e.to), chosen: any ? !!taken[e.from + '>' + e.to] : null };
+  });
+}
+
+/* What a gate asks a person to approve, from gate_waiting.proposed, as a card: the object that has
+   a title or description (the proposal itself, or the first one inside it), its kind put in the
+   map's own words when the map lists that action, and its other short plain fields. */
+function proposalObject(p) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
+  if (p.title != null || p.description != null || p.summary != null) return p;
+  var keys = Object.keys(p);
+  for (var i = 0; i < keys.length; i++) {
+    var v = p[keys[i]];
+    if (v && typeof v === 'object' && !Array.isArray(v) && (v.title != null || v.description != null || v.summary != null)) return v;
+  }
+  return p;
+}
+var KIND_KEY = /^(action_type|action|type|kind)$/;
+export function proposalCard(proposed, topo) {
+  if (proposed == null) return null;
+  if (typeof proposed !== 'object') return { kicker: null, title: String(proposed), description: null, fields: [] };
+  var o = proposalObject(proposed) || {};
+  var kindKey = Object.keys(o).filter(function (k) { return KIND_KEY.test(k) && typeof o[k] === 'string'; })[0];
+  var act = kindKey && ((topo && topo.actions) || []).filter(function (a) { return a.id === o[kindKey]; })[0];
+  var fields = Object.keys(o).filter(function (k) {
+    var v = o[k];
+    return k !== 'title' && k !== 'summary' && k !== 'description' && k !== kindKey && !ENG_ONLY_KEY.test(k) &&
+      (typeof v === 'string' ? v.trim() !== '' : typeof v === 'number' || typeof v === 'boolean');
+  }).slice(0, 4).map(function (k) { return { name: human(k).replace(/^./, function (c) { return c.toUpperCase(); }), value: String(o[k]) }; });
+  return { kicker: act ? act.title : (kindKey ? human(o[kindKey]) : null), title: o.title || o.summary || null,
+           description: typeof o.description === 'string' ? o.description : null, fields: fields };
+}
+
+/* One source in the callout: what it holds, item by item, with each item's state this run and,
+   for what the search found, its rank (1 = best match). */
+function sourceView(s, events) {
+  var rank = {};
+  events.forEach(function (e) {
+    if (e.event_type !== 'retrieval') return;
+    ((e.data || {}).hits || []).forEach(function (h, i) { if (rank[h.id] == null) rank[h.id] = i + 1; });
+  });
+  // Whether the AI has been asked anything yet: before that, "given" is "not yet", not unknown.
+  var asked = events.some(function (e) { return e.event_type === 'llm_call'; });
+  return { id: s.id, title: s.title, count: s.count, found: s.found, given: s.given, givenKnown: s.givenKnown, relied: s.relied, asked: asked,
+           line: sourceCountsLine(s), undeclared: s.undeclared,
+           items: s.items.map(function (it) { return { id: it.id, title: it.title || it.id, state: it.state, relied: !!it.relied, rank: rank[it.id] || null, text: it.text || null }; }) };
+}
+function itemTitle(topo, id) {
+  var t = null;
+  ((topo && topo.sources) || []).forEach(function (s) { (s.items || []).forEach(function (it) { if (it.id === id) t = it.title || id; }); });
+  return t || id;
+}
+
+/* The callout for one node: a header, ONE headline sentence, then evidence objects keyed by what
+   the node's events contain. opts: {finished, last (the run's last shown node), numbers (stepNumbers),
+   reply (text), starting (the run's newest step has started but shown nothing yet)}. */
+export function callout(topo, events, id, opts) {
+  opts = opts || {};
+  var node = nodeOf(topo, id), evs = nodeEvents(events, id), actor = actorOf(node), kind = (node && node.kind) || 'step';
+  var nums = opts.numbers || {};
+  var out = { id: id, n: nums[id] || null, title: plainLabel(node, id), technical: techLabel(node, id), actor: actor, kind: kind,
+              status: 'done', headline: [], sub: null, choices: [], reason: null, checks: [], sources: [], given: [],
+              proposal: null, ifNext: [], did: null, wrote: null, reply: null, why: null, about: null, ran: evs.length > 0 };
+  var about = node && node.description;
+  out.about = about ? { label: kind === 'gate' ? 'Who can sign off' : 'About this step', text: about } : null;
+  function head(t) { out.headline = Array.prototype.slice.call(arguments).map(function (x) { return typeof x === 'string' ? { t: x } : x; }); }
+  var nx = nextOf(topo, id), nextWords = nx ? plainLabel(nodeOf(topo, nx), nx) : null;
+
+  if (!evs.length) {
+    out.status = opts.finished ? 'not_needed' : 'pending';
+    head(opts.finished ? (node && node['x-not-needed']) || 'Not needed this time: this run didn’t come this way.' : 'Not reached yet.');
+    return out;
+  }
+  var err = evs.filter(function (e) { return e.event_type === 'error'; })[0];
+  var waiting = evs.filter(function (e) { return e.event_type === 'gate_waiting'; })[0];
+  var resolved = evs.filter(function (e) { return e.event_type === 'gate_resolved'; }).pop();
+  var decision = evs.filter(function (e) { return e.event_type === 'decision' && e.data && e.data.rationale; }).pop();
+  var finishedStep = evs.some(function (e) { return e.event_type === 'step_finished'; });
+  out.status = finishedStep ? 'done' : 'now';
+
+  // Evidence objects -------------------------------------------------------------------------------
+  out.choices = choiceCards(topo, events, id);
+  if (decision) {
+    var d = decision.data;
+    out.reason = { text: d.rationale, cited: (d.cited || []).map(function (c) { return { id: c, title: itemTitle(topo, c) }; }) };
+  }
+  var isCheck = kind === 'check';
+  evs.forEach(function (e) {
+    if (e.event_type !== 'check_result') return;
+    var c = e.data || {}, st = checkEventState(e), key = isCheck ? id : c.name;
+    var w = checkWord(topo, key, st, c.words);
+    out.checks.push({ label: isCheck ? plainLabel(node, id) : (c.label || human(c.name || 'check').replace(/^./, function (x) { return x.toUpperCase(); })),
+                      state: st, word: w || { passed: 'Passed', failed: 'Didn’t pass', not_on_path: 'Not needed' }[st],
+                      detail: c.detail || null, evidence: (c.evidence || []).map(function (x) { return { id: x, title: itemTitle(topo, x) }; }) });
+  });
+  var hitsHere = evs.some(function (e) { return e.event_type === 'retrieval'; });
+  var states = sourceStates(topo, events);
+  if (hitsHere) {
+    var ids = {};
+    evs.forEach(function (e) { if (e.event_type === 'retrieval') ((e.data || {}).hits || []).forEach(function (h) { ids[h.id] = true; }); });
+    out.sources = states.filter(function (s) { return s.items.some(function (it) { return ids[it.id]; }); }).map(function (s) { return sourceView(s, events); });
+  }
+  var calls = evs.filter(function (e) { return e.event_type === 'llm_call'; });
+  if (calls.length) {
+    // What this step's own model calls were given from the sources, when the prompts say.
+    var txt = calls.map(function (e) { var cd = e.data || {}; return [evText(cd.system)].concat((cd.messages || []).map(function (m) { return evText(m && m.content); })).join('\n'); }).join('\n');
+    if (txt.trim()) states.forEach(function (s) {
+      if (!s.found) return;
+      var n = s.items.filter(function (it) { var t = matchText(it); return t && txt.indexOf(t) >= 0; }).length;
+      out.given.push({ title: s.title, n: n, of: s.count });
+    });
+    var last = calls[calls.length - 1].data || {};
+    // What it wrote, for a step whose answer isn't already a decision's reason.
+    if (!decision && last.output != null) {
+      var fields = answerFields(last.output);
+      out.wrote = fields ? { fields: fields.filter(function (f) { return !ENG_ONLY_KEY.test(f.name); }).map(function (f) { return { name: human(f.name), value: f.value }; }) }
+                         : { text: evText(last.output) };
+    }
+  }
+  var tool = evs.filter(function (e) { return e.event_type === 'tool_call'; }).pop();
+  if (tool) {
+    var td = tool.data || {}, made = null;
+    Object.keys(td).forEach(function (k) { var v = td[k]; if (!made && v && typeof v === 'object' && !Array.isArray(v) && (v.title || v.id)) made = v; });
+    out.did = { what: human(td.tool || td.name || 'a tool'), title: made && made.title ? String(made.title) : null, ref: made && made.id != null ? String(made.id) : null };
+  }
+  if (waiting || resolved) {
+    var card = proposalCard(waiting && (waiting.data || {}).proposed, topo);
+    out.proposal = Object.assign({ state: resolved ? (resolved.data.approved ? 'approved' : 'denied') : 'waiting',
+                                   by: resolved ? (resolved.data.by || null) : null, at: resolved ? resolved.ts : null }, card || { kicker: null, title: null, description: null, fields: [] });
+  }
+
+  // The headline: one sentence per state, from the map's words -------------------------------------
+  var taken = takenOut(topo, events, id).filter(function (ed) { return ed.from_branch || ed.when; })[0];
+  var isLast = opts.finished && opts.last === id;
+  if (err) {
+    out.status = 'error';
+    head('Something went wrong here: ' + ((err.data || {}).message || 'an error') + '.');
+  } else if (waiting && !resolved) {
+    out.status = 'waiting';
+    head('Nothing goes ahead until a person approves ', { t: 'exactly this', em: true }, '.');
+    out.ifNext = ((topo && topo.edges) || []).filter(function (e) { return e.from === id; }).map(function (e) {
+      return { label: e.from_branch || e.when ? branchLabel(e) : null, to: plainLabel(nodeOf(topo, e.to), e.to) };
+    });
+  } else if (resolved) {
+    var rd = resolved.data || {};
+    head((rd.approved ? 'Approved by ' : 'Not approved: ') + (rd.by || 'a person'), taken ? ', so next: ' + plainLabel(nodeOf(topo, taken.to), taken.to) + '.' : '.');
+  } else if (taken) {
+    out.sub = taken.description || null;
+    head(SUBJECT[actor] + ' ' + CHOSE[actor] + ' ', { t: branchLabel(taken), em: true }, ', so next: ' + plainLabel(nodeOf(topo, taken.to), taken.to) + '.');
+  } else if (out.choices.length) {
+    head(SUBJECT[actor] + ' is choosing one of ' + out.choices.length + ' paths.');
+  } else if (isLast) {
+    // handled below: the run's ending is this step's headline
+  } else if (out.sources.length) {
+    var s0 = out.sources[0];
+    head('Found ', { t: s0.found + (s0.count != null ? ' of ' + s0.count : ''), em: true }, nextWords ? '; next: ' + nextWords + '.' : '.');
+  } else if (out.did) {
+    head(out.did.title ? 'Done: ' + out.did.title + '.' : 'Done: ' + out.did.what + '.');
+  } else if (calls.length) {
+    head(SUBJECT.ai + ' worked on this step' + (nextWords ? '; next: ' + nextWords + '.' : '.'));
+  } else {
+    var first = about ? String(about).split(/(?<=[.!?])\s+/)[0] : null;
+    head(first || (plainLabel(node, id) + (nextWords ? '; next: ' + nextWords + '.' : '.')));
+  }
+
+  // The run's ending, on its last step: the outcome, the reply, and (handed over) the AI's reason.
+  if (isLast) {
+    out.status = 'last';
+    var oc = outcome(topo, events);
+    if (!err) head({ t: oc.text, em: true }, '.');
+    out.reply = opts.reply || null;
+    if (oc.why) {
+      var dn = null;
+      events.forEach(function (e) { if (e.event_type === 'decision' && e.data && e.data.rationale === oc.why) dn = e.node; });
+      if (!(decision && decision.data.rationale === oc.why)) out.why = { text: oc.why, atStep: dn && nums[dn] ? nums[dn] : null, at: dn ? plainLabel(nodeOf(topo, dn), dn) : null };
+    }
+  }
+  return out;
+}
+
+/* The closing recap: the four questions, answered from this run. */
+export function recap(topo, events, finished, seq) {
+  var oc = outcome(topo, events);
+  var states = sourceStates(topo, events);
+  return {
+    did: { text: oc.text || (events.length ? 'Still running' : 'Nothing has run yet'), path: (seq || []).map(function (id) { return { id: id, title: plainLabel(nodeOf(topo, id), id), actor: actorOf(nodeOf(topo, id)) }; }) },
+    looked: states.map(function (s) {
+      var v = sourceView(s, events);
+      v.shown = v.items.filter(function (it) { return it.state === 'given' || it.state === 'found'; })
+        .sort(function (a, b) { return (b.relied - a.relied) || ((a.rank || 99) - (b.rank || 99)); });
+      return v;
+    }),
+    checked: checkStates(topo, events, finished),
+    signed: gateState(topo, events, finished),
+    never: (topo && topo.never) || []
   };
 }

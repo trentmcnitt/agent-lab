@@ -70,7 +70,6 @@
     this.inferred = null;                        // Level 0: {appId, name} when no map was registered
     this.transport = null;
     this.tstate = null;
-    this.presOpen = {};
     this.picker = null;
     this.pair = null;
     this.overlay = null;
@@ -113,21 +112,23 @@
       '</section>' +
       '</div>' +
       '<div class="pres">' +
-        '<header class="p-head">' +
-          '<div class="p-req" data-p="req"></div>' +
-          '<div class="p-sub"><span class="p-appname" data-p="appname"></span><span class="p-who" data-p="who"></span><span class="p-inferred" data-p="inferred" hidden>map inferred from the trace</span>' +
-            '<span class="bh-spacer"></span><span data-p="picker"></span>' + toggle + '</div>' +
-          '<div class="p-outrow"><div class="p-out"><div data-p="outcome"></div><div class="p-why" data-p="why"></div></div><div class="p-transport" data-p="transport"></div></div>' +
+        // Presentation (Build spec v3, the A+B hybrid): the map is the stage; ONE callout bubble,
+        // joined to the step it explains by a wedge, says what happened there. A quiet footer.
+        '<header class="ps-head">' +
+          '<div class="ps-brand"><span class="p-appname" data-p="appname"></span><span class="ps-modename">Presentation</span></div>' +
+          '<div class="ps-ask"><div class="ps-who" data-p="who"></div><div class="ps-req" data-p="req"></div></div>' +
+          '<div class="ps-right"><span class="ps-status" data-p="status"></span>' +
+            '<div class="ps-tools"><span class="p-inferred" data-p="inferred" hidden>map inferred from the trace</span><span data-p="picker"></span>' + toggle + '</div></div>' +
         '</header>' +
-        '<div class="p-main">' +
-          '<section class="p-graph"><div class="graphwrap" data-p="graph"></div><div class="edgetip" data-p="tip" hidden></div>' +
-            '<button class="p-mapbtn" data-p="mapbtn" title="Give the map the whole screen (for a room); again to bring the details back">⤢ Map only</button></section>' +
-          '<section class="p-side">' +
-            '<div class="p-now" data-p="now"></div>' +
-            '<div class="p-rows" data-p="rows"></div>' +
-          '</section>' +
+        '<div class="ps-stage" data-p="stage">' +
+          '<svg class="ps-wedge" data-p="wedge" aria-hidden="true"></svg><svg class="ps-seam" data-p="seam" aria-hidden="true"></svg>' +
+          '<section class="ps-map"><div class="graphwrap" data-p="graph"></div><div class="edgetip" data-p="tip" hidden></div></section>' +
+          '<section class="ps-side" data-p="side"><div class="ps-bubble" data-p="bubble" aria-live="polite"></div></section>' +
         '</div>' +
-        '<footer class="p-bottom" data-p="bottom"></footer>' +
+        '<footer class="ps-foot"><div class="ps-facts" data-p="bottom"></div>' +
+          '<div class="ps-ctl"><div class="p-transport" data-p="transport"></div>' +
+            '<button class="ps-key" data-act="maponly" title="The map alone, for the whole-system view (M)"><kbd>M</kbd> Map</button>' +
+            '<button class="ps-key" data-act="recap" title="The run in four answers (R)"><kbd>R</kbd> Recap</button></div></footer>' +
         '<div class="p-overlay" data-p="overlay" hidden></div>' +
       '</div>';
     this.f = {}; this.p = {};
@@ -139,24 +140,9 @@
       b.onclick = function () { self.setViewMode(b.getAttribute('data-v'), true); };
     });
     // Delegated clicks for everything Presentation redraws.
-    this.p.now.onclick = this.p.rows.onclick = this.p.bottom.onclick = this.p.overlay.onclick = this.p.transport.onclick = this.p.why.onclick = function (e) { self._presClick(e); };
-    this.p.mapbtn.onclick = function () {
-      self.mapOnly = !self.mapOnly;
-      self.root.classList.toggle('p-maponly', self.mapOnly);
-      self.p.mapbtn.textContent = self.mapOnly ? '⤡ Show details' : '⤢ Map only';
-      if (self._fit) self._fit();
-    };
+    this.root.querySelector('.pres').addEventListener('click', function (e) { self._presClick(e); });
     this.f.download.onclick = function () { self.downloadMap(); };
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && self.overlay) { self.overlay = null; self.render(); return; }
-      // A presenter's keys (and clicker, which sends PageUp/PageDown): step, and Space to play/pause.
-      if (self.mode !== 'presentation' || self.overlay || !self.transport || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target && e.target.tagName) || '') && e.key === ' ') return;
-      if (/^(INPUT|SELECT|TEXTAREA)$/.test((e.target && e.target.tagName) || '')) return;
-      var act = { ArrowRight: 'next', PageDown: 'next', ArrowLeft: 'back', PageUp: 'back' }[e.key];
-      if (e.key === ' ') act = self._tstateShown === 'playing' ? 'pause' : self._tstateShown === 'done' ? 'restart' : 'play';
-      if (act && self.transport[act]) { e.preventDefault(); self.selectedNode = null; self.transport[act](); }
-    });
+    document.addEventListener('keydown', function (e) { self._presKey(e); });
     var res = this._resolveMode();
     this.setViewMode(res.mode, false);
   };
@@ -349,14 +335,12 @@
     this._raf = (global.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(function () { self._raf = null; self.render(); });
   };
 
-  Bench.prototype._graphEl = function () { return this.mode === 'presentation' ? this.p.graph : this.f.graph; };
-
   Bench.prototype._drawGraph = function () {
-    var pres = this.mode === 'presentation', L = lg();
-    var G = pres ? global.BenchLayout.PRES_GEOM : global.BenchLayout.GEOM;
+    if (this.mode === 'presentation') { this.f.graph.innerHTML = ''; this._drawStage(); return; }
+    var G = global.BenchLayout.GEOM;
     var Lay = this.layout = layout(this.topo, G), topo = this.topo, self = this;
-    var g = this._graphEl(), other = pres ? this.f.graph : this.p.graph;
-    other.innerHTML = '';
+    var g = this.f.graph;
+    this.p.graph.innerHTML = '';
     var svg = '<svg class="edges" width="' + Lay.W + '" height="' + Lay.H + '" viewBox="0 0 ' + Lay.W + ' ' + Lay.H + '">' +
       '<defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>';
     // Every edge comes routed from the layout: short ones curve through the gap between rows,
@@ -364,75 +348,45 @@
     topo.edges.forEach(function (e, i) {
       var r = Lay.edges[i];
       if (!r) return;
-      var name = (pres && e.plain_label) || (e.from_branch || e.when || '').replace(/_/g, ' ');
-      // A routed edge's label in Presentation is dropped: the source box's own "→ branch" line says it.
-      if (pres && r.routed) name = '';
+      var name = (e.from_branch || e.when || '').replace(/_/g, ' ');
       svg += '<g class="edge' + (r.routed ? ' routed' : '') + '" data-edge="' + i + '"><path d="' + r.d + '" marker-end="url(#arr)"/>' +
-        (pres && e.description ? '<path class="hit" d="' + r.d + '"/>' : '') +
         (name && r.label ? '<text x="' + r.label.x + '" y="' + r.label.y + '"' + (r.label.anchor === 'end' ? ' text-anchor="end"' : '') + '>' + esc(name) + '</text>' : '') + '</g>';
     });
     svg += '</svg>';
     var boxes = topo.nodes.map(function (n) {
       var p = Lay.pos[n.id];
       var style = 'left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px';
-      if (pres) {
-        var actor = L.actorOf(n);
-        return '<div class="gnode pnode kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" style="' + style + '" title="' + esc(L.plainLabel(n) + (n.description ? ': ' + n.description : '')) + '">' +
-          '<span class="actor actor-' + esc(actor) + '">' + esc(ACTOR_CHIP[actor] || actor) + '</span>' +
-          '<div class="gl">' + esc(L.plainLabel(n)) + '</div>' +
-          (n.plain_label && n.label !== n.plain_label ? '<div class="gt mono">' + esc(n.label || n.id) + '</div>' : '<div class="gt mono">' + esc(n.id !== L.plainLabel(n) ? n.id : '') + '</div>') +
-          '<div class="gp"></div></div>';
-      }
       return '<div class="gnode kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" style="' + style + '" title="' + esc((n.label || n.id) + (n.description ? ': ' + n.description : '')) + '">' +
         '<div class="gl">' + esc(n.label || n.id) + '</div><div class="gm mono"></div><div class="gp"></div></div>';
     }).join('');
     g.innerHTML = '<div class="graph" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + boxes + '</div><div class="unmapped" data-f="unmapped"></div>';
     var gr = g.querySelector('.graph');
-    // Shrink the whole flow to fit rather than scroll: by width always, and in Presentation by
-    // height too, so the map, the NOW card and the rows share one screen.
+    // Shrink the whole flow to fit the column's width rather than scroll.
     function fit() {
-      var availW = g.clientWidth || Lay.W, k = Math.min(1, availW / Lay.W);
-      var byH = pres && global.innerWidth > 560;
-      if (byH) {
-        var box = g.parentNode, availH = box.clientHeight - 6;
-        if (availH > 60) k = Math.min(k, availH / Lay.H);
-      }
-      k = Math.max(k, 0.35);
+      var availW = g.clientWidth || Lay.W, k = Math.max(0.35, Math.min(1, availW / Lay.W));
       gr.style.transform = k < 1 ? 'scale(' + k + ')' : '';
       gr.style.transformOrigin = 'top left';
       gr.style.marginLeft = Math.max(0, (availW - Lay.W * k) / 2) + 'px';
       gr.style.marginBottom = k < 1 ? (-(1 - k) * Lay.H) + 'px' : '';
-      self._fitK = k;
     }
     this._fit = fit;
     fit();
-    if (!this._fitBound) { this._fitBound = true; global.addEventListener('resize', function () { if (self._fit) self._fit(); }); }
+    this._bindResize();
     this._unmapped = g.querySelector('.unmapped');
     g.querySelectorAll('.gnode').forEach(function (n) {
       n.onclick = function () { var id = n.getAttribute('data-node'); self.selectedNode = self.selectedNode === id ? null : id; self.ioPick = null; self.render(); };
     });
-    if (pres) {
-      // An edge's description on hover or tap: on a dashed edge, why it wasn't taken.
-      var tip = this.p.tip, sec = g.parentNode;
-      g.querySelectorAll('.edge').forEach(function (eg) {
-        var ed = topo.edges[+eg.getAttribute('data-edge')];
-        if (!ed.description) return;
-        function show(ev) {
-          var untaken = /untaken/.test(eg.getAttribute('class'));
-          var taken = /\btaken\b/.test(eg.getAttribute('class'));
-          tip.innerHTML = '<b>' + esc(untaken ? 'Not taken this time' : taken ? 'Taken' : 'Path') + (ed.plain_label || ed.from_branch ? ': ' + esc(ed.plain_label || ed.from_branch.replace(/_/g, ' ')) : '') + '</b> ' + esc(ed.description);
-          tip.hidden = false;
-          var rb = sec.getBoundingClientRect();
-          var x = Math.min(Math.max(4, ev.clientX - rb.left + 10), Math.max(4, rb.width - 250));
-          tip.style.left = x + 'px'; tip.style.top = (ev.clientY - rb.top + 12) + 'px';
-        }
-        eg.addEventListener('mouseenter', show);
-        eg.addEventListener('mousemove', show);
-        eg.addEventListener('mouseleave', function () { tip.hidden = true; });
-        eg.addEventListener('click', function (ev) { ev.stopPropagation(); show(ev); });
-      });
-      sec.onclick = function (ev) { if (!ev.target.closest('.edge')) tip.hidden = true; };
-    }
+  };
+  Bench.prototype._bindResize = function () {
+    var self = this;
+    if (this._fitBound) return;
+    this._fitBound = true;
+    global.addEventListener('resize', function () {
+      // Presentation picks its geometry from the stage's size: crossing a breakpoint redraws the map.
+      if (self.mode === 'presentation' && self.topo && self._stageGeom !== self._pickStageGeom()) { self._drawStage(); self.render(); return; }
+      if (self._fit) self._fit();
+      if (self.mode === 'presentation') self._placeBubble();
+    });
   };
 
   Bench.prototype._buildPanels = function () {
@@ -445,6 +399,7 @@
     panels.unshift({ id: '_sources', title: 'Sources · could look at / given to the model / relied on', event_types: ['retrieval'] });
     panels.unshift({ id: '_io', title: 'Model I/O · exactly what the model was given, and what it returned', event_types: ['llm_call'] });
     panels.unshift({ id: '_node', title: 'Selected step', event_types: ['*'], mode: 'append' });
+    panels.unshift({ id: '_mapchecks', title: 'Checks on this map · do the map’s words still match the code?', event_types: [] });
     panels.unshift({ id: '_run', title: 'This run', event_types: ['run_started', 'run_finished'] });
     var self = this;
     panels.forEach(function (p) {
@@ -495,7 +450,7 @@
       (ci.calls ? m('$0', 'cost') : '');
     var st = run.status || (run.gate && run.gate.state === 'waiting' ? 'waiting' : 'running');
     var stTxt = { ok: '✓ finished', error: '✕ error', aborted: 'aborted', waiting: '⏸ waiting for approval', running: '● running' }[st] || st;
-    var split = L.timeSplit(run.events), base = L.baselineOf(run.events);
+    var split = L.timeSplit(run.events), base = L.baselineOf(run.events, this.topo);
     this.f.meters.innerHTML = cost +
       m(fmtNum(run.tok.input), 'tokens in', run.tok.cache_read ? fmtNum(run.tok.cache_read) + ' of them read from the cache' : '') +
       m(fmtNum(run.tok.output), 'tokens out') +
@@ -528,7 +483,7 @@
      running; the node order (for lit edges); and whether the run is shown finished. */
   Bench.prototype._shown = function (run) {
     var now = wallNow(), shownEnd = schedule(run);
-    var ran = {}, seq = [], openNode = null, lastNode = null, nest = {};
+    var ran = {}, seq = [], openNode = null, lastNode = null, nest = {}, focusNode = null, starting = {};
     // A nested step (a retrieval inside a tool call) lights once its parent is shown, with the
     // edge into it; it never becomes the NOW step or part of the run's order.
     function shownStep(s) { return s.vs <= now && (!s.parent || !run.steps[s.parent] || shownStep(run.steps[s.parent])); }
@@ -544,6 +499,11 @@
       ran[s.node] = (ran[s.node] || []).concat([s]);
       if (s.ve > now) openNode = s.node;
       lastNode = s.node;
+      // The step Presentation's callout is about: the newest one that has shown something. A step
+      // that has only started (the one a branch just chose) is "starting": it lights the path into
+      // it, while the callout stays on the step that chose it.
+      var said = s.events.some(function (e) { return e.event_type !== 'step_started'; }) || s.ve <= now;
+      if (said) { focusNode = s.node; delete starting[s.node]; } else starting[s.node] = true;
       // A step the app reports as skipped was reached but did no work: it is not on the lit path.
       if (s.status !== 'skipped' && seq[seq.length - 1] !== s.node) seq.push(s.node);
     });
@@ -554,22 +514,20 @@
     var finished = !!run.status && now >= shownEnd;
     var caught = !Object.keys(hidden).length;   // every step received is on screen
     if (!finished) events = events.filter(function (e) { return e.event_type !== 'run_finished'; });
-    return { now: now, shownEnd: shownEnd, ran: ran, seq: seq, nest: nest, openNode: openNode, lastNode: lastNode, finished: finished, caught: caught, events: events };
+    if (finished && lastNode) focusNode = lastNode;
+    return { now: now, shownEnd: shownEnd, ran: ran, seq: seq, nest: nest, openNode: openNode, lastNode: lastNode, focusNode: focusNode || lastNode,
+             starting: starting, finished: finished, caught: caught, events: events };
   };
 
   Bench.prototype._renderGraph = function (run) {
-    var self = this, g = this._graphEl(), L = lg(), pres = this.mode === 'presentation';
+    var self = this, g = this.f.graph, L = lg();
     var S = this._shown(run), now = S.now, ran = S.ran, finished = S.finished;
-    var nowId = this.selectedNode || S.openNode || S.lastNode;
-    var taken = L.takenEdges(this.topo, S.events.filter(function (e) { return ran[e.node] || e.node === '_run'; }), S.seq);
-    Object.keys(S.nest).forEach(function (k) { taken[k] = true; });
-    var srcCount = {};
-    if (pres) L.sourceStates(this.topo, S.events).forEach(function (s) { s.items.forEach(function (it) { srcCount[it.id] = s.count; }); });
+    var taken = this._taken(S);
     g.querySelectorAll('.gnode').forEach(function (n) {
       var id = n.getAttribute('data-node'), steps = ran[id] || [];
       var last = steps[steps.length - 1];
       var node = L.nodeOf(self.topo, id) || {};
-      var cls = 'gnode ' + (pres ? 'pnode ' : '') + 'kind-' + (node.kind || 'step');
+      var cls = 'gnode kind-' + (node.kind || 'step');
       var shownOpen = last && last.ve > now;
       if (!steps.length) cls += finished ? ' untaken' : ' idle';
       else if (last.status === 'error' && !shownOpen) cls += ' error';
@@ -578,7 +536,6 @@
       else if (shownOpen) cls += ' active';
       else cls += ' done';
       if (self.selectedNode === id) cls += ' selected';
-      if (pres && !self.selectedNode && nowId === id) cls += ' now';
       if (n.className !== cls) n.className = cls;
       var gm = n.querySelector('.gm');
       if (gm) {
@@ -593,13 +550,7 @@
         }
         gm.textContent = m;
       }
-      var pv = '';
-      if (!shownOpen) {
-        var hitsCount = null;
-        steps.forEach(function (s) { s.events.forEach(function (e) { if (e.event_type === 'retrieval' && e.data && e.data.hits && e.data.hits[0]) hitsCount = srcCount[e.data.hits[0].id]; }); });
-        pv = L.preview(steps, self.mode, hitsCount, node.kind === 'check', self.topo);
-      }
-      n.querySelector('.gp').textContent = pv;
+      n.querySelector('.gp').textContent = shownOpen ? '' : L.preview(steps, 'engineering', null, node.kind === 'check', self.topo);
     });
     g.querySelectorAll('.edge').forEach(function (e) {
       var ed = self.topo.edges[+e.getAttribute('data-edge')];
@@ -614,6 +565,13 @@
     clearTimeout(this._tick);
     if (busy) this._tick = setTimeout(function () { self.render(); }, 100);
     return S;
+  };
+
+  // The edges this run is shown to have taken (a nested step lights the edge into it).
+  Bench.prototype._taken = function (S) {
+    var ran = S.ran, taken = lg().takenEdges(this.topo, S.events.filter(function (e) { return ran[e.node] || e.node === '_run'; }), S.seq);
+    Object.keys(S.nest).forEach(function (k) { taken[k] = true; });
+    return taken;
   };
 
   Bench.prototype._renderWaterfall = function (run) {
@@ -647,6 +605,7 @@
       }
       if (pid === '_sources') { self._renderSourcesEng(P, run); return; }
       if (pid === '_checks') { self._renderChecksEng(P, run); return; }
+      if (pid === '_mapchecks') { self._renderMapChecks(P, run); return; }
       evs = run.events.filter(function (e) {
         return spec.event_types.indexOf(e.event_type) >= 0 && (!spec.nodes || spec.nodes.indexOf(e.node) >= 0);
       });
@@ -691,6 +650,24 @@
           var h = it.hit, nums = Object.keys(h).filter(function (k) { return typeof h[k] === 'number'; }).map(function (k) { return k + ' ' + Number(h[k]).toFixed(k === 'bm25' ? 1 : 4); }).join(' · ');
           return '<div class="row mono"><span class="tag">' + esc(it.id) + '</span> ' + esc(it.state) + (it.relied ? ' · relied on' : '') + (it.hinted ? ' · app says given' : '') + '<span class="right">' + esc(nums) + '</span></div>';
         }).join('') + '</div>';
+    }).join('');
+  };
+  /* Verification (architecture A8): the app's own verify findings carried in the map, then what
+     this run shows. Errors red, warnings amber, info plain. */
+  Bench.prototype._renderMapChecks = function (P, run) {
+    var rows = lg().mapChecks(this.topo, run.events);
+    var bad = rows.filter(function (r) { return r.severity !== 'info'; }).length;
+    P.el.classList.toggle('empty', !rows.length);
+    P.count.textContent = bad ? ' ' + bad : '';
+    if (!rows.length) {
+      P.body.innerHTML = '<span class="muted">' + (this.topo.inferred ? 'The map is inferred from this trace: there are no hand-written words to check.'
+        : 'No findings: every name the map’s words and this run’s events use is in the structure the code produced.') + '</span>';
+      return;
+    }
+    P.body.innerHTML = rows.map(function (r) {
+      return '<div class="mc mc-' + esc(r.severity) + '"><span class="tag">' + esc(r.code) + '</span> <b>' + esc(r.severity) + '</b>' +
+        (r.node ? ' <span class="mono">' + esc(r.node) + (r.branch ? ' → ' + esc(r.branch) : '') + '</span>' : '') +
+        ' <span class="muted">(' + (r.from === 'map' ? 'from the app’s verify' : 'from this run') + ')</span><div class="note">' + esc(r.message) + '</div></div>';
     }).join('');
   };
   Bench.prototype._renderChecksEng = function (P, run) {
@@ -801,14 +778,153 @@
     }).join(''));
   };
 
-  // ---- Presentation ----------------------------------------------------------------------
+  // ---- Presentation: the stage ------------------------------------------------------------
+  /* The map is the stage (layout.js at a presentation geometry), the run's path lit and numbered
+     in run order, past steps keeping a one-line badge. ONE callout bubble beside it, joined to the
+     step it explains by a filled wedge, says what happened there (logic.callout): a headline
+     sentence from the map's own words, then that step's evidence. Keys: → Space PageDown next,
+     ← PageUp back, M the map alone, R the recap (also the step after the last). All words come
+     from the map and the events; nothing here knows any app. */
+  var ACTOR_WORDS_P = { ai: 'The AI', rule: 'A rule', person: 'A person', app: 'The app' };
+  var STAGE_BREAK = 600;   // map column width (px) below which the pane geometry is used
+
+  Bench.prototype._pickStageGeom = function () {
+    var side = this.p.side, stage = this.p.stage;
+    var W = (stage && stage.clientWidth) || global.innerWidth || 1200;
+    var mapW = this.mapOnly ? W : W - ((side && side.offsetWidth) || W * 0.5);
+    if (global.innerWidth <= 640) mapW = W;   // stacked: the map gets the full width
+    return mapW >= STAGE_BREAK ? 'stage' : 'pane';
+  };
+
+  Bench.prototype._drawStage = function () {
+    var self = this, topo = this.topo, L = lg();
+    this.root.classList.toggle('p-maponly', !!this.mapOnly);
+    var which = this._stageGeom = this._pickStageGeom();
+    this.root.classList.toggle('ps-pane', which === 'pane');
+    var G = which === 'stage' ? global.BenchLayout.STAGE_GEOM : global.BenchLayout.PANE_GEOM;
+    var Lay = this.layout = layout(topo, G), g = this.p.graph;
+    var svg = '<svg class="edges" width="' + Lay.W + '" height="' + Lay.H + '" viewBox="0 0 ' + Lay.W + ' ' + Lay.H + '">' +
+      '<defs><marker id="parr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>';
+    topo.edges.forEach(function (e, i) {
+      var r = Lay.edges[i];
+      if (!r) return;
+      // No labels on the stage's edges: a branching step's badge names the path it took.
+      svg += '<g class="edge' + (r.routed ? ' routed' : '') + '" data-edge="' + i + '"><path d="' + r.d + '" marker-end="url(#parr)"/>' +
+        (e.description ? '<path class="hit" d="' + r.d + '"/>' : '') + '</g>';
+    });
+    svg += '</svg>';
+    var boxes = topo.nodes.map(function (n) {
+      var p = Lay.pos[n.id], actor = L.actorOf(n);
+      return '<div class="gnode snode a-' + esc(actor) + ' kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" style="left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px" title="' + esc(L.plainLabel(n) + (n.description ? ': ' + n.description : '')) + '">' +
+        '<span class="s-num" hidden></span>' +
+        '<div class="s-top"><div class="gl">' + esc(L.plainLabel(n)) + '</div><span class="actor actor-' + esc(actor) + '">' + esc(ACTOR_CHIP[actor] || actor) + '</span></div>' +
+        '<div class="s-badge"><span class="gp"></span></div></div>';
+    }).join('');
+    g.innerHTML = '<div class="graph" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + boxes + '</div>';
+    var gr = g.querySelector('.graph'), sec = g.parentNode;
+    // Fit the whole map in its column, by width and height (stacked on a phone: by width only).
+    function fit() {
+      var availW = sec.clientWidth - 8 || Lay.W, availH = sec.clientHeight - 8;
+      var k = Math.min(1, availW / Lay.W);
+      if (global.innerWidth > 640 && availH > 80) k = Math.min(k, availH / Lay.H);
+      k = Math.max(k, 0.3);
+      self._fitK = k;
+      gr.style.transform = k < 1 ? 'scale(' + k + ')' : '';
+      gr.style.transformOrigin = 'top left';
+      var padX = Math.max(0, (availW - Lay.W * k) / 2), padY = global.innerWidth > 640 ? Math.max(0, (availH - Lay.H * k) / 2) : 0;
+      gr.style.marginLeft = padX + 'px';
+      gr.style.marginTop = padY + 'px';
+      gr.style.marginBottom = k < 1 ? (-(1 - k) * Lay.H) + 'px' : '';
+    }
+    this._fit = fit;
+    fit();
+    this._bindResize();
+    g.querySelectorAll('.gnode').forEach(function (n) {
+      n.onclick = function () { var id = n.getAttribute('data-node'); self.selectedNode = self.selectedNode === id ? null : id; self.recapOpen = false; self.presItem = null; self.render(); };
+    });
+    // A path's own words on hover or tap: on a dashed path, why it wasn't taken.
+    var tip = this.p.tip;
+    g.querySelectorAll('.edge').forEach(function (eg) {
+      var ed = topo.edges[+eg.getAttribute('data-edge')];
+      if (!ed.description) return;
+      function show(ev) {
+        var cls = eg.getAttribute('class');
+        tip.innerHTML = '<b>' + esc(/untaken/.test(cls) ? 'Not taken this time' : /\btaken\b/.test(cls) ? 'Taken' : 'Path') + (ed.plain_label || ed.from_branch ? ': ' + esc(ed.plain_label || ed.from_branch.replace(/_/g, ' ')) : '') + '</b> ' + esc(ed.description);
+        tip.hidden = false;
+        var rb = sec.getBoundingClientRect();
+        tip.style.left = Math.min(Math.max(4, ev.clientX - rb.left + 10), Math.max(4, rb.width - 300)) + 'px';
+        tip.style.top = (ev.clientY - rb.top + 12) + 'px';
+      }
+      eg.addEventListener('mouseenter', show);
+      eg.addEventListener('mousemove', show);
+      eg.addEventListener('mouseleave', function () { tip.hidden = true; });
+      eg.addEventListener('click', function (ev) { ev.stopPropagation(); show(ev); });
+    });
+    sec.onclick = function (ev) { if (!ev.target.closest('.edge')) tip.hidden = true; };
+  };
+
+  // The map's state for what's shown: lit path, numbers in run order, badges on past steps.
+  Bench.prototype._renderStage = function (run) {
+    var self = this, g = this.p.graph, L = lg(), topo = this.topo;
+    var S = this._shown(run), now = S.now, ran = S.ran, finished = S.finished;
+    var taken = this._taken(S), nums = L.stepNumbers(S.seq);
+    var focus = this.recapOpen ? null : (this.selectedNode || S.focusNode);
+    var counts = {};
+    L.sourceStates(topo, S.events).forEach(function (s) { s.items.forEach(function (it) { counts[it.id] = s.count; }); });
+    g.querySelectorAll('.gnode').forEach(function (n) {
+      var id = n.getAttribute('data-node'), steps = ran[id] || [], last = steps[steps.length - 1];
+      var node = L.nodeOf(topo, id) || {};
+      var cls = 'gnode snode a-' + L.actorOf(node) + ' kind-' + (node.kind || 'step');
+      var shownOpen = last && last.ve > now;
+      if (!steps.length) cls += finished ? ' untaken' : ' idle';
+      else if (last.status === 'error' && !shownOpen) cls += ' error';
+      else if (steps.every(function (s) { return s.status === 'skipped'; })) cls += ' skipped';
+      else if (run.gate && run.gate.node === id && run.gate.state === 'waiting' && !(run.status && finished)) cls += ' gatewait';
+      else if (S.starting[id]) cls += ' starting';
+      else if (shownOpen) cls += ' active';
+      else cls += ' done';
+      if (focus === id) cls += ' focus';
+      if (self.selectedNode === id) cls += ' selected';
+      if (n.className !== cls) n.className = cls;
+      var num = n.querySelector('.s-num');
+      var nv = nums[id] ? String(nums[id]) : '';
+      if (num.textContent !== nv) num.textContent = nv;
+      num.hidden = !nv;
+      // A past step keeps one badge: the path it took, or its verdict, or what it found.
+      var badge = '';
+      if (steps.length && focus !== id && !S.starting[id]) {
+        var outs = L.takenOut(topo, S.events, id).filter(function (ed) { return ed.from_branch || ed.when; });
+        var hitsCount = null;
+        steps.forEach(function (s) { s.events.forEach(function (e) { if (e.event_type === 'retrieval' && e.data && e.data.hits && e.data.hits[0]) hitsCount = counts[e.data.hits[0].id]; }); });
+        var pv = L.preview(steps, 'presentation', hitsCount, node.kind === 'check', topo);
+        badge = node.kind !== 'check' && outs.length ? '→ ' + (outs[0].plain_label || L.human(outs[0].from_branch || outs[0].when)) : pv;
+        if (/^\d+ (of \d+|found)$/.test(badge)) badge = 'found ' + badge.replace(/ found$/, '');
+      } else if (!steps.length && finished && node.kind === 'check') badge = '– not needed';
+      var gp = n.querySelector('.gp');
+      if (gp.textContent !== badge) gp.textContent = badge;
+      gp.parentNode.hidden = !badge;
+    });
+    g.querySelectorAll('.edge').forEach(function (e) {
+      var ed = topo.edges[+e.getAttribute('data-edge')];
+      var k = ed.from + '>' + ed.to;
+      var c = 'edge' + (taken[k] ? ' taken' + (S.openNode === ed.to ? ' flowing' : '') : finished ? ' untaken' : '') + (ed.description ? ' described' : '');
+      if (e.getAttribute('class') !== c) e.setAttribute('class', c);
+    });
+    var busy = S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; });
+    clearTimeout(this._tick);
+    if (busy) this._tick = setTimeout(function () { self.render(); }, 100);
+    S.focus = focus;
+    S.numbers = nums;
+    return S;
+  };
+
   Bench.prototype._renderPicker = function () {
-    var box = this.p.picker, pk = this.picker, self = this;
+    var box = this.p.picker, pk = this.picker;
     if (!box) return;
     if (!pk || pk.items.length < 2) { box.innerHTML = ''; return; }
     var groups = [], by = {};
     pk.items.forEach(function (it) { var g = it.group || ''; if (!by[g]) { by[g] = []; groups.push(g); } by[g].push(it); });
-    box.innerHTML = '<label class="p-pick"><span>Try another request</span><select>' + groups.map(function (g) {
+    box.innerHTML = '<label class="p-pick"><span>Try another</span><select>' + groups.map(function (g) {
       var opts = by[g].map(function (it) { return '<option value="' + esc(it.path) + '"' + (it.path === pk.current ? ' selected' : '') + '>' + esc(it.title) + '</option>'; }).join('');
       return g ? '<optgroup label="' + esc(g) + '">' + opts + '</optgroup>' : opts;
     }).join('') + '</select></label>';
@@ -817,112 +933,294 @@
 
   Bench.prototype._presClick = function (e) {
     var t = e.target.closest('[data-act]');
-    if (!t) return;
+    if (!t || !this.root.contains(t)) return;
     var act = t.getAttribute('data-act'), arg = t.getAttribute('data-arg');
-    if (act === 'row') { this.presOpen[arg] = !this.presOpen[arg]; }
-    else if (act === 'given') { this.overlay = { focus: arg || null }; }
+    if (act === 'given') { this.overlay = { focus: arg || null }; }
     else if (act === 'close') { if (e.target === t || t.classList.contains('p-close')) this.overlay = null; else return; }
-    else if (act === 'item') { this.presItem = this.presItem === arg ? null : arg; this.presOpen.looked = true; }
-    else if (act === 'record') { this.presOpen.record = !this.presOpen.record; }
+    else if (act === 'item') { this.presItem = this.presItem === arg ? null : arg; }
     else if (act === 'clearsel') { this.selectedNode = null; }
-    else if (act === 'why') { this.whyOpen = !this.whyOpen; }
+    else if (act === 'more') { this.moreOpen = !this.moreOpen; }
     else if (act === 'bigtext') { this.bigText = !this.bigText; }
-    else if (act === 'stepthrough') { this.selectedNode = null; this.stepThrough(); return; }
-    else if (this.transport && this.transport[act]) { this.selectedNode = null; this.transport[act](); return; }
+    else if (act === 'maponly') { this.toggleMapOnly(); return; }
+    else if (act === 'recap') { this.recapOpen = !this.recapOpen; this.selectedNode = null; }
+    else if (act === 'stepthrough') { this.selectedNode = null; this.recapOpen = false; this.stepThrough(); return; }
+    else if (this.transport && this.transport[act]) { this.selectedNode = null; this.recapOpen = false; this.presItem = null; this.transport[act](); return; }
     else return;
     this.render();
   };
 
+  Bench.prototype.toggleMapOnly = function () {
+    this.mapOnly = !this.mapOnly;
+    if (this.topo) { this._drawStage(); this.render(); }
+  };
+  Bench.prototype.openRecap = function (on) { this.recapOpen = on !== false; this.selectedNode = null; this.render(); };
+
+  /* A presenter's keys, and a clicker's (it sends PageUp/PageDown): → Space PageDown go forward one
+     step (and from the last step to the recap), ← PageUp go back (out of the recap first), M shows
+     the map alone, R the recap, Esc closes what's open. */
+  Bench.prototype._presKey = function (e) {
+    if (e.key === 'Escape') {
+      if (this.overlay) this.overlay = null;
+      else if (this.recapOpen) this.recapOpen = false;
+      else if (this.selectedNode) this.selectedNode = null;
+      else return;
+      this.render();
+      return;
+    }
+    if (this.mode !== 'presentation' || this.overlay || e.metaKey || e.ctrlKey || e.altKey) return;
+    var tag = (e.target && e.target.tagName) || '';
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;
+    var k = e.key;
+    if (k === 'm' || k === 'M') { e.preventDefault(); this.toggleMapOnly(); return; }
+    if (k === 'r' || k === 'R') { e.preventDefault(); this.openRecap(!this.recapOpen); return; }
+    var fwd = k === 'ArrowRight' || k === 'PageDown' || k === ' ', back = k === 'ArrowLeft' || k === 'PageUp';
+    if (!fwd && !back) return;
+    e.preventDefault();
+    this.presItem = null;
+    if (back && this.recapOpen) { this.openRecap(false); return; }
+    if (this.selectedNode) { this.selectedNode = null; this.render(); return; }
+    var atEnd = this._tstateShown === 'done' || (!this.transport && this._lastShown && this._lastShown.finished);
+    if (fwd && atEnd) { if (!this.recapOpen) this.openRecap(true); return; }
+    if (!this.transport) return;
+    this.transport[fwd ? 'next' : 'back']();
+  };
+
   Bench.prototype._renderPres = function (run) {
     var L = lg(), self = this, topo = this.topo, p = this.p;
-    this._renderPicker && !p.picker.firstChild && this._renderPicker();
+    if (!p.picker.firstChild) this._renderPicker();
     p.inferred.hidden = !topo.inferred;
-    var S = run ? this._renderGraphPres(run) : null;
+    var S = run ? this._renderStage(run) : null;
+    this._lastShown = S;
     var events = S ? S.events : [];
     var finished = S ? S.finished : false;
     // The replay can stop (a moment, a pause, the end) while pacing is still drawing the steps
-    // before it; until the screen catches up it reads as still playing, so the Continue sits
-    // on the step it belongs to.
+    // before it; until the screen catches up it reads as still playing.
     var tstate = this.tstate;
     if (S && (tstate === 'moment' || tstate === 'paused' || tstate === 'stepping') && !S.caught) tstate = tstate === 'stepping' ? 'stepping' : 'catching';
     if (tstate === 'stepping' && S && S.caught) tstate = 'paused';
     if (S && tstate === 'done' && !finished) tstate = 'catching';
     this._tstateShown = tstate;
 
-    // Header: the request and who asked (dropped beside a live app, whose pane shows it), the outcome.
-    var input = run && run.input != null ? (typeof run.input === 'string' ? run.input : JSON.stringify(run.input)) : (run && run.label) || '';
-    setHTML(p.req, this.source === 'parent' ? '' : (input ? '<span title="' + esc(input) + '">“' + esc(input.replace(/\s+/g, ' ')) + '”</span>' : '<span class="muted">' + (run ? '' : 'Waiting for a request…') + '</span>'));
-    p.req.hidden = this.source === 'parent' && true;
-    setHTML(p.who, run ? esc(L.requesterOf(run.events)) : '');
-    var oc = run ? L.outcome(topo, events) : { text: '', why: null, done: false };
-    if (!oc.done && oc.text === 'Working…' && (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping')) oc.text = 'Paused · ▶ to go on, ◂ ▸ to step';
-    setHTML(p.outcome, oc.text ? '<span class="p-oc' + (oc.done ? ' done' : '') + '">' + (oc.done ? '▸ ' : '') + esc(oc.text) + '</span>' : '');
-    // The reason is the strongest line on a hand-off; clamped to two lines, a click shows it whole.
-    setHTML(p.why, oc.why ? '<span data-act="why" title="' + (this.whyOpen ? 'Show less' : 'Show it all') + '"><b>Why:</b> ' + esc(oc.why) + '</span>' : '');
-    p.why.classList.toggle('full', !!this.whyOpen);
+    // Header: who asked and what (beside a live app its own pane shows them), and where it stands.
+    var req = run ? L.requestOf(run.events) : { text: null, who: '' };
+    var beside = this.source === 'parent';
+    setHTML(p.req, beside ? '' : req.text ? '<span title="' + esc(req.text) + '">“' + esc(req.text.replace(/\s+/g, ' ')) + '”</span>' : '<span class="muted">' + (run ? '' : 'Waiting for a request…') + '</span>');
+    setHTML(p.who, beside ? '' : esc(req.who));
+    var oc = run ? L.outcome(topo, events) : { text: '', done: false };
+    var st = !run ? { cls: 'idle', text: 'Waiting for a request' }
+      : oc.done ? { cls: /^Handed/.test(oc.text) ? 'handed' : /^(Stopped|Something)/.test(oc.text) ? 'bad' : 'ok', text: 'Finished · ' + oc.text }
+      : /^Waiting/.test(oc.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' }
+      : (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping') ? { cls: 'paused', text: 'Paused · → for the next step' }
+      : { cls: 'running', text: oc.text === 'Something went wrong' ? oc.text : 'Running' };
+    setHTML(p.status, '<span class="ps-pill st-' + st.cls + '"><i></i>' + esc(st.text) + '</span>');
     setHTML(p.transport, this._transportHTML(finished, run, S));
-
-    // NOW card: the selected step, else the step being shown, else (finished) the last one.
-    var nowId = this.selectedNode || (S && (S.openNode || S.lastNode)) || null;
-    this._nowNode = nowId;
-    setHTML(p.now, this._nowHTML(run, events, nowId, finished, S));
-    setHTML(p.rows, run ? this._rowsHTML(run, events, finished) : '');
     setHTML(p.bottom, run ? this._bottomHTML(run, events, finished) : '');
+    this.root.querySelectorAll('.ps-key').forEach(function (b) {
+      var on = b.getAttribute('data-act') === 'maponly' ? !!self.mapOnly : !!self.recapOpen;
+      b.classList.toggle('on', on);
+    });
+
+    // The callout (or the recap): the selected step, else the step the run is on.
+    var html;
+    if (!run) html = '<div class="bb bb-empty"><p class="bb-headline">' + (beside ? 'Nothing has run yet. Pick a request in the app, and this side shows what the AI does with it.' : 'Nothing has run yet.') + '</p></div>';
+    else if (this.recapOpen) html = this._recapHTML(run, events, finished, S);
+    else html = S.focus ? this._bubbleHTML(run, events, S.focus, finished, S) : '<div class="bb bb-empty"><p class="bb-headline">Starting…</p></div>';
+    setHTML(p.bubble, html);
+    p.bubble.classList.toggle('is-recap', !!(run && this.recapOpen));
     if (this.overlay && run) {
       p.overlay.hidden = false; setHTML(p.overlay, this._overlayHTML(run, events));
-      // Opened from a step: start at that step's call, not at the top of the run.
       if (this.overlay.focus && !this.overlay.scrolled) {
         var sec = p.overlay.querySelector('.g-call.focus');
         if (sec) { p.overlay.scrollTop = Math.max(0, sec.offsetTop - 60); this.overlay.scrolled = true; }
       }
-    }
-    else { p.overlay.hidden = true; }
+    } else p.overlay.hidden = true;
     if (this._fit) this._fit();
+    this._placeBubble();
   };
 
-  Bench.prototype._renderGraphPres = function (run) {
-    return this._renderGraph(run);
+  /* Moves the bubble down its column toward the step it explains, and draws the wedge between
+     them. The wedge sits under the map's boxes (z-order), so it can pass behind a box in its way. */
+  Bench.prototype._placeBubble = function () {
+    var p = this.p, wedge = p.wedge, seam = p.seam, bub = p.bubble, stage = p.stage;
+    var focusEl = this.recapOpen || this.mapOnly ? null : p.graph.querySelector('.gnode.focus');
+    var stacked = global.innerWidth <= 640;
+    if (!focusEl || stacked || !bub.firstChild) { wedge.innerHTML = seam.innerHTML = ''; wedge._h = seam._h = null; bub.style.marginTop = bub.style.maxHeight = ''; return; }
+    var sr = stage.getBoundingClientRect(), side = p.side, sideR = side.getBoundingClientRect();
+    var nr = focusEl.getBoundingClientRect();
+    var ny = nr.top + nr.height / 2 - sideR.top;
+    var sideH = side.clientHeight, bh = Math.min(sideH, bub.scrollHeight + 2), room = sideH - bh;
+    // Center the bubble's wedge end on the step when there's room; never past the column.
+    var top = Math.max(0, Math.min(room, ny - Math.min(140, bh / 2)));
+    var cur = parseFloat(bub.style.marginTop) || 0;
+    if (Math.abs(cur - top) > 1) bub.style.marginTop = top + 'px';
+    bub.style.maxHeight = (sideH - top) + 'px';
+    // From where the bubble is going, not where its slide (a CSS transition) happens to be now.
+    var bLeft = sideR.left - sr.left, bTop = sideR.top - sr.top + top;
+    var x1 = nr.right - sr.left - 2, y1 = nr.top + nr.height / 2 - sr.top;
+    var hw = Math.min(16, nr.height / 3);
+    var x2 = bLeft + 2;
+    var lo = bTop + 28, hi = bTop + bh - 28;
+    var yc = Math.max(lo, Math.min(hi, y1)), hw2 = Math.min(34, Math.max(12, (hi - lo) / 2));
+    if (x2 - x1 < 8) { wedge.innerHTML = seam.innerHTML = ''; wedge._h = seam._h = null; return; }
+    wedge.setAttribute('width', sr.width); wedge.setAttribute('height', sr.height);
+    var pts = [[x1, y1 - hw], [x2, yc - hw2], [x2, yc + hw2], [x1, y1 + hw]].map(function (q) { return q[0].toFixed(1) + ',' + q[1].toFixed(1); });
+    var html = '<polygon class="w-fill" points="' + pts.join(' ') + '"/>' +
+      '<polyline class="w-edge" points="' + pts[0] + ' ' + pts[1] + '"/><polyline class="w-edge" points="' + pts[3] + ' ' + pts[2] + '"/>';
+    var actor = (focusEl.className.match(/\ba-(\w+)/) || [])[1] || 'app';
+    wedge.setAttribute('class', 'ps-wedge a-' + actor);
+    seam.setAttribute('class', 'ps-seam a-' + actor);
+    if (wedge._h !== html) { wedge._h = html; wedge.innerHTML = html; }
+    // The seam: the wedge's last few pixels drawn over the bubble's border, so the two read as one
+    // shape while the rest of the wedge stays under the map's boxes.
+    var sx = x2 - 10, t = (sx - x1) / (x2 - x1);
+    var ya = (y1 - hw) + t * ((yc - hw2) - (y1 - hw)), yb = (y1 + hw) + t * ((yc + hw2) - (y1 + hw));
+    var sp = [[sx, ya], [x2 + 3, yc - hw2], [x2 + 3, yc + hw2], [sx, yb]].map(function (q) { return q[0].toFixed(1) + ',' + q[1].toFixed(1); });
+    var shtml = '<polygon class="w-fill" points="' + sp.join(' ') + '"/><polyline class="w-edge" points="' + sp[0] + ' ' + sp[1] + '"/><polyline class="w-edge" points="' + sp[3] + ' ' + sp[2] + '"/>';
+    seam.setAttribute('width', sr.width); seam.setAttribute('height', sr.height);
+    if (seam._h !== shtml) { seam._h = shtml; seam.innerHTML = shtml; }
   };
 
-  /* Replay: ◂ ▶ ▸ ⟲ (keys: ← → or PageUp/PageDown, Space). Beside the app or live, there is no
-     transport, but a finished run (or one waiting for a person) can be stepped through here. */
+  /* Replay: ◂ ▶ ▸ ⟲ (keys: ← → or PageUp/PageDown, Space = next). Beside the app or live, there
+     is no transport, but a finished run (or one waiting for a person) can be stepped through here. */
   Bench.prototype._transportHTML = function (finished, run, S) {
     if (!this.transport) {
       var idle = run && S && S.caught && (finished || (run.gate && run.gate.state === 'waiting'));
       return idle && global.BenchSources ? '<button data-act="stepthrough" class="main" title="Replay this run here, one step at a time, pausing at the moments that matter (the app stays as it is)">▶ Step through it</button>' : '';
     }
     var s = this._tstateShown || this.tstate;
-    var playing = s === 'playing';
-    var catching = s === 'catching';
+    var playing = s === 'playing', catching = s === 'catching';
     var started = run && run.events.length > 0;
-    return '<button data-act="back" title="Back one step (←)">◂</button>' +
-      (playing ? '<button data-act="pause" class="main" title="Pause (Space)">❚❚ Pause</button>'
+    return '<button data-act="back" title="Back one step (← or PageUp)">◂</button>' +
+      (playing ? '<button data-act="pause" class="main" title="Pause">❚❚ Pause</button>'
                : catching ? '<button class="main" disabled title="Finishing">❚❚ Playing</button>'
                : s === 'done' ? '<button data-act="restart" class="main" title="Play it again from the start">↻ Replay</button>'
-               : '<button data-act="play" class="main" title="Play (Space); it pauses at the moments that matter">▶ ' + (started ? 'Continue' : 'Play') + '</button>') +
-      '<button data-act="next" title="Forward one step (→)">▸</button>' +
+               : '<button data-act="play" class="main" title="Play; it pauses at the moments that matter">▶ ' + (started ? 'Continue' : 'Play') + '</button>') +
+      '<button data-act="next" title="Forward one step (→, Space or PageDown)">▸</button>' +
       '<button data-act="restart" title="Start over">⟲</button>' +
       (this.transport.speed ? '<button data-act="speed" class="speed" title="Playing speed">' + (this.speedNow || 1) + '×</button>' : '') +
       (this.transport.follow ? '<button data-act="follow" title="Stop stepping through and follow the app again">' + (this.source === 'parent' ? '✕ Follow the app' : '✕ Back to live') + '</button>' : '');
   };
 
-  Bench.prototype._nowHTML = function (run, events, id, finished, S) {
+  // ---- the callout -------------------------------------------------------------------------
+  var STATUS_TAG = { now: 'Now', done: 'Done', waiting: 'Waiting', last: 'Last step', not_needed: 'Not needed', pending: 'Not yet', error: 'Error' };
+  function para(h) {
+    return h.map(function (x) { return x.em ? '<em>' + esc(x.t) + '</em>' : esc(x.t); }).join('');
+  }
+  function sec(label, body, cls) { return '<section class="bb-sec' + (cls ? ' ' + cls : '') + '"><h4>' + esc(label) + '</h4>' + body + '</section>'; }
+  function chip(title, cls) { return '<span class="bb-chip' + (cls ? ' ' + cls : '') + '">' + esc(title) + '</span>'; }
+  // A long text (an answer, a description) folds after a few lines; "more" opens it.
+  function foldText(text, open, cls) {
+    var long = String(text).length > 260;
+    return '<div class="bb-text' + (cls ? ' ' + cls : '') + (long && !open ? ' folded' : '') + '">' + esc(text) + '</div>' +
+      (long ? '<button class="bb-more" data-act="more">' + (open ? 'less ▴' : 'more ▾') + '</button>' : '');
+  }
+  var CHECK_SYM_P = { passed: '✓', failed: '✕', not_on_path: '–' };
+
+  // The evidence for one source, the same for every app: counts, then its items as tiles.
+  Bench.prototype._sourceHTML = function (s) {
+    var self = this;
+    var nums = '<div class="bb-counts">' +
+      (s.count != null ? '<span><b>' + lg().fmtNum(s.count) + '</b> available</span><i>→</i>' : '') +
+      (!s.asked ? '<span class="c-given"><b>' + s.found + '</b> found · given to the AI: <b class="unk">not yet</b></span>'
+        : s.givenKnown ? '<span class="c-given"><b>' + s.given + '</b> given to the AI</span>' : '<span class="c-given"><b>' + s.found + '</b> found · given to the AI: <b class="unk">not known</b></span>') +
+      (s.asked ? '<i>→</i><span class="c-relied"><b>' + s.relied + '</b> relied on</span>' : '') + '</div>';
+    var compact = s.items.length > 24;
+    var tiles = '<div class="bb-tiles' + (compact ? ' compact' : '') + '">' + s.items.map(function (it, i) {
+      var face = tileFace(it, i, s.items);
+      return '<button class="bb-tile st-' + esc(it.state) + (it.relied ? ' relied' : '') + (self.presItem === it.id ? ' sel' : '') + '" data-act="item" data-arg="' + esc(it.id) + '" title="' + esc(it.title) + '">' +
+        '<span class="t-face">' + esc(face) + '</span><span class="t-title">' + esc(it.title) + '</span>' + (it.rank ? '<span class="t-rank">#' + it.rank + '</span>' : '') + '</button>';
+    }).join('') + '</div>';
+    var legend = '<div class="bb-legend"><span><i class="lg st-could"></i>available</span><span><i class="lg st-given"></i>given to the AI</span><span><i class="lg relied"></i>relied on</span>' +
+      (s.items.some(function (it) { return it.state === 'found'; }) ? '<span><i class="lg st-found"></i>found, not given</span>' : '') + '</div>';
+    var sel = s.items.filter(function (it) { return it.id === self.presItem; })[0];
+    var item = sel ? '<div class="b-item"><b>' + esc(sel.title) + '</b> <span class="muted">' + esc(sel.text ? (sel.state === 'given' ? '· given to the AI, word for word' : '· found by the search') : '· not read this run') + '</span>' +
+      (sel.text ? '<pre class="io">' + esc(sel.text) + '</pre>' : '') + '</div>' : '';
+    return sec(s.title, nums + tiles + legend + item, 'bb-source');
+  };
+  // A tile's short face: the number its title starts with ("5. …" → 5), else an initial among
+  // numbered siblings, else its position.
+  function tileFace(it, idx, items) {
+    var NUM = /^\s*(\d+)/, own = String(it.title || it.id).match(NUM);
+    if (own) return own[1];
+    var numbered = items.some(function (x) { return NUM.test(String(x.title || '')); });
+    return numbered ? String(it.title || it.id).trim().charAt(0).toUpperCase() : String(idx + 1);
+  }
+
+  Bench.prototype._bubbleHTML = function (run, events, id, finished, S) {
     var L = lg(), topo = this.topo, self = this;
-    if (!run || !id) return '<div class="p-nowhead"><span class="p-label">Now</span></div><div class="p-line muted">' +
-      (run ? 'Starting…' : this.source === 'parent' ? 'Nothing has run yet. Pick a request in the app, and this side shows what the AI does with it.' : 'Nothing has run yet.') + '</div>';
-    var reply = run.output != null ? (typeof run.output === 'string' ? run.output : JSON.stringify(run.output)) : null;
-    var n = L.narrate(topo, events, id, { finished: finished, reply: reply, last: S && S.lastNode });
-    // The map box already carries the technical name; the card keeps to plain words.
-    var head = '<div class="p-nowhead"><span class="p-label">' + (this.selectedNode ? 'Selected' : 'Now') + '</span><b>' + esc(n.title) + '</b>' +
-      '<span class="actor actor-' + esc(n.actor) + '">' + esc(ACTOR_CHIP[n.actor] || n.actor) + '</span>' +
-      (this.selectedNode ? '<button class="p-x" data-act="clearsel" title="Follow the run again">✕</button>' : '') + '</div>';
-    var lines = n.lines.map(function (l) {
-      if (l.kind === 'reply') return '<div class="p-line k-reply"><span class="p-replyt">What the person was told</span>' + esc(l.text) + '</div>';
-      return '<div class="p-line k-' + esc(l.kind) + (l.cls ? ' c-' + esc(l.cls) : '') + '">' + esc(l.text) + '</div>';
-    }).join('');
-    // The app's own story panels for this step (audience both or presentation), in Presentation's voice.
-    var panels = '';
-    var story = this.story();
+    var reply = L.replyOf(run.output);
+    var c = L.callout(topo, events, id, { finished: finished, last: S.lastNode, numbers: S.numbers, reply: reply });
+    var tag = this.selectedNode ? 'Selected' : STATUS_TAG[c.status] || '';
+    var head = '<div class="bb-head">' + (c.n ? '<span class="bb-num">' + c.n + '</span>' : '') +
+      '<span class="bb-name">' + esc(c.title) + '</span>' +
+      '<span class="bb-who">' + esc(ACTOR_WORDS_P[c.actor] || c.actor) + '</span>' +
+      (tag ? '<span class="bb-tag t-' + esc(this.selectedNode ? 'selected' : c.status) + '">' + esc(tag) + '</span>' : '') +
+      (this.selectedNode ? '<button class="p-x" data-act="clearsel" title="Follow the run again (Esc)">✕</button>' : '') + '</div>';
+    var acts = '';
+    if (this._tstateShown === 'moment' && this.transport && !this.selectedNode) acts += '<button class="p-btn primary" data-act="play">Continue ▸</button>';
+    var calls = events.filter(function (e) { return e.event_type === 'llm_call' && e.node === id; });
+    if (calls.some(function (e) { var d = e.data || {}; return d.system != null || (d.messages || []).length || d.output != null; }))
+      acts += '<button class="p-btn" data-act="given" data-arg="' + esc(id) + '">What the AI was given ▸</button>';
+    if (this.pair && c.proposal && c.proposal.state !== 'waiting') acts += '<a class="p-btn" href="' + esc(this.pair.href) + '">' + esc(this.pair.text) + '</a>';
+    var body = '<p class="bb-headline">' + para(c.headline) + '</p>' + (c.sub ? '<p class="bb-sub">' + esc(c.sub) + '</p>' : '');
+    var evidence = 0;
+    // A sign-off's ways out are its "Next, if …" lines under the proposal, not cards.
+    if (c.choices.length && c.ran && !c.proposal) {
+      evidence++;
+      body += sec(c.choices.some(function (x) { return x.chosen; }) ? 'Its choice' : 'The paths it can take', '<div class="bb-cards">' + c.choices.map(function (x) {
+        return '<div class="bb-card' + (x.chosen ? ' chosen' : x.chosen === false ? ' not' : '') + '" title="' + esc(x.description) + '">' + (x.chosen ? '<span class="bb-chosen">Chosen</span>' : '') +
+          '<b>' + esc(x.label) + '</b><span>→ ' + esc(x.toLabel) + '</span></div>';
+      }).join('') + '</div>');
+    }
+    if (c.reason) {
+      evidence++;
+      body += sec('Its reason, word for word', '<blockquote class="bb-quote">' + foldText(c.reason.text, this.moreOpen) + '</blockquote>' +
+        (c.reason.cited.length ? '<div class="bb-chips"><span class="muted">It relied on</span> ' + c.reason.cited.map(function (x) { return chip(x.title, 'cited'); }).join(' ') + '</div>' : ''));
+    }
+    if (c.given.length) body += '<div class="bb-given">' + c.given.map(function (g) {
+      return 'It was given <b>' + g.n + (g.of != null ? ' of ' + g.of : '') + '</b> from ' + esc(g.title) + '.';
+    }).join(' ') + '</div>';
+    if (c.sources.length) { evidence++; c.sources.forEach(function (s) { body += self._sourceHTML(s); }); }
+    if (c.proposal) {
+      evidence++;
+      var pr = c.proposal;
+      var card = '<div class="bb-proposal' + (pr.state === 'waiting' ? ' waiting' : '') + '">' + (pr.kicker ? '<div class="bb-kicker">' + esc(pr.kicker) + '</div>' : '') +
+        (pr.title ? '<div class="bb-ptitle">' + esc(pr.title) + '</div>' : '') +
+        (pr.fields.length ? '<dl class="bb-fields">' + pr.fields.map(function (f) { return '<dt>' + esc(f.name) + '</dt><dd>' + esc(f.value) + '</dd>'; }).join('') + '</dl>' : '') +
+        (pr.description ? foldText(pr.description, this.moreOpen, 'bb-pdesc') : '') + '</div>';
+      var lead = pr.state === 'waiting' ? 'What a person is asked to approve' : pr.state === 'approved' ? 'What a person approved' : 'What a person turned down';
+      var foot = pr.state === 'waiting' ? '<div class="bb-inapp"><b>Approve</b> / <b>Deny</b> is pressed in the app, not here.</div>' +
+        (c.ifNext.length ? '<div class="bb-next">' + c.ifNext.map(function (x) { return '<div><span>Next, if ' + (x.label ? '“' + esc(x.label) + '”' : 'it goes ahead') + ':</span> ' + esc(x.to) + '</div>'; }).join('') + '</div>' : '')
+        : (pr.by ? '<div class="bb-inapp">' + (pr.state === 'approved' ? '✓ Approved by ' : '✕ Not approved by ') + esc(pr.by) + (pr.at ? ', ' + esc(L.clock(pr.at)) : '') + '.</div>' : '');
+      body += sec(lead, card + foot);
+    }
+    if (c.checks.length) {
+      evidence++;
+      body += sec(c.kind === 'check' ? 'The verdict' : 'Checked at this step', c.checks.map(function (k) {
+        return '<div class="bb-check c-' + esc(k.state) + '"><span class="bb-sym">' + (CHECK_SYM_P[k.state] || '•') + '</span><div><b>' + esc(k.label) + ':</b> ' + esc(k.word) +
+          (k.detail ? ' <span class="muted">' + esc(k.detail) + '</span>' : '') +
+          (k.evidence.length ? '<div class="bb-chips"><span class="muted">Its evidence</span> ' + k.evidence.map(function (x) { return chip(x.title, 'cited'); }).join(' ') + '</div>' : '') + '</div></div>';
+      }).join(''));
+    }
+    if (c.did) { evidence++; body += sec('What it did', '<div class="bb-did">' + esc(c.did.what) + (c.did.title ? ': <b>' + esc(c.did.title) + '</b>' : '') + (c.did.ref ? ' <span class="bb-chip">' + esc(c.did.ref) + '</span>' : '') + '</div>'); }
+    if (c.wrote) {
+      evidence++;
+      body += sec('What it wrote', c.wrote.fields ? '<dl class="bb-fields">' + c.wrote.fields.map(function (f) { return '<dt>' + esc(f.name) + '</dt><dd>' + esc(f.value) + '</dd>'; }).join('') + '</dl>'
+                                                 : foldText(c.wrote.text, this.moreOpen));
+    }
+    if (c.reply) { evidence++; body += sec('What the person was told', '<blockquote class="bb-quote reply">' + foldText(c.reply, this.moreOpen) + '</blockquote>'); }
+    if (c.why) body += sec('Why, in the AI’s words' + (c.why.atStep ? ' (at step ' + c.why.atStep + ')' : ''), '<blockquote class="bb-quote">' + foldText(c.why.text, this.moreOpen) + '</blockquote>');
+    // The step's own description: always at a sign-off (who may sign), else when nothing else shows.
+    if (c.about && (c.kind === 'gate' || !evidence)) body += sec(c.about.label, '<p class="bb-about">' + esc(c.about.text) + '</p>', 'bb-aboutsec');
+    body += this._storyHTML(run, events, id);
+    return '<div class="bb a-' + esc(c.actor) + ' s-' + esc(c.status) + '">' + head + (acts ? '<div class="p-acts">' + acts + '</div>' : '') + '<div class="bb-body">' + body + '</div></div>';
+  };
+
+  /* The app's own story panels for this step (audience both or presentation), under their
+     plain_title: Trent's outlet for a bespoke view or added color. Additive: the generic
+     evidence above always shows. */
+  Bench.prototype._storyHTML = function (run, events, id) {
+    var L = lg(), topo = this.topo, story = this.story(), self = this, out = '';
     (topo.panels || []).forEach(function (pn) {
       var aud = pn.audience || 'both';
       if (aud === 'engineering') return;
@@ -936,82 +1234,61 @@
         else if (pn.fields) html = list.map(function (e) { return L.renderFields(e, pn.fields); }).join('');
         else html = list.map(function (e) { return L.renderGeneric(e, { mode: 'presentation' }); }).join('');
       } catch (err) { html = '<div class="err">This step’s story panel failed: ' + esc(err.message) + '</div>'; }
-      // Presentation's heading is the panel's plain_title; a panel without one shows no heading
-      // here (its title is Engineering's name for it).
-      if (html) panels += '<div class="p-story">' + (pn.plain_title ? '<div class="p-storyt">' + esc(pn.plain_title) + '</div>' : '') + html + '</div>';
+      if (html) out += '<section class="bb-sec bb-story">' + (pn.plain_title ? '<h4>' + esc(pn.plain_title) + '</h4>' : '') + '<div class="bb-storybody">' + html + '</div></section>';
     });
-    var acts = '';
-    // Only on a step where the AI was asked something, and only when the app sent the text.
-    var calls = events.filter(function (e) { return e.event_type === 'llm_call' && e.node === id; });
-    var hasText = calls.some(function (e) { var d = e.data || {}; return d.system != null || (d.messages || []).length || d.output != null; });
-    if (this._tstateShown === 'moment' && this.transport) acts += '<button class="p-btn primary" data-act="play">Continue ▸</button>';
-    if (hasText) acts += '<button class="p-btn" data-act="given" data-arg="' + esc(id) + '">What the AI was given ▸</button>';
-    if (this.pair && n.kind === 'gate' && events.some(function (e) { return e.event_type === 'gate_resolved'; })) acts += '<a class="p-btn" href="' + esc(this.pair.href) + '">' + esc(this.pair.text) + '</a>';
-    // The buttons sit above the body, so a long note never scrolls "Continue" out of reach.
-    return head + (acts ? '<div class="p-acts">' + acts + '</div>' : '') + '<div class="p-nowbody">' + lines + panels + '</div>';
+    return out;
   };
 
-  Bench.prototype._rowsHTML = function (run, events, finished) {
-    var L = lg(), topo = this.topo, open = this.presOpen, self = this;
-    function row(key, q, summary, body) {
-      var on = !!open[key];
-      return '<div class="p-row' + (on ? ' open' : '') + '"><button class="p-rowhead" data-act="row" data-arg="' + key + '" aria-expanded="' + on + '">' +
-        '<span class="p-q">' + esc(q) + '</span><span class="p-sum">' + summary + '</span><span class="p-chev">' + (on ? '▾' : '▸') + '</span></button>' +
-        (on ? '<div class="p-rowbody">' + body + '</div>' : '') + '</div>';
-    }
-    // What it looked at
-    var srcs = L.sourceStates(topo, events);
-    var srcBody = srcs.map(function (s) {
-      var sel = s.items.filter(function (it) { return it.id === self.presItem; })[0];
-      return '<div class="p-src"><div><b>' + esc(s.title) + '</b>' + (s.line ? ' <span class="muted">· ' + esc(s.line) + '</span>' : '') + '</div>' +
-        (s.description ? '<div class="p-says">The app says: ' + esc(s.description) + '</div>' : '') +
-        (s.items.length ? '<div class="tiles">' + s.items.map(function (it, i) { return tile(it, it.id === self.presItem, i, s.items).replace('<button', '<button data-act="item" data-arg="' + esc(it.id) + '"'); }).join('') + '</div>' : '') +
-        (sel ? '<div class="p-item"><b>' + esc(sel.title) + '</b> ' + (sel.text ? '<span class="muted">' + esc(sel.state === 'given' ? '· given to the AI, word for word' : '· found by the search') + '</span><pre class="io">' + esc(sel.text) + '</pre>' : '<span class="muted">· not read this run</span>') + '</div>' : '') +
-        '</div>';
-    }).join('') + (srcs.some(function (s) { return s.items.length; }) ? '<div class="legend"><span class="tile st-could">·</span> could look at <span class="tile st-found">·</span> found by the search <span class="tile st-given">·</span> given to the AI <span class="tile st-given relied">·</span> its answer rests on it</div>' : '');
-    var html = row('looked', 'What it looked at', esc(L.sourcesLine(srcs, finished)), srcBody || '<span class="muted">The app doesn’t say what it can see.</span>');
-    // How it was checked
-    var checks = L.checkStates(topo, events, finished);
-    var ckSum = checks.length ? checks.map(function (c) { return '<span class="ck ck-' + esc(c.state) + '">' + esc({ passed: '✓', failed: '✕', not_on_path: '–', ran: '•', running: '…', pending: '·' }[c.state] || '') + ' ' + esc(c.label) + (c.state === 'not_on_path' ? ': not needed' : '') + '</span>'; }).join(' ')
-      : '<span class="muted">No checks declared</span>';
-    html += row('checked', 'How it was checked', ckSum, checks.map(function (c) {
-      return '<div class="p-check"><b>' + esc(c.label) + '</b> <span class="c-' + esc(c.state) + '">' + esc(c.line) + '</span>' + (c.description ? '<div class="p-says">' + esc(c.description) + '</div>' : '') + '</div>';
-    }).join('') || '<span class="muted">The app declares no checks.</span>');
-    // Who signed off
-    var g = L.gateState(topo, events, finished);
-    var gBody = '<div>' + esc(g.line) + '</div>';
-    if (g.proposed) gBody += '<div class="p-says">What they were shown: ' + esc(typeof g.proposed === 'object' ? (g.proposed.title || '') + (g.proposed.description ? ': ' + g.proposed.description : '') || JSON.stringify(g.proposed) : g.proposed) + '</div>';
-    if (this.pair && (g.state === 'approved' || g.state === 'denied')) gBody += '<a class="p-btn" href="' + esc(this.pair.href) + '">' + esc(this.pair.text) + '</a>';
-    html += row('signed', 'Who signed off', esc(g.line), gBody);
-    // What it can never do
-    var never = topo.never || [], actions = topo.actions || [];
-    if (never.length || actions.length) {
-      html += row('never', 'What it can never do', esc(never.length ? never.join(' · ') : 'The app doesn’t say'),
-        (never.length ? '<div class="p-says">The app says it can never:</div><ul>' + never.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') +
-        (actions.length ? '<div class="p-says">What it can do (the app says):</div><ul>' + actions.map(function (a) { return '<li><b>' + esc(a.title) + '</b>' + (a.description ? ': ' + esc(a.description) : '') + '</li>'; }).join('') + '</ul>' : ''));
-    }
-    return html;
+  // ---- the recap: the run in four answers ----------------------------------------------------
+  Bench.prototype._recapHTML = function (run, events, finished, S) {
+    var L = lg(), topo = this.topo, self = this;
+    var rc = L.recap(topo, events, finished, S.seq);
+    function q(label, answer, body) { return '<section class="rc-q"><h4>' + esc(label) + '</h4><p class="rc-a">' + answer + '</p>' + (body || '') + '</section>'; }
+    var path = '<div class="rc-path">' + rc.did.path.map(function (x, i) { return '<span class="rc-step a-' + esc(x.actor) + '"><i>' + (i + 1) + '</i>' + esc(x.title) + '</span>'; }).join('<span class="rc-arrow">→</span>') + '</div>';
+    var looked = rc.looked.length ? rc.looked.map(function (s) {
+      return (rc.looked.length > 1 ? '<div class="rc-src"><b>' + esc(s.title) + '</b>: ' + esc(s.line) + '</div>' : '') +
+        (s.shown.length ? '<ul class="rc-items">' + s.shown.map(function (it) {
+          return '<li class="' + (it.relied ? 'relied' : '') + '">' + (it.relied ? '★ ' : '') + esc(it.title) + (it.relied ? ' <span class="muted">· relied on</span>' : it.state === 'found' ? ' <span class="muted">· found, not given</span>' : '') + '</li>';
+        }).join('') + '</ul>' : '');
+    }).join('') : '<span class="muted">The app doesn’t say what it can see.</span>';
+    var lookedA = rc.looked.length === 1 ? '<b>' + esc(rc.looked[0].title) + ':</b> ' + esc(rc.looked[0].line)
+      : rc.looked.length ? esc(rc.looked.some(function (s) { return s.found; }) ? 'What it was given, and what its answer rests on' : 'Nothing was looked up this time') : 'The app doesn’t say';
+    var checks = rc.checked.length ? '<ul class="rc-checks">' + rc.checked.map(function (c) {
+      return '<li class="c-' + esc(c.state) + '"><span class="bb-sym">' + ({ passed: '✓', failed: '✕', not_on_path: '–', ran: '•', running: '…', pending: '·' }[c.state] || '•') + '</span><b>' + esc(c.label.replace(/^./, function (x) { return x.toUpperCase(); })) + '</b> ' + esc(c.line.replace(/^[✓✕–]\s*/, '')) + '</li>';
+    }).join('') + '</ul>' : '';
+    var nChecks = rc.checked.length;
+    var signed = rc.signed.line + (rc.signed.state === 'approved' || rc.signed.state === 'denied' ? '' : '');
+    var pair = this.pair && (rc.signed.state === 'approved' || rc.signed.state === 'denied') ? '<a class="p-btn" href="' + esc(this.pair.href) + '">' + esc(this.pair.text) + '</a>' : '';
+    var tr = topo.app && topo.app.track_record;
+    return '<div class="bb rc">' +
+      '<div class="bb-head"><span class="rc-k">Recap</span><span class="bb-name">The run in four answers</span>' + (finished ? '' : '<span class="bb-tag t-now">So far</span>') +
+        '<button class="p-x" data-act="recap" title="Back to the steps (← or Esc)">✕</button></div>' +
+      '<div class="bb-body">' +
+      q('What did it do?', '<b>' + esc(rc.did.text) + '</b>', path) +
+      q('What did it look at?', lookedA, looked) +
+      q('How was it checked?', nChecks ? esc(nChecks + (nChecks === 1 ? ' check' : ' checks')) : 'The app declares no checks', checks) +
+      q('Did a person sign off?', esc(signed), pair) +
+      (rc.never.length ? '<p class="rc-never"><span>It can never:</span> ' + rc.never.map(esc).join(' · ') + '</p>' : '') +
+      (tr ? '<p class="rc-record"><span>How it’s been tested (the app says):</span> ' + esc(tr) + '</p>' : '') +
+      '</div></div>';
   };
 
+  // The footer: time, cost in words, and the by-hand baseline (finished) or what it can never do.
   Bench.prototype._bottomHTML = function (run, events, finished) {
-    var L = lg(), topo = this.topo;
-    var bits = [];
+    var L = lg(), topo = this.topo, bits = [];
     // Live, an open gate keeps waiting by the wall clock; a replay's times are the recorded ones.
     var nowTs = null;
     if (this.source !== 'replay' && !this._local && !finished && run.gate && run.gate.state === 'waiting' && run.gate.seenAt != null)
-      nowTs = run.gate.since + (wallNow() - run.gate.seenAt) / 1000;   // the app's own clock, run on by the wall
-    // Mid-run the time is a running total, said as one ("So far: 2.3 s"), not a clipped "Took…".
+      nowTs = run.gate.since + (wallNow() - run.gate.seenAt) / 1000;
     var split = events.length ? L.timeSplit(events, nowTs) : null;
     if (split) bits.push(esc(finished || split.gated ? L.timeLine(split) : 'So far: ' + L.timeLine(split).replace(/^Took /, '')));
     var cl = L.costLine(L.costInfo(events));
     if (cl) bits.push(esc(cl));
-    var base = finished ? L.baselineOf(events) : null;
-    if (base) bits.push('by hand: ' + esc(base) + ' <span class="muted">(the team’s estimate)</span>');
-    var tr = topo.app && topo.app.track_record;
-    var html = '<div class="p-bline">' + bits.join(' <span class="sep">·</span> ') +
-      (tr ? ' <button class="p-link" data-act="record">How it’s been tested ' + (this.presOpen.record ? '▾' : '▸') + '</button>' : '') + '</div>';
-    if (tr && this.presOpen.record) html += '<div class="p-record">The app says: ' + esc(tr) + '</div>';
-    return html;
+    var base = finished ? L.baselineOf(events, topo) : null;
+    var never = topo.never || [];
+    if (base) bits.push('<span class="muted">By hand:</span> ' + esc(base));
+    else if (never.length) bits.push('<span class="muted">Can never:</span> ' + never.map(esc).join(' · '));
+    return '<div class="p-bline">' + bits.join(' <span class="sep">·</span> ') + '</div>';
   };
 
   // "What the AI was given": the run's model calls, as plain blocks, with retrieved text marked.

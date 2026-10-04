@@ -90,9 +90,15 @@ test('cursor stops: every visit for stepping; moments for auto-pause; the end al
   const { events, topo } = hello('hello-answer');
   const s = L.cursorStops(events, topo);
   const vs = L.visits(events);
-  assert.deepEqual(s.steps, vs.map((v) => v.last).concat([events.length - 1]).filter((x, i, a) => a.indexOf(x) === i));
+  // A branching node's stop takes in the next visit's step_started, so the path it took is known
+  // (the branch is derived from what ran next); every other visit stops at its own last event.
+  const branching = (v) => L.hasBranches(topo, v.node);
+  const want = vs.map((v, i) => (branching(v) && vs[i + 1] && events[vs[i + 1].first].event_type === 'step_started') ? vs[i + 1].first : v.last);
+  assert.deepEqual(s.steps, want.concat([events.length - 1]).filter((x, i, a) => a.indexOf(x) === i));
   const momentNodes = s.moments.slice(0, -1).map((i) => events[i].node);
-  assert.deepEqual(momentNodes, ['triage', 'answer_check']);   // a decision with branches, a check
+  // a decision with branches (its stop is the next step's start), a check (likewise: it branches)
+  assert.deepEqual(momentNodes, ['lookup', 'reply']);
+  assert.deepEqual(s.moments.slice(0, -1).map((i) => events[i].event_type), ['step_started', 'step_started']);
   assert.equal(s.moments.at(-1), events.length - 1);
   assert.equal(L.nextStop(s.steps, -1), s.steps[0]);
   assert.equal(L.prevStop(s.steps, s.steps[0]), -1);
@@ -419,19 +425,21 @@ test('check_words: a check\'s own state words show in the Checks row, the NOW ca
 test('helpdesk: the low-confidence check never says "Passed" anywhere', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
   for (const name of ['req-020', 'req-012-approved', 'req-005']) {
     const r = desk(name);
-    const row = L.checkStates(r.topo, r.events, true).find((c) => c.id === 'unsure');
+    // The library's helpdesk names this check `confidence_check` (its words travel with it).
+    const row = L.checkStates(r.topo, r.events, true).find((c) => c.id === 'confidence_check');
     assert.ok(row, name);
     assert.doesNotMatch(row.line, /Passed/);
     assert.match(row.line, /Didn't trigger|Triggered: sent to a person/);
     const n = L.narrate(r.topo, r.events, 'classify', { finished: true });
-    const line = n.lines.find((l) => /Low-confidence check/.test(l.text));
+    const line = n.lines.find((l) => /Confidence check/i.test(l.text));
     assert.ok(line && /Didn't trigger|Triggered/.test(line.text) && !/Passed/.test(line.text), JSON.stringify(n.lines));
   }
 });
 test('NOW card: a line the reply already quotes isn\'t said twice (req-020\'s hand-off)', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
   const h = desk('req-020');
   const fin = h.events.find((e) => e.event_type === 'run_finished');
-  const reply = fin && fin.data && fin.data.output;
+  // The run's output is the graph's final state: the reply is its response field.
+  const reply = fin && fin.data && L.replyOf(fin.data.output);
   assert.ok(reply, 'req-020 has a reply');
   const n = L.narrate(h.topo, h.events, 'handoff', { finished: true, reply, last: 'handoff' });
   const count = n.lines.filter((l) => /Escalated for human review/.test(l.text)).length;

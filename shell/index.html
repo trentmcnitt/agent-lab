@@ -102,6 +102,9 @@
   // A presenter's ?mode= (presentation | engineering) reaches the bench.
   if (q.get('mode')) benchUrl = withParam(benchUrl, 'mode', q.get('mode'));
   document.getElementById('benchFrame').src = benchUrl;
+  // A presenter's clicker sends keys to whatever has focus: start with the bench, so → / PageDown,
+  // M and R work before anyone clicks (a click in the app pane moves focus there, as expected).
+  document.getElementById('benchFrame').addEventListener('load', function () { try { this.contentWindow.focus(); } catch (e) {} });
   // Opened with nothing to show (no app, no recording): say so, and point somewhere useful.
   if (!appUrl && !q.get('replay')) {
     document.querySelector('.split').innerHTML = '<div class="missing"><b>Nothing on the bench yet.</b><span>Open a scenario to see an app and its bench side by side.</span>' +

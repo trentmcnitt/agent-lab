@@ -5,6 +5,7 @@ fails its test on any script error or console error (conftest.Watched)."""
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -48,12 +49,19 @@ def test_replay_plays_to_the_end(page, site, name, mode):
     p = open_replay(page, site, name, mode)
     wait_done(p, mode)
     if mode == "presentation":
-        out = p.inner_text("[data-p=outcome]")
+        out = p.inner_text("[data-p=status]")
         expect = {"hello-answer": "Answered", "req-012-approved": "approved by a person", "req-019": "Handed to a person"}[name]
         assert expect in out
-        rows = p.inner_text("[data-p=rows]")
-        for q in ("What it looked at", "How it was checked", "Who signed off"):
-            assert q in rows
+        # The callout is on the last step, numbered, joined to it by the wedge.
+        assert p.locator(".pres .gnode.focus").count() == 1
+        assert p.locator("[data-p=bubble] .bb-num").count() == 1
+        assert p.locator("[data-p=wedge] polygon").count() == 1
+        # One more step forward is the recap: the four questions.
+        p.keyboard.press("ArrowRight")
+        p.wait_for_selector("[data-p=bubble] .rc")
+        recap = p.inner_text("[data-p=bubble]").lower()
+        for q in ("what did it do?", "what did it look at?", "how was it checked?", "did a person sign off?"):
+            assert q in recap
         # Hidden in Presentation: tokens, raw JSON, the event log.
         assert "tokens" not in p.inner_text(".pres") and not p.is_visible(".eng")
     else:
@@ -83,36 +91,36 @@ def test_mode_toggle_switches_and_is_remembered(page, site):
 
 # ---- step-through --------------------------------------------------------------------------
 def now_title(p):
-    return p.inner_text("[data-p=now] .p-nowhead b")
+    return p.inner_text("[data-p=bubble] .bb-name")
 
 
 def test_step_through_pauses_at_moments_and_steps_back(page, site):
     p = open_replay(page, site, "req-012-approved", "presentation", pause=True)
     # Play stops by itself at the first moment (the classify decision), with a Continue.
-    p.wait_for_selector("[data-p=now] [data-act=play]", timeout=20_000)
+    p.wait_for_selector("[data-p=bubble] [data-act=play]", timeout=20_000)
     first = now_title(p)
-    assert "Paused" in p.inner_text("[data-p=outcome]")
+    assert "Paused" in p.inner_text("[data-p=status]")
     p.click("[data-p=transport] [data-act=next]")
-    p.wait_for_function("t => document.querySelector('[data-p=now] .p-nowhead b').textContent !== t", arg=first, timeout=15_000)
+    p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent !== t", arg=first, timeout=15_000)
     second = now_title(p)
     p.click("[data-p=transport] [data-act=back]")
-    p.wait_for_function("t => document.querySelector('[data-p=now] .p-nowhead b').textContent === t", arg=first, timeout=15_000)
+    p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent === t", arg=first, timeout=15_000)
     assert second != first
     # After stepping back it's paused (not at a moment): Play goes on to the next moment.
     p.click("[data-p=transport] [data-act=play]")
-    p.wait_for_function("t => document.querySelector('[data-p=now] .p-nowhead b').textContent !== t", arg=first, timeout=20_000)
+    p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent !== t", arg=first, timeout=20_000)
 
 
 def test_keys_step_and_a_single_step_reads_as_paused(page, site):
     p = open_replay(page, site, "req-012-approved", "presentation", pause=True)
-    p.wait_for_selector("[data-p=now] [data-act=play]", timeout=20_000)
+    p.wait_for_selector("[data-p=bubble] [data-act=play]", timeout=20_000)
     first = now_title(p)
     p.keyboard.press("ArrowRight")
     # A single step never shows the Pause button: it is a step, not Play.
     assert p.locator("[data-p=transport] [data-act=pause]").count() == 0
-    p.wait_for_function("t => document.querySelector('[data-p=now] .p-nowhead b').textContent !== t", arg=first, timeout=15_000)
+    p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent !== t", arg=first, timeout=15_000)
     p.keyboard.press("ArrowLeft")
-    p.wait_for_function("t => document.querySelector('[data-p=now] .p-nowhead b').textContent === t", arg=first, timeout=15_000)
+    p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent === t", arg=first, timeout=15_000)
     assert "▶ Continue" in p.inner_text("[data-p=transport]")
 
 
@@ -120,11 +128,13 @@ def test_keys_step_and_a_single_step_reads_as_paused(page, site):
 def test_open_a_source_shows_the_text_the_ai_was_given(page, site):
     p = open_replay(page, site, ANSWER, "presentation")
     wait_done(p, "presentation")
-    p.click("[data-act=row][data-arg=looked]")
-    tile = p.locator(".tile.st-given").first
+    # The search step's callout shows the source's items as tiles; a given one opens to its text.
+    p.click(".pres .gnode[data-node=retrieve]")
+    tile = p.locator("[data-p=bubble] .bb-tile.st-given").first
     assert tile.count(), "no source item was given to the AI"
+    assert "available" in p.inner_text("[data-p=bubble] .bb-legend")
     tile.click()
-    item = p.locator(".p-item")
+    item = p.locator(".b-item")
     item.wait_for()
     assert "given to the AI, word for word" in item.inner_text()
     assert len(item.locator("pre.io").inner_text()) > 40
@@ -135,9 +145,9 @@ def test_given_overlay_opens_and_closes(page, site):
     p = open_replay(page, site, "req-012-approved", "presentation")
     wait_done(p, "presentation")
     # Only a step where the AI was asked something offers it; the last step (the app's) doesn't.
-    assert p.locator("[data-p=now] [data-act=given]").count() == 0
+    assert p.locator("[data-p=bubble] [data-act=given]").count() == 0
     p.click(".pres .gnode[data-node=propose_action]")
-    p.click("[data-p=now] [data-act=given]")
+    p.click("[data-p=bubble] [data-act=given]")
     ov = p.locator("[data-p=overlay]")
     ov.wait_for(state="visible")
     text = ov.inner_text().lower()   # (role labels are styled uppercase)
@@ -150,7 +160,7 @@ def test_given_overlay_opens_and_closes(page, site):
     assert '{"action_type"' not in ov.locator(".g-call.focus").inner_text()   # the raw JSON is folded away
     p.click("[data-p=overlay] .p-close")
     ov.wait_for(state="hidden")
-    p.click("[data-p=now] [data-act=given]")
+    p.click("[data-p=bubble] [data-act=given]")
     ov.wait_for(state="visible")
     p.keyboard.press("Escape")
     ov.wait_for(state="hidden")
@@ -167,18 +177,20 @@ def test_shell_side_by_side_follows_the_app(page, site):
     bench.locator("#bench.mode-presentation").wait_for()
     app.get_by_role("button", name="req-012").click()
     # The bench follows the app's run to the gate, then the approval made in the app.
-    bench.locator("[data-p=outcome]", has_text="Waiting for a person to approve").wait_for(timeout=40_000)
+    bench.locator("[data-p=status]", has_text="Waiting for a person to approve").wait_for(timeout=40_000)
     app.get_by_role("button", name="Approve").click()
-    bench.locator("[data-p=outcome]", has_text="approved by a person").wait_for(timeout=40_000)
-    assert "Approved" in bench.locator("[data-p=rows]").inner_text()
-    # The app's replay keeps the recording's times: the work reads the same as the bench's own replay (7.7 s).
-    assert "AI work: 7.7 s" in bench.locator("[data-p=bottom]").inner_text()
+    bench.locator("[data-p=status]", has_text="approved by a person").wait_for(timeout=40_000)
+    bench.locator(".ps-key[data-act=recap]").click()
+    assert "Approved" in bench.locator("[data-p=bubble]").inner_text()
+    bench.locator(".ps-key[data-act=recap]").click()
+    # The app's replay keeps the recording's times: the work reads as the bench's own replay does (7.x s).
+    assert re.search(r"AI work: 7\.\d s", bench.locator("[data-p=bottom]").inner_text())
     # Step through it here, paced like a recording, then back to following the app.
     bench.locator("[data-p=transport] [data-act=stepthrough]").click()
-    bench.locator("[data-p=now] [data-act=play]").wait_for(timeout=20_000)     # paused at the first moment
-    assert "Paused" in bench.locator("[data-p=outcome]").inner_text()
+    bench.locator("[data-p=bubble] [data-act=play]").wait_for(timeout=20_000)     # paused at the first moment
+    assert "Paused" in bench.locator("[data-p=status]").inner_text()
     bench.locator("[data-p=transport] [data-act=follow]").click()
-    bench.locator("[data-p=outcome]", has_text="approved by a person").wait_for(timeout=10_000)
+    bench.locator("[data-p=status]", has_text="approved by a person").wait_for(timeout=10_000)
     assert bench.locator("[data-p=transport] [data-act=stepthrough]").count() == 1
 
 
@@ -214,8 +226,8 @@ def test_level0_pydantic_ai_draws_an_inferred_map(page, live_bench):
     p.wait_for_selector("#bench.mode-presentation")
     assert p.locator(".pres [data-p=inferred]").is_visible()
     assert "reset my VPN password" in p.inner_text("[data-p=req]")
-    p.wait_for_function("() => document.querySelector(\"[data-p=now] .p-nowhead b\").textContent !== ''", timeout=10_000)
-    assert "didn’t run" not in p.inner_text("[data-p=now]")
+    p.wait_for_function("() => (document.querySelector(\"[data-p=bubble] .bb-name\") || {}).textContent", timeout=10_000)
+    assert "didn’t come this way" not in p.inner_text("[data-p=bubble]")
     assert "AI cost not known" in p.inner_text("[data-p=bottom]"), "an unpriced model is unknown, never free"
     p.evaluate("localStorage.removeItem('bench.mode')")
     # Another app's runs stay off this app's page.
@@ -226,3 +238,38 @@ def test_level0_pydantic_ai_draws_an_inferred_map(page, live_bench):
     p.wait_for_selector(".eng .gnode")
     p.wait_for_timeout(800)
     assert "printer" not in p.inner_text(".eng select[data-f=runs]").lower()
+
+
+# ---- the stage: deep links, the presenter's keys, the recap ------------------------------------
+def test_deep_link_opens_paused_at_the_gate_with_the_exact_proposal(page, site):
+    w = page
+    w.page.goto(f"{site}/bench/?replay={RECORDINGS['req-012-approved']}&mode=presentation&at=approval_gate")
+    p = w.page
+    p.wait_for_selector("[data-p=bubble] .bb-proposal.waiting")
+    assert "Waiting for a person" in p.inner_text("[data-p=status]")
+    bub = p.inner_text("[data-p=bubble]")
+    assert "pressed in the app, not here" in bub
+    assert "Approved by" not in bub, "nothing after the pause is shown"
+    # The sign-off's node is the focus; the earlier steps are numbered in run order.
+    assert "gatewait" in p.get_attribute(".pres .gnode[data-node=approval_gate]", "class")
+    assert p.inner_text(".pres .gnode[data-node=ingest] .s-num") == "1"
+
+
+def test_presenter_keys_map_only_and_recap(page, site):
+    w = page
+    w.page.goto(f"{site}/bench/?replay={RECORDINGS['req-012-approved']}&mode=presentation&at=classify")
+    p = w.page
+    p.wait_for_selector("[data-p=bubble] .bb-card.chosen")
+    p.keyboard.press("m")
+    p.wait_for_selector("#bench.p-maponly")
+    assert not p.is_visible("[data-p=bubble]")
+    p.keyboard.press("m")
+    p.wait_for_selector("[data-p=bubble] .bb-card.chosen")
+    p.keyboard.press("r")
+    p.wait_for_selector("[data-p=bubble] .rc")
+    p.keyboard.press("ArrowLeft")   # back out of the recap first
+    p.wait_for_selector("[data-p=bubble] .bb-card.chosen")
+    # Space is the clicker's "next".
+    first = now_title(p)
+    p.keyboard.press(" ")
+    p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent !== t", arg=first, timeout=15_000)

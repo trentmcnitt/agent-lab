@@ -21,8 +21,13 @@
   // Presentation: wider boxes, tighter rows, so an 8-layer map fits a ~640 px pane.
   // A routed edge's label is left off there (the source box's "→ branch" line says it): routedLabels.
   var PRES_GEOM = { w: 212, h: 50, gx: 12, gy: 16, pad: 8, routedLabels: false };
-  var CLEAR = 6;      // a channel keeps at least this far from any box
-  var LANE = 9;       // spacing between parallel channels
+  // Presentation's stage (the map beside one callout, Build spec v3): boxes big enough for a
+  // two-line plain name at projector size plus one badge, and a smaller one for a ~960 px pane.
+  // lane/clear: channel spacing and clearance, scaled with the boxes so long edges stay distinct.
+  var STAGE_GEOM = { w: 300, h: 92, gx: 64, gy: 24, pad: 18, routedLabels: false, lane: 14, clear: 10 };
+  var PANE_GEOM = { w: 196, h: 70, gx: 30, gy: 18, pad: 12, routedLabels: false, lane: 10, clear: 7 };
+  var CLEAR_DEFAULT = 6;   // a channel keeps at least this far from any box (geom.clear overrides)
+  var LANE_DEFAULT = 9;    // spacing between parallel channels (geom.lane overrides)
   var CHAR_W = 5.9;   // the edge label font (9.5px monospace), per character
 
   function cubic(a, b, c, d) { return [a, b, c, d]; }
@@ -51,6 +56,7 @@
 
   function layout(topo, geom) {
     var G = geom || GEOM;
+    var CLEAR = G.clear || CLEAR_DEFAULT, LANE = G.lane || LANE_DEFAULT;
     var ids = topo.nodes.map(function (n) { return n.id; });
     var preds = {}, succs = {};
     ids.forEach(function (id) { preds[id] = []; succs[id] = []; });
@@ -208,6 +214,8 @@
 
   layout.GEOM = GEOM;
   layout.PRES_GEOM = PRES_GEOM;
+  layout.STAGE_GEOM = STAGE_GEOM;
+  layout.PANE_GEOM = PANE_GEOM;
   layout.at = at;
   global.BenchLayout = layout;
 })(typeof window !== 'undefined' ? window : this);

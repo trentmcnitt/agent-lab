@@ -15,11 +15,17 @@ vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'viewer/layout.js'), 'utf8'),
 const layout = sandbox.window.BenchLayout;
 
 const MAPS = {
-  helpdesk: path.resolve(ROOT, '../agent-lab/request-queue/app/bench/topology.json'),
+  // The helpdesk's map is derived from its code by the agentlab library and travels in each
+  // recording's header (there is no hand-written topology.json any more).
+  helpdesk: path.resolve(ROOT, '../agent-lab/request-queue/demo/bench-recordings/req-012-approved.recording.jsonl'),
   hello: path.join(ROOT, 'examples/hello-agent.topology.json'),
   bespoke: path.resolve(ROOT, '../bespoke-ai-vscode-ext/playground/topology.json'),
 };
-const GEOMS = { engineering: layout.GEOM, presentation: layout.PRES_GEOM };
+function readMap(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  return file.endsWith('.recording.jsonl') ? JSON.parse(text.split('\n')[0]).topology : JSON.parse(text);
+}
+const GEOMS = { engineering: layout.GEOM, presentation: layout.PRES_GEOM, stage: layout.STAGE_GEOM, pane: layout.PANE_GEOM };
 
 // Every sampled point of every edge piece, against every box but the edge's own ends.
 function crossings(topo, L) {
@@ -78,7 +84,7 @@ for (const [name, file] of Object.entries(MAPS)) {
   const have = fs.existsSync(file);
   for (const [mode, G] of Object.entries(GEOMS)) {
     test(`layout: no edge crosses a box (${name}, ${mode})`, { skip: !have && `${file} not present` }, () => {
-      const topo = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const topo = readMap(file);
       const L = layout(topo, G);
       assert.deepEqual(crossings(topo, L), []);
       assert.deepEqual(labelsInBoxes(topo, L), []);
@@ -91,7 +97,7 @@ for (const [name, file] of Object.entries(MAPS)) {
 }
 
 test('layout: the helpdesk long edges are routed (the trick request\'s escalation included)', { skip: !fs.existsSync(MAPS.helpdesk) }, () => {
-  const topo = JSON.parse(fs.readFileSync(MAPS.helpdesk, 'utf8'));
+  const topo = readMap(MAPS.helpdesk);
   const L = layout(topo, layout.PRES_GEOM);
   const i = topo.edges.findIndex((e) => e.from === 'classify' && e.to === 'handoff');
   assert.ok(L.edges[i].routed);
