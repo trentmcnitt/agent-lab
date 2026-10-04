@@ -146,3 +146,22 @@ test('two branches between the same two steps are one line with joined words', (
   assert.equal(layout.edgeText(topo, L.edges[1], true), 'needs a change · not sure');
   assert.equal(layout.edgeText(topo, L.edges[0], true), 'can answer');
 });
+
+test('Presentation geometries: the helpdesk\'s row-skipping edges run inside the map, and every line in a gap turns at one height', { skip: !fs.existsSync(MAPS.helpdesk) }, () => {
+  const topo = readMap(MAPS.helpdesk);
+  for (const G of [layout.STAGE_GEOM, layout.PANE_GEOM]) {
+    const L = layout(topo, G);
+    const xs = Object.values(L.pos).map((p) => p.x), lo = Math.min(...xs), hi = Math.max(...xs) + G.w;
+    const turns = {};   // gap index -> the heights of every horizontal leg in it
+    L.edges.forEach((r) => r && r.pieces.forEach((pc) => {
+      const dx = Math.abs(pc[3][0] - pc[0][0]), dy = Math.abs(pc[3][1] - pc[0][1]);
+      // A vertical leg never runs outside the boxes' span (no frame round the map).
+      if (dx < 0.01 && dy > G.radius) assert.ok(pc[0][0] > lo && pc[0][0] < hi, `${r.from}->${r.to} runs outside the map at x ${pc[0][0]}`);
+      if (dy < 0.01 && dx > G.radius) {
+        const gap = Math.floor((pc[0][1] - G.pad) / (G.h + G.gy));
+        (turns[gap] = turns[gap] || new Set()).add(Math.round(pc[0][1] * 10) / 10);
+      }
+    }));
+    for (const [gap, ys] of Object.entries(turns)) assert.equal(ys.size, 1, `gap ${gap} has lines turning at ${[...ys].join(', ')}`);
+  }
+});

@@ -140,7 +140,8 @@
         '<footer class="ps-foot"><div class="ps-facts" data-p="bottom"></div>' +
           '<div class="ps-ctl"><div class="p-transport" data-p="transport"></div>' +
             '<button class="ps-key" data-act="maponly" title="The map alone, for the whole-system view (M)"><kbd>M</kbd><span class="kl">Map</span></button>' +
-            '<button class="ps-key" data-act="recap" title="The run in four answers (R)"><kbd>R</kbd><span class="kl">Recap</span></button></div></footer>' +
+            '<button class="ps-key" data-act="recap" title="The run in four answers (R)"><kbd>R</kbd><span class="kl">Recap</span></button>' +
+            '<button class="ps-key ps-help" data-act="keys" title="The presenter\'s keys (?): → or PageDown next step, ← back" aria-label="Keys"><kbd>?</kbd><span class="kl">Keys</span></button></div></footer>' +
         '<div class="p-overlay" data-p="overlay" hidden></div>' +
       '</div>';
     this.f = {}; this.p = {};
@@ -500,6 +501,12 @@
     sel.style.display = this.runOrder.length ? '' : 'none';
 
     if (this.mode === 'presentation') { this._renderPres(run); return; }
+    // The bar's status pill is the same in both modes (Engineering reads it from every event it has).
+    var oc0 = run ? lg().outcome(this.topo, run.events) : null;
+    var st0 = !run ? { cls: 'idle', text: 'Waiting for a request' }
+      : oc0.done ? { cls: /^Handed/.test(oc0.text) ? 'handed' : /^(Stopped|Something)/.test(oc0.text) ? 'bad' : 'ok', text: oc0.text === 'Finished' ? 'Finished' : 'Finished · ' + oc0.text }
+      : /^Waiting/.test(oc0.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' } : { cls: 'running', text: 'Running' };
+    setHTML(this.p.status, '<span class="ps-pill st-' + st0.cls + '" title="' + esc(st0.text) + '"><i></i><b>' + esc(st0.text) + '</b></span>');
     if (!run) {
       this.f.meters.textContent = 'waiting for events…';
       return;
@@ -874,18 +881,35 @@
   /* The stage's box size for this map: one line of name when every name fits the box's width at
      the stage's type, else two (measured, so a long-named app gets taller boxes, never clipped
      names or a badge pressed against them). Box padding and type are index.html's .snode rules. */
-  var BOX_TYPE = { stage: { font: 22, badge: 21, line: 1.18, padX: 24 + 16 }, pane: { font: 16, badge: 14, line: 1.18, padX: 17 + 10 } };
+  /* The box's type and spacing (index.html's .snode rules, in px): the name, the step number's disc
+     before it, the footer's badge; padX/padY are the stripe, borders and padding. The box's height
+     is built from these, so the name and footer always have the room they're drawn with. */
+  var BOX_TYPE = {
+    stage: { font: 22, badge: 21, line: 1.18, num: 30, padX: 6 + 18 + 14 + 1.5, padY: 8 + 8 + 3, gap: 8 },
+    pane: { font: 18, badge: 16, line: 1.18, num: 26, padX: 5 + 12 + 10 + 1.5, padY: 8 + 8 + 3, gap: 8 }
+  };
   var _measure = null;
   function boxGeom(topo, G, which) {
     var T = BOX_TYPE[which] || BOX_TYPE.stage, ctx;
     try { _measure = _measure || document.createElement('canvas').getContext('2d'); ctx = _measure; } catch (e) { ctx = null; }
-    if (!ctx) return G;
-    ctx.font = '600 ' + T.font + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-    var room = G.w - T.padX - 8;   // a margin: the page's text runs a little wider than the canvas's
-    var two = topo.nodes.some(function (n) { return ctx.measureText(lg().plainLabel(n)).width > room; });
-    if (!two) return G;
+    var lines = 1;
+    if (ctx) {
+      ctx.font = '600 ' + T.font + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      var room = G.w - T.padX - (T.num + 10) - 8;   // a margin: the page's text runs a little wider than the canvas's
+      // Each name wrapped at its words, as the page will: the most lines any name takes.
+      topo.nodes.forEach(function (n) {
+        var ws = String(lg().plainLabel(n)).split(/\s+/), k = 1, cur = '';
+        ws.forEach(function (w) {
+          var t = cur ? cur + ' ' + w : w;
+          if (cur && ctx.measureText(t).width > room) { k++; cur = w; } else cur = t;
+        });
+        lines = Math.max(lines, k);
+      });
+    }
     var out = {}; Object.keys(G).forEach(function (k) { out[k] = G[k]; });
-    out.h = G.h + Math.round(T.font * T.line);
+    out.lines = lines;
+    var nameH = Math.max(T.num, Math.min(lines, 2) * T.font * T.line);
+    out.h = Math.ceil(T.padY + nameH + T.gap + T.badge * 1.45);
     return out;
   }
 
@@ -911,13 +935,15 @@
     [G, Object.assign({}, G, { w: Math.round(G.w * 0.8) })].forEach(function (cand) {
       var gc = boxGeom(topo, cand, which), lc = layout(topo, gc);
       var kc = Math.min(aw / lc.W, global.innerWidth > 640 && ahh > 80 ? ahh / lc.H : Infinity);
-      if (!best || kc > best.k + 0.01) best = { k: kc, g: gc, lay: lc };
+      // A shape whose names would run to three lines is out (unless no shape avoids it).
+      var ok = gc.lines <= 2;
+      if (!best || (ok && !best.ok) || (ok === best.ok && kc > best.k + 0.01)) best = { k: kc, g: gc, lay: lc, ok: ok };
     });
     G = best.g;
     // How many characters of badge fit beside the actor chip (in the pane the chip gives way to a
     // badge: the box's stripe still says who does the step).
     var T = BOX_TYPE[which] || BOX_TYPE.stage;
-    this._badge = { room: G.w - T.padX - (which === 'pane' ? 0 : 3.4 * T.font) - 24, font: T.badge };
+    this._badge = { room: G.w - T.padX - 3 * T.badge - 24, font: T.badge };
     var Lay = this.layout = best.lay, g = this.p.graph;
     // Arrowheads in px (not stroke widths, which made the lit path's heads fill the whole gap),
     // one per edge state so each head takes its line's colour.
@@ -939,9 +965,9 @@
     var boxes = topo.nodes.map(function (n) {
       var p = Lay.pos[n.id], actor = L.actorOf(n);
       return '<div class="gnode snode a-' + esc(actor) + ' kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" style="left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px" title="' + esc(L.plainLabel(n) + (n.description ? ': ' + n.description : '')) + '">' +
-        '<span class="s-num" hidden></span>' +
-        // The name gets the box's whole width; under it, who does the step and (once it has run) one badge.
-        '<div class="gl">' + esc(L.plainLabel(n)) + '</div>' +
+        // The step's number in a disc before its name (its place kept while it has none, so every
+        // name starts at the same x); under them, who does the step and (once it has run) one badge.
+        '<div class="gl"><span class="s-num" hidden></span><span class="gt">' + esc(L.plainLabel(n)) + '</span></div>' +
         '<div class="s-foot"><span class="actor actor-' + esc(actor) + '">' + esc(ACTOR_CHIP[actor] || actor) + '</span><span class="gp" hidden></span></div></div>';
     }).join('');
     g.innerHTML = '<div class="graph" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + boxes + '</div>';
@@ -1029,10 +1055,18 @@
       if (steps.length && focus !== id && !S.starting[id]) badge = L.stepBadge(topo, S.events, id, steps, counts);
       // Finished: every box the run didn't reach says so, so none reads as still to come.
       else if (!steps.length && finished) badge = '– not needed';
-      // The badge's room: its box's footer, less the actor chip beside it (the pane hides the chip
-      // for a badge), less the badge's own padding.
-      var gp = n.querySelector('.gp'), foot = gp.parentNode, chipW = self._stageGeom === 'pane' ? 0 : chip.offsetWidth + 10;
-      var shown = fitBadge(badge, self._badge && foot.clientWidth ? { font: self._badge.font, room: foot.clientWidth - chipW - 24 } : self._badge);
+      // The badge's room: its box's footer, less the actor chip beside it, less the badge's own
+      // padding. Where the whole badge won't fit beside the chip, the chip shrinks to its actor's
+      // dot (the word in its tooltip), so the badge is never cut while there's any way to fit it.
+      var gp = n.querySelector('.gp'), foot = gp.parentNode;
+      var fw = foot.clientWidth;
+      chip.classList.remove('mini'); chip.title = '';
+      var chipW = chip.offsetWidth + 10, bf = self._badge ? self._badge.font : 14;
+      if (badge && fw && _measure) {
+        _measure.font = '600 ' + bf + 'px -apple-system, BlinkMacSystemFont, sans-serif';
+        if (_measure.measureText(badge).width > fw - chipW - 24) { chip.classList.add('mini'); chip.title = ACTOR_WORDS_P[actor] || actor; chipW = chip.offsetWidth + 8; }
+      }
+      var shown = fitBadge(badge, self._badge && fw ? { font: bf, room: fw - chipW - 24 } : self._badge);
       if (gp.textContent !== shown) { gp.textContent = shown; gp.title = shown === badge ? '' : badge; }
       gp.hidden = !badge;
       gp.parentNode.classList.toggle('has-badge', !!badge);
@@ -1044,6 +1078,16 @@
       var c = 'edge' + (taken[k] ? ' taken' + (S.openNode === ed.to ? ' flowing' : '') : finished ? ' untaken' : '') + (described ? ' described' : '');
       if (e.getAttribute('class') !== c) e.setAttribute('class', c);
     });
+    // The lit path is drawn over the lines it shares a trunk with (SVG paints in document order).
+    var svgE = g.querySelector('svg.edges');
+    if (svgE) {
+      var es = [].slice.call(svgE.querySelectorAll('.edge'));
+      var want = es.slice().sort(function (a, b) {
+        var ta = /\btaken\b/.test(a.getAttribute('class')) ? 1 : 0, tb = /\btaken\b/.test(b.getAttribute('class')) ? 1 : 0;
+        return ta - tb || a.getAttribute('data-edge') - b.getAttribute('data-edge');
+      });
+      if (want.some(function (e, i) { return e !== es[i]; })) want.forEach(function (e) { svgE.appendChild(e); });
+    }
     var busy = S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; });
     clearTimeout(this._tick);
     if (busy) this._tick = setTimeout(function () { self.render(); }, 100);
@@ -1172,7 +1216,7 @@
     var st = !run ? { cls: 'idle', text: 'Waiting for a request' }
       : oc.done ? { cls: /^Handed/.test(oc.text) ? 'handed' : /^(Stopped|Something)/.test(oc.text) ? 'bad' : 'ok', text: oc.text === 'Finished' ? 'Finished' : 'Finished · ' + oc.text }
       : /^Waiting/.test(oc.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' }
-      : (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping') ? { cls: 'paused', text: 'Paused · → or PageDown: next step · ? keys' }
+      : (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping') ? { cls: 'paused', text: 'Paused' + (S && S.focusNode && S.numbers && S.numbers[S.focusNode] ? ' at step ' + S.numbers[S.focusNode] : '') }
       : { cls: 'running', text: oc.text === 'Something went wrong' ? oc.text : 'Running' };
     setHTML(p.status, '<span class="ps-pill st-' + st.cls + '" title="' + esc(st.text) + '"><i></i><b>' + esc(st.text) + '</b></span>');
     setHTML(p.transport, this._transportHTML(finished, run, S));
@@ -1246,6 +1290,9 @@
 
   /* Replay: ◂ ▶ ▸ ⟲ (keys: ← → or PageUp/PageDown, Space = next). Beside the app or live, there
      is no transport, but a finished run (or one waiting for a person) can be stepped through here. */
+  // One icon set for the transport (stroked, the text's colour, sized by the button's type).
+  function svgI(d) { return '<svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="' + d + '"/></svg>'; }
+  var ICON = { back: svgI('M12.5 4.5 7 10l5.5 5.5'), next: svgI('M7.5 4.5 13 10l-5.5 5.5'), restart: svgI('M4.5 4.5v4.5H9M4.9 8.8A6 6 0 1 1 4.6 12') };
   Bench.prototype._transportHTML = function (finished, run, S) {
     if (!this.transport) {
       var idle = run && S && S.caught && (finished || (run.gate && run.gate.state === 'waiting'));
@@ -1254,13 +1301,13 @@
     var s = this._tstateShown || this.tstate;
     var playing = s === 'playing', catching = s === 'catching';
     var started = run && run.events.length > 0;
-    return '<button data-act="back" title="Back one step (← or PageUp)">◂</button>' +
+    return '<button data-act="back" class="ico" title="Back one step (← or PageUp)" aria-label="Back one step">' + ICON.back + '</button>' +
       (playing ? '<button data-act="pause" class="main" title="Pause">❚❚ Pause</button>'
                : catching ? '<button class="main" disabled title="Finishing">❚❚ Playing</button>'
-               : s === 'done' ? '<button data-act="restart" class="main" title="Play it again from the start">↻ Replay</button>'
+               : s === 'done' ? '<button data-act="restart" class="main" title="Play it again from the start">' + ICON.restart + ' Replay</button>'
                : '<button data-act="play" class="main" title="Play; it pauses at the moments that matter">▶ ' + (started ? 'Continue' : 'Play') + '</button>') +
-      '<button data-act="next" title="Forward one step (→, Space or PageDown)">▸</button>' +
-      '<button data-act="restart" title="Start over">⟲</button>' +
+      '<button data-act="next" class="ico" title="Forward one step (→, Space or PageDown)" aria-label="Forward one step">' + ICON.next + '</button>' +
+      '<button data-act="restart" class="ico" title="Start over from the first step" aria-label="Start over">' + ICON.restart + '</button>' +
       (this.transport.speed ? '<button data-act="speed" class="speed" title="Playing speed">' + (this.speedNow || 1) + '×</button>' : '') +
       (this.transport.follow ? '<button data-act="follow" title="Stop stepping through and follow the app again">' + (this.source === 'parent' ? '✕ Follow the app' : '✕ Back to live') + '</button>' : '');
   };
@@ -1457,15 +1504,21 @@
       if (!info.priced) facts.push(item('AI cost', 'not known'));
       else facts.push(item('AI cost', (info.known ? '' : 'at least ') + L.costWords(info.usd) + (info.known ? '' : ' (some calls carry no price)')));
     }
-    function row(label, items) { return '<div class="frow"><span class="flabel">' + esc(label) + '</span><span class="fitems">' + items.join('') + '</span></div>'; }
+    var LABELS = ['This run', 'By hand', 'It can never'];
+    function row(label, items, cls) {
+      var lab = '<span>' + esc(label) + '</span>' + LABELS.filter(function (t) { return t !== label; }).map(function (t) { return '<span class="fghost" aria-hidden="true">' + t + '</span>'; }).join('');
+      return '<div class="frow"><span class="flabel">' + lab + '</span><span class="fitems' + (cls ? ' ' + cls : '') + '">' + items.join('') + '</span></div>';
+    }
     var rows = facts.length ? [row('This run', facts)] : [];
     var base = finished ? L.baselineOf(events, topo) : null;
     var never = topo.never || [];
     if (base) {
       var pairs = L.labelledPairs(base);
       rows.push(row('By hand', pairs ? pairs.map(function (x) { return item(x.k.replace(/^./, function (c) { return c.toUpperCase(); }), x.v); }) : [item('', base)]));
-    } else if (never.length) rows.push(row('It can never', never.map(function (x) { return item('', x); })));
-    // The footer keeps room for two rows (index.html), so its growing never moves the stage.
+    } else if (never.length) rows.push(row('It can never', never.map(function (x) { return item('', x); }), 'never'));
+    // The footer keeps room for two rows (index.html), so its growing never moves the stage. The
+    // label column is as wide as the widest label it ever holds (invisible copies share its first
+    // cell, see row), so the facts don't shift sideways when "It can never" becomes "By hand".
     return rows.join('');
   };
 

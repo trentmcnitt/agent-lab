@@ -30,9 +30,12 @@
   // lane/clear: channel spacing and clearance, scaled with the boxes so long edges stay distinct.
   // ortho: edges run in straight lines with rounded corners (down, across in a gap, down), so a
   // dashed path reads as one calm line rather than a run of S-curves; turns sit in the gaps.
-  // gy leaves every edge between stacked boxes a visible shaft above its arrowhead.
-  var STAGE_GEOM = { w: 356, h: 84, gx: 56, gy: 36, pad: 18, routedLabels: false, lane: 16, clear: 28, ortho: true, radius: 6 };
-  var PANE_GEOM = { w: 240, h: 64, gx: 24, gy: 24, pad: 10, routedLabels: false, lane: 9, clear: 12, ortho: true, radius: 5 };
+  // gy leaves every edge between stacked boxes a visible shaft above its arrowhead. gx leaves the
+  // gutter between two columns wider than its clearance on both sides plus a few lanes, so a
+  // row-skipping edge runs down the middle of the map, not round its outside (see snap).
+  // One corner radius per geometry, for every line in every state.
+  var STAGE_GEOM = { w: 372, h: 84, gx: 72, gy: 32, pad: 18, routedLabels: false, lane: 16, clear: 14, ortho: true, radius: 10, snap: true };
+  var PANE_GEOM = { w: 232, h: 68, gx: 48, gy: 30, pad: 8, routedLabels: false, lane: 12, clear: 8, ortho: true, radius: 8, snap: true };
   var CLEAR_DEFAULT = 6;   // a channel keeps at least this far from any box (geom.clear overrides)
   var LANE_DEFAULT = 9;    // spacing between parallel channels (geom.lane overrides)
   var CHAR_W = 5.9;   // the edge label font (9.5px monospace), per character
@@ -150,6 +153,23 @@
       var x0 = (W0 - rowW) / 2;
       L.forEach(function (id, i) { pos[id] = { x: x0 + i * (G.w + G.gx), y: G.pad + li * (G.h + G.gy) }; });
     });
+    /* snap (Presentation's geometries): a step alone in its row, with one step leading into it,
+       sits straight under that step instead of in the middle; a row of several is then ordered by
+       where the steps leading into it sit. A centred box in the middle of a two-column map blocks
+       the gutter between the columns, which sent every row-skipping edge round the outside of the
+       map, where its lines closed into frames; with the box under its own column, they run down
+       the gutter. */
+    if (G.snap) layers.forEach(function (L, li) {
+      if (!li) return;
+      function px(id) { var p = preds[id].filter(function (q) { return pos[q]; }); return p.length ? p.reduce(function (s, q) { return s + pos[q].x; }, 0) / p.length : pos[id].x; }
+      if (L.length === 1) {
+        var only = preds[L[0]].filter(function (q) { return row[q] === li - 1; });
+        if (only.length === 1 && preds[L[0]].length === 1) pos[L[0]].x = pos[only[0]].x;
+        return;
+      }
+      var slots = L.map(function (id) { return pos[id].x; }).sort(function (a, b) { return a - b; });
+      L.slice().sort(function (a, b) { return px(a) - px(b) || order[a] - order[b]; }).forEach(function (id, i) { pos[id].x = slots[i]; });
+    });
     function rowTop(li) { return G.pad + li * (G.h + G.gy); }
     // The x ranges a channel can't use in rows lo..hi (boxes, plus clearance).
     function blocked(lo, hi) {
@@ -159,8 +179,10 @@
     }
     function free(x, bl) { return bl.every(function (b) { return x <= b[0] || x >= b[1]; }); }
     var verticals = [];   // channels already taken: {x, y0, y1}
-    function clash(x, y0, y1) {
-      return verticals.some(function (v) { return Math.abs(v.x - x) < LANE - 0.5 && v.y0 < y1 && y0 < v.y1; });
+    // Two channels to the same step may share one line (bundle: G.snap), so they read as one path
+    // into it rather than parallel wires a lane apart.
+    function clash(x, y0, y1, to) {
+      return verticals.some(function (v) { return !(G.snap && to != null && v.to === to && Math.abs(v.x - x) < 0.01) && Math.abs(v.x - x) < LANE - 0.5 && v.y0 < y1 && y0 < v.y1; });
     }
     var minBox = Infinity, maxBox = -Infinity;
     ids.forEach(function (id) { minBox = Math.min(minBox, pos[id].x); maxBox = Math.max(maxBox, pos[id].x + G.w); });
@@ -183,8 +205,10 @@
       var x1 = a.x + G.w / 2, y1 = a.y + G.h, x2 = b.x + G.w / 2, y2 = b.y;
       var ls = row[e.from], lt = row[e.to];
       if (lt === ls + 1 && G.ortho) {
-        // Down from the source, across 40% of the way through the gap, down into the target.
-        var ym = y1 + (y2 - y1) * 0.4;
+        // Down from the source, across the middle of the gap, down into the target. Every line in a
+        // gap turns at the same height, so the lines leaving one step share one trunk (and the lit
+        // path is drawn over its own line, never beside it on a lane of its own).
+        var ym = y1 + (y2 - y1) * 0.5;
         var op = Math.abs(x1 - x2) < 0.5 ? [line([x1, y1], [x2, y2])] : rounded([[x1, y1], [x1, ym], [x2, ym], [x2, y2]], G.radius || 8);
         return { from: e.from, to: e.to, pieces: op, routed: false, label: null };
       }
@@ -218,23 +242,26 @@
       });
       var y0v = Math.min(yA, yC), y1v = Math.max(yA, yC);
       var best = null, bestScore = Infinity;
+      if (G.snap) verticals.forEach(function (v) { if (down && v.to === e.to && v.down) cands.unshift(v.x); });
       cands.forEach(function (c) {
-        if (!free(c, bl) || clash(c, y0v, y1v)) return;
+        if (!free(c, bl) || clash(c, y0v, y1v, down ? e.to : null)) return;
         // Shortest detour; on a tie, nearest the source, so the edge leaves straight down and
         // crosses over in the last gap rather than running across the rows it passes.
         var s = Math.abs(c - x1) + Math.abs(c - x2) + 0.01 * Math.abs(c - x1);
+        // Sharing a channel already running into the same step beats a lane of its own.
+        if (G.snap && verticals.some(function (v) { return v.to === e.to && v.down && Math.abs(v.x - c) < 0.01; })) s -= 3 * LANE;
         if (s < bestScore - 1e-9) { bestScore = s; best = c; }
       });
       if (best == null) best = maxBox + CLEAR + LANE * (verticals.length + 1);
       var cx = best;
-      verticals.push({ x: cx, y0: y0v, y1: y1v });
+      verticals.push({ x: cx, y0: y0v, y1: y1v, to: e.to, down: down });
       var pieces;
       if (G.ortho) {
-        // Leave across the upper part of the gap below the source, run the channel, arrive across
-        // the lower part of the gap above the target: the two turns never share a height with a
-        // short edge's (40%), and the last leg is long enough to show a shaft above the arrowhead.
+        // Leave across the middle of the gap below the source, run the channel, arrive across the
+        // middle of the gap above the target: the same height as every other line in those gaps,
+        // so lines leaving (or reaching) one step share its trunk instead of running 5 px apart.
         var gb = down ? yA - y1 : G.gy, ga = down ? y2 - yC : G.gy;
-        var hy1 = y1 + gb * 0.22, hy2 = y2 - ga * 0.5;
+        var hy1 = y1 + gb * 0.5, hy2 = y2 - ga * 0.5;
         pieces = rounded([[x1, y1], [x1, hy1], [cx, hy1], [cx, hy2], [x2, hy2], [x2, y2]], G.radius || 8);
       } else if (down) {
         var hA = yA - y1, hC = y2 - yC;

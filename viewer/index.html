@@ -7,6 +7,7 @@
 <title>Bench</title>
 <style>
   :root {
+    color-scheme: dark;   /* dark scrollbars and form controls everywhere */
     --bg: #0f1420; --panel: #171d2c; --panel-2: #1e2740; --border: #2a3350; --text: #e6ebff; --muted: #8a93b8;
     --accent: #5eead4; --accent-2: #a78bfa; --warn: #fbbf24; --bad: #fb7185; --good: #34d399;
   }
@@ -28,17 +29,23 @@
   .bh select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 11.5px; padding: 2px 4px; max-width: 260px; }
   /* The bar on top, the same in both modes: the app, the run's status (Presentation), "Try another",
      and the mode switch, which never moves. Its type scales with the window like Presentation's. */
-  #bench { --fs: clamp(16px, 1.146vw, 22px); --fs-label: clamp(13px, .9375vw, 18px); --fs-chrome: clamp(13px, .9375vw, 18px); }
-  .topbar { flex: none; display: flex; align-items: center; gap: 16px; height: clamp(50px, 3.1vw, 60px); padding: 0 clamp(16px, 1.46vw, 28px);
+  /* Type for a room: a projector at any width shows body 22 px and labels 18 px (hard floors, not
+     a share of the window: a 1440 projector or the bench beside an app at 954 px gets the same
+     sizes). Only a phone (≤ 640, below) steps down. */
+  #bench { --fs: 22px; --fs-label: 18px; --fs-chrome: 18px; }
+  /* The bar on top: a grid with fixed places, never wrapping, the same in both modes:
+     [app][status, which takes the room and ends in "…"][map inferred][Try another][the switch]. */
+  .topbar { flex: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; column-gap: 20px; height: 64px; padding: 0 clamp(16px, 1.46vw, 28px);
             background: #0b0f19; border-bottom: 1px solid var(--border); font-size: var(--fs-chrome); min-width: 0; }
-  .tb-app { flex: none; font-weight: 700; letter-spacing: .01em; color: var(--text); white-space: nowrap; max-width: 22vw; overflow: hidden; text-overflow: ellipsis; padding-right: 16px; border-right: 1px solid var(--border); }
+  .tb-app { grid-column: 1; font-weight: 700; letter-spacing: .01em; color: var(--text); white-space: nowrap; max-width: 22vw; overflow: hidden; text-overflow: ellipsis; padding-right: 20px; border-right: 1px solid var(--border); }
   .tb-app[hidden] { display: none; }
-  .tb-status { min-width: 0; display: flex; }
-  .mode-engineering .tb-status, .mode-engineering .topbar .p-inferred { display: none !important; }
-  .tb-spacer { flex: 1 1 auto; min-width: 8px; }
+  .tb-status { grid-column: 2; min-width: 0; display: flex; }
+  .topbar .p-inferred { grid-column: 3; } .tb-pick { grid-column: 4; min-width: 0; } .topbar .viewtoggle { grid-column: 5; }
+  .mode-engineering .topbar .p-inferred { display: none !important; }
+  .tb-spacer { display: none; }
   .tb-pick:empty { display: none; }
   .viewtoggle { flex: none; display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: 10px; background: #121827; }
-  .viewtoggle button { background: none; border: none; border-radius: 7px; color: var(--muted); font: 600 var(--fs-chrome)/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: .45em .9em; cursor: pointer; white-space: nowrap; }
+  .viewtoggle button { background: none; border: none; border-radius: 7px; color: var(--muted); font: 600 var(--fs-chrome)/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: .5em .95em; cursor: pointer; white-space: nowrap; }
   .viewtoggle button:hover { color: var(--text); }
   .viewtoggle button.on { background: #1f2a44; color: var(--accent); box-shadow: inset 0 0 0 1px rgba(94,234,212,.35); }
   .meterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 11.5px; color: var(--muted); }
@@ -70,7 +77,8 @@
   .graph { position: relative; margin: 0 auto; }
   .graph svg.edges { position: absolute; left: 0; top: 0; color: var(--border); overflow: visible; }
   .edge path { fill: none; stroke: currentColor; stroke-width: 1.4; }
-  .edge text { fill: var(--muted); font: 9.5px ui-monospace, monospace; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+  /* A label sits on a plate of the background (a wide halo), so the line under it never strikes through it. */
+  .edge text { fill: var(--muted); font: 9.5px ui-monospace, monospace; paint-order: stroke; stroke: var(--bg); stroke-width: 7px; stroke-linejoin: round; }
   .edge.taken { color: var(--accent); } .edge.taken path { stroke-width: 2.2; } .edge.taken text { fill: var(--accent); }
   .edge.flowing path { stroke-dasharray: 6 5; animation: flow .6s linear infinite; }
   @keyframes flow { to { stroke-dashoffset: -11; } }
@@ -97,6 +105,9 @@
   .gnode.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
   @keyframes pulse { 50% { box-shadow: 0 0 4px rgba(251,191,36,.2); } }
   .unmapped { margin-top: 6px; font-size: 11.5px; }
+  /* Engineering's detail lines end in "…" inside the box's padding (the pill rule below makes .gp
+     an inline-flex, where text-overflow has no effect). */
+  .graphcol .gnode .gp, .graphcol .gnode .gm { display: block; line-height: 1.3; padding: 0 !important; text-box: none; }
 
   .wrow { display: grid; grid-template-columns: 118px 1fr 62px; gap: 6px; align-items: center; font-size: 11px; height: 17px; }
   .wrow.child .wl { padding-left: 10px; }
@@ -176,8 +187,8 @@
      Sizes are set for a projector at 1920×1080 (body 22px, labels 18px) and scale down with the
      window; the map itself is drawn at layout.js's STAGE_GEOM (or PANE_GEOM, ≤ ~960) and fitted. */
   .pres {
-    --fs-head: clamp(20px, 1.5625vw, 30px);
-    --fs-small: clamp(14px, .9375vw, 18px); --fs-req: clamp(16px, 1.25vw, 24px);
+    --fs-head: clamp(26px, 1.5625vw, 30px);
+    --fs-small: 18px; --fs-req: clamp(20px, 1.25vw, 24px);
     --stage: #0c111c; --bub: #182039; --bub-2: #121a2e; --line: #2c3757; --dim: #6b7599;
     --a-app: #7cc4fa; --a-ai: #a78bfa; --a-rule: #5eead4; --a-person: #fbbf24;
     position: relative; background: var(--stage);
@@ -198,7 +209,7 @@
   .ps-pill b { font-weight: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .ps-pill i { width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex: none; }
   .ps-pill.st-running { color: var(--accent); } .ps-pill.st-running i { animation: pulse 1.2s infinite; }
-  .ps-pill.st-paused { color: var(--accent-2); } .ps-pill.st-waiting { color: var(--warn); background: rgba(251,191,36,.08); }
+  .ps-pill.st-paused { color: #c3cae6; } .ps-pill.st-waiting { color: var(--warn); background: rgba(251,191,36,.08); }
   .ps-pill.st-ok { color: var(--good); } .ps-pill.st-handed { color: var(--a-app); } .ps-pill.st-bad { color: var(--bad); } .ps-pill.st-idle { color: var(--muted); }
 
   .ps-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex; gap: 40px; padding: 18px 28px; }
@@ -212,56 +223,61 @@
   .ps-bubble { flex: none; max-height: 100%; overflow: auto; transition: margin-top .25s ease; border-radius: 16px; }
   .p-maponly .ps-side, .p-maponly .ps-wedge, .p-maponly .ps-seam { display: none; }
 
-  /* The map's boxes: an actor stripe; the plain name across the whole width (one or two lines, the
-     box sized for it by bench.js), centred in the room above a footer row that holds who does the
-     step and, once it has run, its one badge. */
-  .snode { overflow: visible; background: #151c2f; border: 1.5px solid #252f4b; border-left: 6px solid color-mix(in srgb, var(--ac) 45%, #252f4b); border-radius: 11px;
-           padding: 8px 14px 8px 22px; color: #69739a; display: flex; flex-direction: column; gap: 4px; opacity: 1; }
+  /* The map's boxes: an actor stripe; the step's number in a disc and its plain name across the
+     width (one or two lines, the box sized for it by bench.js), centred in the room above a footer
+     row that holds who does the step and, once it has run, its one badge. The same model on the
+     stage and in the pane beside an app; only the sizes differ (bench.js BOX_TYPE matches them). */
+  .snode { overflow: visible; background: #151c2f; border: 1.5px solid #29334f; border-left: 6px solid color-mix(in srgb, var(--ac) 45%, #29334f); border-radius: 12px;
+           padding: 8px 14px 8px 18px; color: #6f7aa1; display: flex; flex-direction: column; gap: 8px; opacity: 1; }
   .snode { transition: box-shadow .25s ease, border-color .25s ease, background-color .25s ease; }
-  .snode .gl { flex: 1 1 auto; min-height: 0; display: flex; align-items: safe center; font: 600 22px/1.18 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; white-space: normal; overflow: hidden; }
+  .snode .gl { flex: 1 1 auto; min-height: 0; display: flex; align-items: safe center; gap: 10px; font: 600 22px/1.18 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; white-space: normal; overflow: hidden; }
+  .snode .gt { min-width: 0; }
   .snode .gl::before { content: none !important; }
   .snode .s-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
-  .snode .actor { flex: none; font-size: 21px; padding: 4px 8px; border-radius: 6px; color: color-mix(in srgb, var(--ac) 70%, #69739a); border-color: color-mix(in srgb, currentColor 55%, transparent); letter-spacing: .06em; }
-  .snode .gp { display: inline-flex; align-items: center; min-width: 0; font: 600 21px/1 -apple-system, BlinkMacSystemFont, sans-serif; padding: 4px 11px; border-radius: 999px; margin: 0;
+  .snode .actor { flex: none; font-size: 21px; padding: 0 9px; border-radius: 6px; color: color-mix(in srgb, var(--ac) 70%, #69739a); border-color: color-mix(in srgb, currentColor 45%, transparent); letter-spacing: .06em; }
+  /* The chip gives way to a dot of its colour (the word in its tooltip) only where the whole badge wouldn't fit beside it. */
+  .snode .s-foot .actor.mini { width: 12px; height: 12px !important; padding: 0 !important; border-radius: 50%; font-size: 0; border: none; background: currentColor; }
+  .snode .gp { display: inline-flex; align-items: center; min-width: 0; font: 600 21px/1 -apple-system, BlinkMacSystemFont, sans-serif; padding: 0 12px; border-radius: 999px; margin: 0;
                color: #8ff3e2; background: rgba(94,234,212,.1); border: 1px solid rgba(94,234,212,.34); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .snode .gp[hidden] { display: none; }
   /* Fixed pill heights (the text centred in them), so a box's height is known without text-box support. */
   .snode .gp { height: 1.45em; padding-top: 0 !important; padding-bottom: 0 !important; }
-  .snode .actor { height: 1.4em; padding-top: 0 !important; padding-bottom: 0 !important; }
-  .s-num { position: absolute; left: -17px; top: -17px; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-           font: 700 21px/1 -apple-system, BlinkMacSystemFont, sans-serif; background: #0c111c; color: #fff; border: 2.5px solid var(--ac); z-index: 2; }
-  .s-num[hidden] { display: none; }
-  .snode.idle { color: #69739a; }
-  .snode.untaken { color: #4f5878; border-style: dashed; border-left-style: solid; background: #121828; }
+  .snode .actor { height: 1.45em; padding-top: 0 !important; padding-bottom: 0 !important; }
+  /* The step number: one style for every step (its actor's colour), inside the box before the name;
+     the box's ring, not the disc, says which step is selected. Its place is kept while it has no number. */
+  .s-num { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+           font: 700 21px/1 -apple-system, BlinkMacSystemFont, sans-serif; background: color-mix(in srgb, var(--ac) 22%, #0c111c); color: #fff; border: 2px solid var(--ac); }
+  .s-num[hidden] { display: inline-flex; visibility: hidden; }
+  .snode.idle { color: #6f7aa1; }
+  .snode.untaken { opacity: 1; border-style: solid; color: #4f5878; background: #111726; border-color: #222a42; border-left-color: color-mix(in srgb, var(--ac) 22%, #222a42); }
   .snode.untaken .actor { color: #4f5878; }
-  .snode.untaken .gp { color: #7f8db3; background: rgba(127,141,179,.08); border-color: rgba(127,141,179,.28); }
+  .snode.untaken .gp { color: #7f8db3; background: none; border-color: rgba(127,141,179,.22); }
   .snode.done, .snode.active { color: var(--text); background: #1b2442; border-color: #36426c; border-left-color: var(--ac); }
   .snode.done .actor, .snode.active .actor { color: var(--ac); }
-  .snode.starting { color: #cfd6f5; border-style: dashed; border-color: var(--ac); border-left-style: solid; }
+  .snode.starting { color: #cfd6f5; border-color: color-mix(in srgb, var(--ac) 70%, #36426c); border-left-color: var(--ac); }
   .snode.skipped { border-style: dotted; }
   .snode.error { border-color: var(--bad); }
   .snode.gatewait { color: var(--text); background: #2c2a24; border-color: var(--warn); }
-  .snode.focus { color: #fff; background: #222c50; border-color: var(--ac); box-shadow: 0 0 0 2px var(--ac), 0 0 30px color-mix(in srgb, var(--ac) 45%, transparent); }
-  .snode.focus .s-num { background: var(--ac); color: #0b1020; }
+  .snode.focus { color: #fff; background: #222c50; border-color: var(--ac); box-shadow: 0 0 0 2px var(--ac), 0 0 30px color-mix(in srgb, var(--ac) 40%, transparent); }
   .snode.selected { outline: none; }
-  /* Edges: one weight per state; the lit path is the brightest, thickest line on the map, untaken
-     paths a quiet dotted line. Arrowheads are fixed-size markers, one per state (bench.js). */
-  .ps-map .graph svg.edges { color: #34405f; }
-  .ps-map .edge path { stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
+  /* Edges: solid lines, one weight per state. Before the end, every path is a calm visible grey; the
+     lit path is the brightest, thickest line, drawn over the trunk it shares; once the run is over,
+     the paths it didn't take fade back (solid, never dotted). Arrowheads are fixed-size markers,
+     one per state (bench.js). */
+  .ps-map .graph svg.edges { color: #4a5878; }
+  .ps-map .edge path { stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .ps-map .edge path:not(.hit) { marker-end: url(#parr); }
   .ps-map .edge.taken { color: var(--accent); } .ps-map .edge.taken path { stroke-width: 3.5; }
   .ps-map .edge.taken path:not(.hit) { marker-end: url(#parr-t); filter: drop-shadow(0 0 4px rgba(94,234,212,.35)); }
-  .ps-map .edge.untaken { color: #3b4767; opacity: 1; } .ps-map .edge.untaken path { stroke-dasharray: 1 7; stroke-width: 2.25; }
+  .ps-map .edge.untaken { color: #2f3a58; opacity: 1; } .ps-map .edge.untaken path { stroke-dasharray: none; stroke-width: 2; }
   .ps-map .edge.untaken path:not(.hit) { marker-end: url(#parr-u); }
-  .ps-map marker.parr { color: #34405f; } .ps-map marker.parr-t { color: var(--accent); } .ps-map marker.parr-u { color: #3b4767; }
+  .ps-map marker.parr { color: #4a5878; } .ps-map marker.parr-t { color: var(--accent); } .ps-map marker.parr-u { color: #2f3a58; }
   .ps-map .edge .hit { stroke-width: 16; stroke-dasharray: none; }
-  .ps-pane .snode .gl { font-size: 16px; }
-  .ps-pane .snode .actor { font-size: 12px; padding: 3px 5px; }
-  .ps-pane .snode .s-foot.has-badge .actor { display: none; }
-  .ps-pane .snode .s-foot.has-badge { justify-content: flex-start; }
-  .ps-pane .snode .gp { font-size: 14px; padding: 3px 8px; }
-  .ps-pane .snode { padding: 6px 9px 7px 15px; border-left-width: 5px; gap: 4px; border-radius: 9px; }
-  .ps-pane .s-num { width: 26px; height: 26px; left: -12px; top: -12px; font-size: 14px; border-width: 2px; }
+  .ps-pane .snode { padding: 8px 10px 8px 12px; border-left-width: 5px; gap: 8px; border-radius: 10px; }
+  .ps-pane .snode .gl { font-size: 18px; gap: 8px; }
+  .ps-pane .s-num { width: 26px; height: 26px; font-size: 17px; }
+  .ps-pane .snode .actor { font-size: 15px; padding: 0 7px; }
+  .ps-pane .snode .gp { font-size: 16px; padding: 0 9px; }
 
   /* The callout. */
   .bb { background: var(--bub); border: 2px solid var(--ac); border-radius: 16px; padding: 18px 24px 20px; font-size: var(--fs); line-height: 1.38; color: var(--text); }
@@ -364,21 +380,32 @@
   .bb-counts span.unk { font-size: var(--fs-small); color: var(--muted); }
 
   /* The footer: time, cost in words, by hand or what it can never do; the presenter's controls. */
-  .ps-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px 32px; padding: 10px clamp(16px, 1.46vw, 28px); border-top: 1px solid var(--border); background: rgba(15,20,32,.92); font-size: var(--fs-small); }
+  /* One grid: the labels, their facts, and the controls at the right of the first row; the second
+     row's facts (by hand, or what it can never do) run under the controls too, so a long list keeps
+     to its line. Always two rows tall, so the stage never moves. */
+  .ps-foot { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; grid-template-rows: minmax(2.3em, auto) minmax(1.4em, auto); align-items: baseline; gap: 2px 20px;
+             padding: 10px clamp(16px, 1.46vw, 28px); border-top: 1px solid var(--border); background: rgba(15,20,32,.92); font-size: var(--fs-small); line-height: 1.4; }
   /* Two labelled rows ("This run", "By hand"), always two rows tall, so the stage never moves. */
-  .ps-facts { min-width: 0; flex: 1 1 auto; min-height: calc(2 * 1.4em + 4px); display: grid; grid-template-columns: max-content minmax(0, 1fr); align-content: center; align-items: baseline; gap: 4px 20px; line-height: 1.4; }
+  .ps-facts { display: contents; }
+  .ps-foot .flabel { grid-column: 1; } .ps-foot .fitems { grid-column: 2; } .ps-foot .frow + .frow .fitems { grid-column: 2 / 4; }
   .frow { display: contents; }
+  /* Each label holds every label the column can show, stacked in one cell, only its own visible:
+     the column is as wide as the widest, whichever is showing. */
+  .flabel { display: grid; } .flabel > span { grid-area: 1 / 1; } .flabel > .fghost { visibility: hidden; }
+  .fitems.never { column-gap: 0; } .fitems.never .fi + .fi::before { content: "·"; color: var(--muted); font-weight: 400; margin: 0 .6em; }
   .flabel { color: var(--muted); font-size: var(--fs-label); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
   .fitems { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 1.6em; min-width: 0; }
   .fi { white-space: nowrap; } .fk { color: var(--muted); } .fv { color: var(--text); font-weight: 600; }
-  .ps-ctl { flex: none; display: flex; align-items: center; gap: 8px; }
-  .ps-key { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 6px 11px; cursor: pointer; font: 600 var(--fs-small)/1 -apple-system, BlinkMacSystemFont, sans-serif; display: inline-flex; align-items: center; gap: 6px; }
-  .ps-key kbd { font: 700 1em ui-monospace, monospace; border: 1px solid currentColor; border-radius: 4px; padding: 1px 4px; }
+  .ps-ctl { grid-column: 3; grid-row: 1; justify-self: end; display: flex; align-items: center; gap: 8px; }
+  .ps-key { height: 2.3em; background: var(--panel-2); color: #b5bddc; border: 1px solid var(--border); border-radius: 9px; padding: 0 .75em; cursor: pointer; font: 600 var(--fs-small)/1 -apple-system, BlinkMacSystemFont, sans-serif; display: inline-flex; align-items: center; gap: .5em; }
+  .ps-key kbd { font: 700 .8em/1 ui-monospace, monospace; color: var(--muted); border: 1px solid #3a4670; border-radius: 5px; padding: .2em .4em; }
   .ps-key.on, .ps-key:hover { color: var(--accent); border-color: var(--accent); }
   .p-transport { display: flex; gap: 6px; flex: 0 0 auto; }
   .p-transport:empty { display: none; }
-  .p-transport button, .p-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; cursor: pointer; font: 600 var(--fs-small) -apple-system, BlinkMacSystemFont, sans-serif; text-decoration: none; display: inline-flex; align-items: center; }
-  .p-transport button { min-width: 2.4em; justify-content: center; }
+  .p-transport button, .p-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 6px 12px; cursor: pointer; font: 600 var(--fs-small) -apple-system, BlinkMacSystemFont, sans-serif; text-decoration: none; display: inline-flex; align-items: center; gap: .45em; }
+  .p-transport button { height: 2.3em; min-width: 2.3em; justify-content: center; }
+  .p-transport button.ico { width: 2.3em; padding: 0; }
+  svg.i { width: 1.15em; height: 1.15em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .p-transport button.main { min-width: 7em; border-color: var(--accent); color: var(--accent); }
   .p-transport button.speed { min-width: 0; color: var(--muted); }
   .p-transport button:disabled { opacity: .7; cursor: default; }
@@ -399,8 +426,7 @@
   @supports (text-box: trim-both cap alphabetic) {
     .actor, .tag, .badge, .src, .p-inferred, .status, .gp, .bb-chip { text-box: trim-both cap alphabetic; padding-top: 3px; padding-bottom: 3px; }
     .actor { padding-top: 3.5px; padding-bottom: 3.5px; }
-    .snode .actor { padding-top: 5px; padding-bottom: 5px; } .snode .gp { padding-top: 6px; padding-bottom: 6px; } .bb-chip { padding-top: 6px; padding-bottom: 6px; }
-    .ps-pane .snode .gp { padding-top: 4px; padding-bottom: 4px; }
+    .bb-chip { padding-top: 6px; padding-bottom: 6px; }
   }
   .actor-ai { color: var(--accent-2); } .actor-rule { color: #93c5fd; } .actor-person { color: var(--warn); } .actor-app { color: var(--muted); }
   .edge .hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; fill: none; cursor: help; }
@@ -451,17 +477,23 @@
     .p-pick select { max-width: 14em; }
     .ps-head { padding: 10px 16px; }
     .ps-stage { gap: 22px; padding: 14px 16px; }
-    .ps-side { flex-basis: 54%; }
-    /* The controls shrink to their keys (each keeps its name as a tooltip), so the facts keep room. */
-    .ps-foot { padding: 8px 16px; gap: 8px 18px; }
-    .ps-key .kl { display: none; }
-    .ps-facts { column-gap: 12px; }
+    /* Beside an app (~954 px): the map's column gets just over half, the most the callout can give
+       and still hold its 22 px text; the boxes are the pane geometry's (bench.js BOX_TYPE). */
+    .ps-side { flex-basis: 48%; }
+    /* The controls keep their names; their key caps go (each is in its tooltip), so the facts keep room. */
+    .ps-foot { padding: 8px 16px; column-gap: 16px; }
+    .ps-key kbd { display: none; }
+    .ps-help .kl { display: none; } .ps-help kbd { display: inline; border: none; padding: 0; font-size: 1em; color: inherit; }
     .fitems { column-gap: 1.1em; }
     .ps-ctl { gap: 6px; }
     .bb { padding: 14px 16px 16px; }
   }
   /* A phone: one column. The map on top (fitted to the width), the callout under it, no wedge. */
   @media (max-width: 640px) {
+    #bench { --fs: 16px; --fs-label: 14px; --fs-chrome: 14px; }
+    .pres { --fs-head: 20px; --fs-small: 14px; --fs-req: 16px; }
+    .topbar { display: flex; }
+    .topbar .viewtoggle { margin-left: auto; }   /* the switch stays at the right, here too */
     #bench.mode-presentation { height: auto; min-height: 100vh; }
     .topbar { height: auto; flex-wrap: wrap; padding: 8px 12px; row-gap: 8px; }
     .tb-status { order: 10; flex-basis: 100%; }
@@ -469,8 +501,9 @@
     .p-pick { min-width: 0; max-width: 100%; }
     .p-pick select { min-width: 0; max-width: 46vw; }
     .ps-pill { white-space: normal; }
-    .ps-facts { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
-    .ps-ctl { flex-wrap: wrap; }
+    .ps-foot { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+    .ps-foot .flabel, .ps-foot .fitems, .ps-foot .frow + .frow .fitems { grid-column: 1; }
+    .ps-ctl { grid-column: 1; grid-row: auto; justify-self: start; flex-wrap: wrap; }
     .ps-stage { flex-direction: column; padding: 12px; gap: 12px; flex: none; }
     .ps-map { flex: none; overflow: visible; }
     .ps-side { flex: none; width: 100%; }

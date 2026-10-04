@@ -332,10 +332,12 @@ def test_a_recording_opens_paused_on_step_one_and_every_press_counts(page, site)
     w.page.goto(f"{site}/bench/?replay={RECORDINGS['req-012-approved']}&mode=presentation")
     p = w.page
     p.wait_for_selector("[data-p=bubble] .bb-num")
-    # Paused on the first step, saying how to go on: the presenter talks first.
+    # Paused on the first step (the pill holds the state only), with the keys one press away in
+    # the footer: the presenter talks first.
     assert p.inner_text("[data-p=bubble] .bb-num") == "1"
     status = p.inner_text("[data-p=status]")
-    assert "Paused" in status and "PageDown" in status
+    assert "Paused at step 1" in status and "PageDown" not in status
+    assert "PageDown" in p.get_attribute(".ps-help", "title")
     p.wait_for_timeout(1200)
     assert p.inner_text("[data-p=bubble] .bb-num") == "1", "it doesn't play by itself"
     # Two quick presses are two steps (a clicker double-tap), not one press lost.
@@ -404,5 +406,11 @@ def test_stage_boxes_fit_their_words_and_edges_show_a_shaft(page, site, size):
       }""")
     assert shaft >= 8, f"edge shaft {shaft:.1f}px"
     # The footer's words are never under its controls.
-    facts, ctl = p.locator("[data-p=bottom]").bounding_box(), p.locator(".ps-ctl").bounding_box()
-    assert facts["x"] + facts["width"] <= ctl["x"] + 1 or facts["y"] + facts["height"] <= ctl["y"] + 1
+    over = p.evaluate("""() => {
+        const c = document.querySelector('.ps-ctl').getBoundingClientRect();
+        return [...document.querySelectorAll('[data-p=bottom] .fi')].filter(e => {
+          const r = e.getBoundingClientRect();
+          return r.right > c.left + 1 && r.left < c.right - 1 && r.bottom > c.top + 1 && r.top < c.bottom - 1;
+        }).map(e => e.textContent)
+      }""")
+    assert over == [], over
