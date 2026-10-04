@@ -1,7 +1,7 @@
 [project]
 name = "agent-lab-bench"
 version = "0.1.0"
-description = "Agent Lab Bench: see inside any AI app while you use it."
+description = "Agent Lab Bench: watch an AI app work, step by step, right beside it."
 license = "FSL-1.1-ALv2"
 requires-python = ">=3.11"
 dependencies = [

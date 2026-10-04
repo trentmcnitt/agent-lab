@@ -1,6 +1,6 @@
 # Roadmap
 
-Agent Lab: see inside any AI app while you use it. The bench sits beside an app and shows the flow it takes, the exact prompt the model got, what came back, and what it cost, on top of whatever tracing the app already uses.
+Agent Lab: watch an AI app work, step by step, right beside it. The bench shows the app's flowchart, the path each run takes, the exact prompt behind each model call and what came back (and the cost, when the app reports a price), live on your machine or replayed from a recording. It reads the OpenTelemetry the app already emits.
 
 Status: 0.1 pre-alpha. Items move as we learn; nothing here is a promise.
 

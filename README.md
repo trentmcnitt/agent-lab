@@ -10,7 +10,7 @@
 <p align="center">
   <em>Debugging and presentation for AI apps</em><br>
   <strong>Watch an AI app work, step by step, right beside it.</strong><br>
-  Its flowchart, the path each run takes, and the exact prompt at every step. Live on your machine, or replayed from a recording.
+  Its flowchart, the path each run takes, and the exact prompt behind each model call. Live on your machine, or replayed from a recording.
 </p>
 
 <p align="center">
@@ -29,11 +29,11 @@
   <img src="docs/images/side-by-side.png" alt="Agent Lab: a Slack helpdesk agent on the left; on the right, its flowchart with the path this run took lit up, and the step-by-step detail" width="820">
 </p>
 
-**What it is.** A viewer that sits beside a running AI app. It draws the app's flowchart, lights up the path each run takes, and shows what the model was given and what came back at every step.
+**What it is.** A viewer that sits beside a running AI app. It draws the app's flowchart, lights up the path each run takes, and shows what the model was given and what came back at every model call.
 
 **Who it's for.** The engineer building or debugging the app (**Engineering** mode: every field, every prompt, the raw events), and the room it's shown to: a client handoff, a demo, a manager or a support team who don't read traces (**Presentation** mode: plain words, stepped through at the presenter's pace).
 
-**Why it's different.** Trace tools show a list of spans, inside their own workspace. Agent Lab shows the paths the app *could* take, read from its own code (LangGraph or Open Agent Spec today), with this run's path lit, next to the real app, in a mode built to be put on a screen in a meeting. It reads the same OpenTelemetry your trace tool does, and sits beside Langfuse or Phoenix rather than replacing them ([what it isn't](#-what-it-isnt)).
+**Why it's different.** Trace tools show what a run did, inside their own workspace. Agent Lab shows the paths the app *could* take, read from its own code (LangGraph or Open Agent Spec today), with this run's path lit, next to the real app, in a mode built to be put on a screen in a meeting. It reads the OpenTelemetry your app already emits, and sits beside Langfuse or Phoenix rather than replacing them ([what it isn't](#-what-it-isnt)).
 
 > [!NOTE]
 > **0.1 pre-alpha.** The format and APIs will change. Issues and ideas are welcome.
@@ -180,7 +180,7 @@ The full rule list is in [SPEC](SPEC.md) section 8.7; the library's guide (redac
 
 </details>
 
-[`examples/langgraph_quickstart`](examples/langgraph_quickstart) is a complete app with every kind of line, a scripted model (no API key) and its own CI test. [`examples/agent_loop`](examples/agent_loop) is one step that runs a whole tool-using agent; the bench shows its model and tool calls in the order they started, two of them at once.
+[`examples/langgraph_quickstart`](examples/langgraph_quickstart) is a complete app with words on every step and one line per fact (documents, searches, decisions, checks, outcomes), a scripted model (no API key) and its own CI test. [`examples/agent_loop`](examples/agent_loop) is one step that runs a whole tool-using agent; the bench shows its model and tool calls in the order they started, two of them at once.
 
 ### 3. Open Agent Spec
 
@@ -204,7 +204,7 @@ curl -X PUT http://127.0.0.1:8790/apps/my-app \
   -d @my-app.registration.json          # {"topology": {...}, "story": null}
 ```
 
-Registration validates the map against [`schema/bench-topology.schema.json`](schema/bench-topology.schema.json); keys starting with `x-` are yours. [`examples/hello-agent.topology.json`](examples/hello-agent.topology.json) uses every field. **A declared map is typed by hand, so it can drift from the code**; nothing checks it against the code, which is why it's the fallback and not the way in. A run that carries its own map always wins over it.
+Registration validates the map against [`schema/bench-topology.schema.json`](schema/bench-topology.schema.json); keys starting with `x-` are yours. [`examples/hello-agent.topology.json`](examples/hello-agent.topology.json) is a worked example of most of the fields. **A declared map is typed by hand, so it can drift from the code**; nothing checks it against the code, which is why it's the fallback and not the way in. A run that carries its own map always wins over it.
 
 Not using OpenTelemetry? Send bench events, one at a time or in batches (the low-level path; the library doesn't use it):
 
