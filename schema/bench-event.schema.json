@@ -98,6 +98,31 @@
       "if": {
         "properties": {
           "event_type": {
+            "const": "run_started"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "properties": {
+              "map_hash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "The sha256 of the map this run carried (agentlab.manifest.hash); the bench serves it at GET /maps/<hash>."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
             "const": "run_finished"
           }
         },
@@ -547,6 +572,22 @@
               "kind": {
                 "type": "string",
                 "description": "Open set, e.g. grounding, policy, permission, format."
+              },
+              "words": {
+                "type": "object",
+                "description": "This check's own words for its states (agentlab check(words=...)); the viewer prefers them to the map's check_words.",
+                "properties": {
+                  "passed": {
+                    "type": "string"
+                  },
+                  "failed": {
+                    "type": "string"
+                  },
+                  "not_on_path": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               }
             }
           }

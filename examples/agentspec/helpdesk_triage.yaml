@@ -1,0 +1,379 @@
+# Helpdesk triage: an example Open Agent Spec flow for Agent Lab (examples/agentspec/README.md).
+# Written with pyagentspec 26.4.0.dev0's AgentSpecSerializer and checked by loading it back (10-03-26).
+# No model is called by anything in this folder.
+component_type: Flow
+id: triage
+name: Helpdesk triage
+description: Answers questions and makes approved changes; anything else goes to a
+  person.
+metadata: {}
+inputs:
+- title: message
+  type: string
+outputs: []
+start_node:
+  $component_ref: start_triage
+nodes:
+- $component_ref: start_triage
+- $component_ref: classify
+- $component_ref: route
+- $component_ref: draft_answer
+- $component_ref: approval
+- $component_ref: make_change
+- $component_ref: answered
+- $component_ref: changed
+- $component_ref: handed_off
+control_flow_connections:
+- component_type: ControlFlowEdge
+  id: triage-1
+  name: start
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: start_triage
+  from_branch: null
+  to_node:
+    $component_ref: classify
+- component_type: ControlFlowEdge
+  id: triage-2
+  name: classified
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: classify
+  from_branch: null
+  to_node:
+    $component_ref: route
+- component_type: ControlFlowEdge
+  id: triage-3
+  name: a question
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: route
+  from_branch: answer
+  to_node:
+    $component_ref: draft_answer
+- component_type: ControlFlowEdge
+  id: triage-4
+  name: a change
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: route
+  from_branch: needs_change
+  to_node:
+    $component_ref: approval
+- component_type: ControlFlowEdge
+  id: triage-5
+  name: unclear
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: route
+  from_branch: default
+  to_node:
+    $component_ref: handed_off
+- component_type: ControlFlowEdge
+  id: triage-6
+  name: replied
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: draft_answer
+  from_branch: null
+  to_node:
+    $component_ref: answered
+- component_type: ControlFlowEdge
+  id: triage-7
+  name: approved
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: approval
+  from_branch: approved
+  to_node:
+    $component_ref: make_change
+- component_type: ControlFlowEdge
+  id: triage-8
+  name: denied
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: approval
+  from_branch: denied
+  to_node:
+    $component_ref: handed_off
+- component_type: ControlFlowEdge
+  id: triage-9
+  name: done
+  description: null
+  metadata: {}
+  from_node:
+    $component_ref: make_change
+  from_branch: null
+  to_node:
+    $component_ref: changed
+data_flow_connections: null
+$referenced_components:
+  start_triage:
+    component_type: StartNode
+    id: start_triage
+    name: message arrives
+    description: null
+    metadata: {}
+    inputs:
+    - title: message
+      type: string
+    outputs:
+    - title: message
+      type: string
+    branches:
+    - next
+  classify:
+    component_type: LlmNode
+    id: classify
+    name: classify
+    description: The AI reads the message and decides whether it is a question or
+      asks for a change.
+    metadata: {}
+    inputs:
+    - title: message
+      type: string
+    outputs:
+    - title: category
+      type: string
+    branches:
+    - next
+    llm_config:
+      $component_ref: model
+    prompt_template: 'Is this a question or a change request? Answer ''question''
+      or ''change''.
+
+
+      {{message}}'
+  model:
+    component_type: VllmConfig
+    id: model
+    name: model
+    description: null
+    metadata: {}
+    model_id: any-model
+    url: http://127.0.0.1:8000
+    default_generation_parameters: null
+  route:
+    component_type: BranchingNode
+    id: route
+    name: route
+    description: Follows the AI's decision; anything it couldn't place goes to a person.
+    metadata: {}
+    inputs:
+    - title: category
+      type: string
+    outputs: []
+    branches:
+    - answer
+    - default
+    - needs_change
+    mapping:
+      question: answer
+      change: needs_change
+  draft_answer:
+    component_type: LlmNode
+    id: draft_answer
+    name: draft answer
+    description: The AI writes a reply from the message.
+    metadata: {}
+    inputs:
+    - title: message
+      type: string
+    outputs:
+    - title: reply
+      type: string
+    branches:
+    - next
+    llm_config:
+      $component_ref: model
+    prompt_template: 'Answer this: {{message}}'
+  approval:
+    component_type: FlowNode
+    id: approval
+    name: get approval
+    description: A person approves the change before anything is touched.
+    metadata: {}
+    inputs: []
+    outputs: []
+    branches:
+    - approved
+    - denied
+    subflow:
+      component_type: Flow
+      id: approval_flow
+      name: approval
+      description: null
+      metadata: {}
+      inputs: []
+      outputs: []
+      start_node:
+        $component_ref: start
+      nodes:
+      - $component_ref: start
+      - $component_ref: ask
+      - $component_ref: decide
+      - $component_ref: approved
+      - $component_ref: denied
+      control_flow_connections:
+      - component_type: ControlFlowEdge
+        id: approval-1
+        name: start to ask
+        description: null
+        metadata: {}
+        from_node:
+          $component_ref: start
+        from_branch: null
+        to_node:
+          $component_ref: ask
+      - component_type: ControlFlowEdge
+        id: approval-2
+        name: ask to decide
+        description: null
+        metadata: {}
+        from_node:
+          $component_ref: ask
+        from_branch: null
+        to_node:
+          $component_ref: decide
+      - component_type: ControlFlowEdge
+        id: approval-3
+        name: 'yes'
+        description: null
+        metadata: {}
+        from_node:
+          $component_ref: decide
+        from_branch: approved
+        to_node:
+          $component_ref: approved
+      - component_type: ControlFlowEdge
+        id: approval-4
+        name: anything else
+        description: null
+        metadata: {}
+        from_node:
+          $component_ref: decide
+        from_branch: default
+        to_node:
+          $component_ref: denied
+      data_flow_connections: null
+      $referenced_components:
+        start:
+          component_type: StartNode
+          id: start
+          name: start
+          description: null
+          metadata: {}
+          inputs: []
+          outputs: []
+          branches:
+          - next
+        ask:
+          component_type: InputMessageNode
+          id: ask
+          name: ask the approver
+          description: Shows the proposed change to a person and waits for their answer.
+          metadata: {}
+          inputs: []
+          outputs:
+          - description: Input provided by the user
+            title: user_input
+            type: string
+          branches:
+          - next
+          message: Approve this change? (yes/no)
+        decide:
+          component_type: BranchingNode
+          id: decide
+          name: read the answer
+          description: Treats 'yes' as approval; anything else is a no.
+          metadata: {}
+          inputs:
+          - title: user_input
+            type: string
+          outputs: []
+          branches:
+          - approved
+          - default
+          mapping:
+            'yes': approved
+        approved:
+          component_type: EndNode
+          id: approved
+          name: approved
+          description: null
+          metadata: {}
+          inputs: []
+          outputs: []
+          branches: []
+          branch_name: approved
+        denied:
+          component_type: EndNode
+          id: denied
+          name: denied
+          description: null
+          metadata: {}
+          inputs: []
+          outputs: []
+          branches: []
+          branch_name: denied
+  handed_off:
+    component_type: EndNode
+    id: handed_off
+    name: handed to a person
+    description: null
+    metadata: {}
+    inputs: []
+    outputs: []
+    branches: []
+    branch_name: handed_off
+  answered:
+    component_type: EndNode
+    id: answered
+    name: answered
+    description: null
+    metadata: {}
+    inputs: []
+    outputs: []
+    branches: []
+    branch_name: answered
+  make_change:
+    component_type: ToolNode
+    id: make_change
+    name: make the change
+    description: Calls the ticketing system.
+    metadata: {}
+    inputs:
+    - title: message
+      type: string
+    outputs: []
+    branches:
+    - next
+    tool:
+      component_type: ServerTool
+      id: ticket_tool
+      name: open_ticket
+      description: Open a ticket for the change
+      metadata: {}
+      inputs:
+      - title: message
+        type: string
+      outputs: []
+  changed:
+    component_type: EndNode
+    id: changed
+    name: change made
+    description: null
+    metadata: {}
+    inputs: []
+    outputs: []
+    branches: []
+    branch_name: changed
+agentspec_version: 25.4.1

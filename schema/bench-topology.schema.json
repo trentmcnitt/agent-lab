@@ -41,6 +41,10 @@
         "track_record": {
           "type": "string",
           "description": "The app's own claim about how it has performed, shown attributed to the app."
+        },
+        "baseline": {
+          "type": "string",
+          "description": "What this job takes a person, as the app states it (e.g. \"~10-15 minutes\"); shown attributed. The viewer uses it when run_finished.data.baseline is absent."
         }
       },
       "patternProperties": {
@@ -99,6 +103,19 @@
           "moment": {
             "type": "boolean",
             "description": "Replay's Play pauses here (a moment worth stopping on)."
+          },
+          "doc": {
+            "type": "string",
+            "description": "The node function's docstring (Engineering's description). Written by the agentlab library; Presentation uses description."
+          },
+          "parent": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The containing node's id, for a subgraph's node (whose id is then parent/inner)."
+          },
+          "branches_unknown": {
+            "type": "boolean",
+            "description": "The code doesn't say where this node can go next (an untyped router): no branch edges are drawn for it. Verification error R3."
           }
         },
         "patternProperties": {
@@ -371,8 +388,30 @@
       ]
     },
     "story": {
-      "type": "boolean",
-      "description": "The app registers a story script with its map (custom panels and renderers). See SPEC.md section 5."
+      "description": "The app has a story script (custom panels and renderers; SPEC.md section 5). true: registered with the map (PUT /apps, a recording header, bench:register). {id, sha256}: a library-built map naming the story by app id and the sha256 of the file the run was built with; the bench serves only a trusted file with that hash (SPEC.md 8.6).",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "sha256"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "check_words": {
       "type": "object",
@@ -392,6 +431,90 @@
         },
         "additionalProperties": false
       }
+    },
+    "derived": {
+      "type": "object",
+      "description": "Written by the agentlab library: where the map came from, its hashes, and what verification found (SPEC.md 8.5, 8.7). A hand-written map has none.",
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "What the structure was read from, e.g. langgraph, agentspec."
+        },
+        "library": {
+          "type": "string",
+          "description": "e.g. agentlab 0.1.0"
+        },
+        "framework": {
+          "type": "string",
+          "description": "e.g. langgraph 1.2.12"
+        },
+        "hashes": {
+          "type": "object",
+          "properties": {
+            "structure": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "words": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "corpora": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "severity",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^R[0-9]+$"
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "info"
+                ]
+              },
+              "node": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "fingerprints": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "confirmed",
+              "changed",
+              "unconfirmed"
+            ]
+          }
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
     }
   },
   "patternProperties": {

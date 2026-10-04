@@ -9,6 +9,8 @@ Two machine-readable files define v0:
 - `schema/bench-event.schema.json`: one event (JSON Schema 2020-12).
 - `schema/bench-topology.schema.json`: one app's map (the topology manifest).
 
+Section 8 defines how an app built with the `agentlab` library reports all of this over OpenTelemetry, with its map derived from its code and attached to every run.
+
 The map's edge vocabulary follows **Open Agent Spec** (Oracle, Apache-2.0, 26.3.1): an edge is a *potential* transition out of a named branch of a node (`from_branch`), and a node reports the branch it took (`decision.data.branch`, Agent Spec's `branch_selected`).
 
 Where this document and a schema disagree, the schema wins and this document is the bug.
@@ -119,11 +121,11 @@ The bench shows the gate's state and what is proposed. It has no approve or deny
 
 ## 3. Transport
 
-- **Register** (the app, at its startup): `PUT /apps/<app_id>` with `{"topology": <map>, "story": "<js source>" | null}`. The bench validates the map, keeps it (under `data/apps/`, so a restart doesn't forget it) and serves the story at `/apps/<app_id>/story.js`. Re-registering replaces both; `"story": null` removes the story. This is the only way app-specific material reaches the bench. At startup the bench reloads every stored map; one that no longer validates (e.g. after a schema change) is skipped with a warning on stderr naming the map and its first error.
+- **Register** (the app, at its startup): `PUT /apps/<app_id>` with `{"topology": <map>, "story": "<js source>" | null}`. The bench validates the map, keeps it (under `data/apps/`, so a restart doesn't forget it) and serves the story at `/apps/<app_id>/story.js`. Re-registering replaces both; `"story": null` removes the story. This is the only way app-specific material reaches the bench. At startup the bench reloads every stored map; one that no longer validates (e.g. after a schema change) is skipped with a warning on stderr naming the map and its first error. This is the **declared-map tier**, for apps with no Agent Lab library (today, TypeScript apps): supported and not deprecated. An app using the library never registers; each run carries its own map (section 8.5).
 - **Ingest:** `POST /ingest` with one event or a JSON array of events, `Content-Type: application/json`. The receiver validates each against the schema and answers `{"accepted": n, "rejected": [{"index": i, "error": "..."}]}`. One bad event does not reject the batch. An aliased `event_type` (`check`) is renamed to its standard name (`check_result`) before validation, so the log and `/stream` carry only the standard name. Recordings and postMessage events don't pass through the receiver; they should use `check_result`, and the viewer accepts the alias there too.
 - **OTLP ingest:** `POST /v1/traces[?session_id=<id>][&app=<app_id>]`: OTLP/HTTP, **protobuf** (`application/x-protobuf`, the exporters' default) or **JSON**, either one optionally `Content-Encoding: gzip` (the 5 MB limit applies after decompression). Ids may be hex or base64. Point an OTLP exporter's endpoint at the bench's base URL (`OTEL_EXPORTER_OTLP_ENDPOINT`; with `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, since Python's auto-configuration otherwise defaults to gRPC). App = `?app=` > resource `service.name`; it selects the map whose `node_from` maps spans to nodes. Session = `?session_id=` > header `x-agent-lab-session` > `bench.session_id` > `session.id` > `gen_ai.conversation.id`, resolved once per trace. A root span is a run; traces with no AI span are dropped. The response is an OTLP `ExportTraceServiceResponse` in the request's encoding, with `partialSuccess` when spans were rejected. Section 6b has the span mapping.
 - **Live stream out:** `GET /stream?session_id=<id>&app=<app_id>` (SSE), both filters optional. Each message's `data:` is one event. `app` keeps out runs known to belong to another app (an OTLP run's app is its `service.name`; a native run's is `run_started.data.app`, if sent); a run whose app is unknown passes. Without filters the stream carries everything (local use only).
-- **Maps:** `GET /topology/<app_id>` (404 for an unregistered app; with `?missing=null`, a 200 `null`, which the viewer uses at Level 0). `GET /topologies` lists registered apps, then apps that have sent runs without registering, marked `"inferred": true`.
+- **Maps:** `GET /topology/<app_id>`: for an app whose runs carry their own map (section 8), the map its latest run carried; else the registered one (404 for neither; with `?missing=null`, a 200 `null`, which the viewer uses at Level 0). `GET /maps/<hash>`: the map a run carried, by `run_started.data.map_hash`. `GET /topologies` lists apps whose runs carry maps (with `map_hash`), then registered apps, then apps that have sent runs with neither, marked `"inferred": true`. `GET /runs` gives each run's `map_hash` when it has one.
 - **Recording:** a JSONL file, `*.recording.jsonl`. Its first line is a header, `{"v": "bench-recording/0", "topology": <map>, "story": "<js>" | null}`, optionally with `title` (the run in plain words, e.g. "Asks for a license") and `group` (what kind of run it is, e.g. "It opens a ticket (a person approves)") for the plain run picker. Every later line is one event, in `seq`/`ts` order. The header makes a recording self-contained: it replays with no receiver and no registration, which is what a static export needs. Replay plays events with their original spacing from `ts`, capped so long idle gaps don't stall the demo. The bench lists its own `examples/` and whatever an app drops in `data/recordings/`.
 
 v0 is local only: no auth, bound to 127.0.0.1. The bench is not meant to be public; a static export of recordings is the public form.
@@ -221,7 +223,7 @@ Beyond `v`, `app.id`, `app.name`, `nodes[].id`, `edges[].from`/`to` and a panel'
 | `actions[]` | What the app can do in the world: `{id, title, description}`, all required. |
 | `never` | `[string]`: what the app can never do, in plain words ("What it can never do (the app says)"). |
 
-A source has three states in a run, each computed by the viewer from events, never declared: **could look at** (in the map); **given to the AI** (a `retrieval` hit from that source whose `text` appears in a later `llm_call`'s `system` or `messages` in the same run, by substring; when the prompt is redacted or has no text, the viewer falls back to "found by the search", and may use `llm_call.context_items` as a labelled hint); **relied on** (an item id in a `check_result.evidence` or a `decision.cited`). Item ids are matched against `retrieval` hits' `id`.
+A source has three states in a run, each computed by the viewer from events, never declared: **could look at** (in the map); **given to the AI** (a `retrieval` hit from that source whose `text` appears in a later `llm_call`'s `system` or `messages` in the same run, by substring; when the prompt is redacted or has no text, the viewer falls back to "found by the search", and may use `llm_call.context_items` as a labelled hint; a hit whose text is masked whole, under 12 characters once placeholders are taken out, is never matched, and with nothing to check against the "given" count is shown as not known, never as 0); **relied on** (an item id in a `check_result.evidence` or a `decision.cited`). Item ids are matched against `retrieval` hits' `id`.
 
 **Panels**
 
@@ -236,7 +238,8 @@ A panel drawn by 1 or 2 has a **raw** toggle that shows the generic view of ever
 
 **Other**
 - `node_from` (OTLP apps only): how to get a bench `node` from a span: `{"attribute": "<span attribute>"}` or `{"span_name": true}`. Without it, the node id is the operation plus the tool, agent or data-source name (section 6b).
-- `story`: the app registers a story with its map (section 5).
+- `story`: `true` when the app registers a story with its map (section 5); in a map built by the `agentlab` library, `{id, sha256}` naming the story file the run was built with (section 8.6).
+- `app.baseline`, `nodes[].doc`, `nodes[].parent`, `nodes[].branches_unknown`, `derived`: written by the `agentlab` library (section 8.5).
 - `check_words` (optional): a check's own words for its states, keyed by the check's `name` (as in `check_result`) or a `kind: "check"` node's id: `{"unsure": {"passed": "Didn't trigger", "failed": "Triggered: sent to a person"}}`, with any of `passed`, `failed`, `not_on_path`. The viewer uses them wherever that check's state shows (the Checks row, the NOW card, the node box), after the state's symbol; an event's `detail` follows as its own sentence. A state left out falls back to Passed / Didn't pass / Not needed this time. A node's `x-states` (a whole line per state) still wins for that node.
 - **Extensions:** any key starting with `x-` is accepted, and ignored by the bench, at the top level and on `app`, nodes, edges, panels, sources (and their items) and actions. Any other unknown key is rejected, so a typo still fails loudly.
 - Events whose `node` is not in the map still render, in an "unmapped" row, so a stale map never hides data.
@@ -312,6 +315,7 @@ Against the OTel GenAI semantic conventions, which are **Development** status an
 | `gen_ai.usage.output_tokens` | `output_tokens` |
 | `gen_ai.response.finish_reasons[0]` | `finish_reason` |
 | `gen_ai.response.time_to_first_chunk` | `time_to_first_chunk_ms` |
+| `agentlab.*` attributes, events and the manifest span (the `agentlab` library) | section 8.6: such spans are read by run (`agentlab.run`), not by trace |
 
 The conventions define **no cost attribute**. If the span carries `gen_ai.usage.cost` (the attribute Langfuse reads; exporters typically set it only when the backend reported a cost), the adapter uses it as `cost_source: "actual"`. Otherwise the call carries no cost: the bench ships no price table (prices change faster than a checked-in table), so the viewer shows such a call's cost as **unknown**, never as zero. The adapter can price calls when given a `price(model, in, out, cache_read, cache_write)` function, and then says so in `cost_basis`; the receiver doesn't pass one today. OTLP/JSON quirks the adapter handles: 64-bit ints and nanosecond timestamps arrive as strings, attributes are `{key, value: {stringValue | intValue | doubleValue | boolValue | arrayValue}}`, and ids are hex strings (protobuf ids are decoded to hex too).
 
@@ -323,3 +327,157 @@ The conventions define **no cost attribute**. If the span carries `gen_ai.usage.
 - Forwarding to other backends (Langfuse, Logfire, Phoenix...): an OpenTelemetry Collector in front of both does this (README, "What it isn't"), so the bench never sits on the path to a team's real tracing. On the roadmap's Later list.
 - Reading Agent Spec flow files directly as maps: the vocabulary is aligned, the importer isn't written.
 - Streaming chunk rendering beyond appending text; no app sends `chunk` yet.
+
+## 8. Agent Lab on OpenTelemetry (the `agentlab` library)
+
+Status: **draft, 10-03-26.** The Python library (`sdk/python`, import name `agentlab`, 0.1.0) writes everything in this section. The bench reads all of it (8.6): the live receiver and `bench.record` run the same reader, `adapters/otlp.py`.
+
+The library is how an app shows up on the bench without typing anything twice: its **structure** (steps, branches) is derived from the framework's own graph, its **facts** (decisions, checks, gates, documents) are reported by one line where each is produced, and its **words** (plain labels, descriptions, check wording) sit next to the code and are **verified** against the structure. Everything travels as ordinary OpenTelemetry spans, so it also reaches any other OTel backend the app uses. The names below are the contract between the library and the bench; `sdk/python/agentlab/_semconv.py` is the one place the library spells them.
+
+### 8.1 Setup and transport
+
+- `agentlab.init(endpoint=None, *, service_name=None, tracer_provider=None, redact=None, price=None, price_basis=None, capture_content=True)`, once at startup. Never raises; a second call with equal arguments does nothing, with different ones it logs a warning and is ignored.
+- **Endpoint:** the argument, else env `AGENT_LAB_URL`, else the local bench `http://127.0.0.1:8790`. `AGENT_LAB_URL=off` (or empty, `0`, `false`, `no`, `none`) turns export off. A developer running the app and the bench on one machine sets nothing; the variable is needed only when they run on different machines.
+- **Export:** OTLP/HTTP protobuf to `{endpoint}/v1/traces`, batched with a 200 ms delay. While nothing is listening on the endpoint's port, batches are dropped (checked from the export thread, rechecked every 5 s), so a closed bench never slows the app or fills its logs. For the default local bench that is silent (one debug line): not running it is normal. For a configured endpoint (the argument or `AGENT_LAB_URL`) it logs one warning, because spans someone asked for are being lost.
+- **Provider:** by default a private `TracerProvider` that is **never** set as the global one: Agent Lab's spans go only to the bench, and nothing is added to the app's own pipeline. `tracer_provider=<SDK provider>` or `"global"` (the current global SDK provider; anything else falls back to private with a warning) shares the app's provider instead: the bench exporter and the stamping processor (8.3) are added to it, so Agent Lab's spans also reach the app's other backends and the app's other spans reach the bench. `service_name` sets the private provider's resource `service.name` only when `OTEL_SERVICE_NAME`/`OTEL_RESOURCE_ATTRIBUTES` don't.
+- **Off:** with no `init`, or `init` with export off and no shared provider, every helper returns after one flag check. `corpus()` is the exception: it always records (an index is often built before `init`), costing one pass over its items.
+- **Never raises:** every public function except `verify` and `lock` catches everything, logs once per (function, reason) at debug level on the `agentlab` logger, and returns `None`.
+
+### 8.2 Spans
+
+Instrumentation scope `agentlab`, version = the library version. **Common attributes** on every Agent Lab span: `agentlab.app`, `agentlab.run`, `agentlab.node` (absent on run and manifest spans), `agentlab.kind`.
+
+| span name | `agentlab.kind` | parent | attributes (beyond the common ones) |
+|---|---|---|---|
+| `agentlab.run {app_id}` | `run` | the app's current span, else none | `agentlab.content_mode` (`full` \| `redacted` \| `absent`), `agentlab.manifest.hash`, `agentlab.thread`, `agentlab.run.resume` (bool), `agentlab.run.status` (`ok` \| `error` \| `paused`), `agentlab.run.outcome`, `agentlab.run.input` (JSON, content), `agentlab.run.output` (JSON, content), `session.id` |
+| `agentlab.manifest` | `manifest` | the run span | `agentlab.manifest` (the map, canonical JSON, 8.5), `agentlab.manifest.hash`. Started and ended at run start, on every invoke including resumes, so the map ships in the run's first export batch; the run span (exported last) carries only the hash. |
+| `node {node_id}` | `node` | the run span, or the containing node's span (subgraphs) | `agentlab.step` (int, the framework's superstep), `agentlab.ns` (the framework's raw namespace). Status ERROR on an exception, except a gate's interrupt. |
+| `chat {model}` | `chat` | its node span | GenAI: `gen_ai.operation.name = "chat"`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens` (**total**, cache included), `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_write.input_tokens`, `gen_ai.response.finish_reasons`; content: `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages`. Plus `agentlab.request.json_schema` (the structured-output schema, JSON) when the framework exposes it, and `agentlab.cost.usd` (double) + `agentlab.cost.basis` when `init(price=…)` returned a number. |
+| `retrieval {corpus}` | `retrieval` | its node span | `gen_ai.operation.name = "retrieval"`, `gen_ai.data_source.id`, `gen_ai.retrieval.query.text` (content), `gen_ai.retrieval.documents` (JSON `[{id, title?, score?, content?, …numeric extras}]`; `content` is content), `agentlab.corpus.hash` (the registered corpus's hash, when registered) |
+| `execute_tool {tool}` | `tool` | its node span | GenAI: `gen_ai.operation.name = "execute_tool"`, `gen_ai.tool.name`, `gen_ai.tool.call.id`; content: `gen_ai.tool.call.arguments` (JSON), `gen_ai.tool.call.result`. Made by a framework integration from the framework's own tool callbacks (LangGraph: LangChain's `on_tool_start`/`on_tool_end`, e.g. every tool a `ToolNode` runs). |
+
+`agentlab.content_mode` is a span attribute, not a resource attribute, because in shared mode the resource is the app's. The bench reads it as it reads `bench.content_mode`.
+
+Estimated cost goes in `agentlab.cost.usd`, never in `gen_ai.usage.cost`, which the bench reads as a provider-reported (`actual`) cost (6b).
+
+**Run identity.** A run is one fresh input to the app. Its id, `agentlab.run`, is `{thread_id}:{8 hex}` (just the hex with no thread), minted per fresh input and reused when the same thread resumes after a gate (`agentlab.run.resume = true` on the resume's run span). A resume whose thread this process never saw (a restart between pause and resume) gets a fresh id, still marked as a resume; the bench joins it (8.6).
+
+**Node identity.** `agentlab.node` is the framework's node id; a subgraph's node is `container/inner`. With LangGraph: `langgraph_checkpoint_ns` split on `|`, each segment's `:<task id>` suffix dropped, joined with `/`.
+
+**With LangGraph** (`agentlab.langgraph.instrument`, checked against LangGraph 1.2.12 and langchain-core 1.6.6 on 10-03-26):
+- A **run** starts at the graph's own top-level `on_chain_start`. It is a resume when the input is `Command(resume=…)` or `None` (continue the thread, e.g. after an `interrupt_before` breakpoint); any other input, `Command(update=…)` alone included, is fresh. `agentlab.thread` and `session.id` come from the callback metadata's `thread_id` and `session_id`. LangGraph copies `configurable.thread_id` into that metadata but not `configurable.session_id`, so an app passes a session as `config["metadata"]["session_id"]`.
+- A **node span** opens at the first `on_chain_start` whose run name equals `metadata["langgraph_node"]`, for a checkpoint namespace not already open in that run; a retried node gets one span per attempt. Model calls, tool calls and facts find their node by the namespace in their own metadata (facts: `langgraph.config.get_config()`), within their own run, so concurrent invokes and parallel branches never mix.
+- **Pauses:** `GraphInterrupt` in a node's `on_chain_error` (sync and async) adds `agentlab.gate.waiting` once per interrupt id, on the innermost node; the container nodes and the run end with status UNSET. A static breakpoint (LangGraph's `on_interrupt` lifecycle callback, no node raising) sets `agentlab.run.status = "paused"` with no gate event. Any other `GraphBubbleUp` (e.g. a `Command` to the parent graph) is not an error.
+- **Model calls:** `gen_ai.usage.input_tokens` is LangChain's `usage_metadata.input_tokens` as is: LangChain defines it as the total, and langchain-anthropic adds cache reads and writes back in. Cache reads are `input_token_details.cache_read`; cache writes are `cache_creation`, else the sum of the `ephemeral_*` keys (langchain-anthropic zeroes the generic key when it reports per-TTL ones). `agentlab.request.json_schema` comes from the `ls_structured_output_format` that `with_structured_output` binds, which LangChain passes to `on_chat_model_start` as `options`.
+- An explicit `callbacks=[…]` passed to a model call inside a node replaces the run's callbacks for that call (LangChain's `ensure_config`), so Agent Lab can't see it; pass such handlers at graph invoke instead.
+
+**Gates.** A run that pauses for a person gets `agentlab.gate.waiting` on the gate's node span (LangGraph: derived from the interrupt; elsewhere `gate_waiting()`), and `agentlab.run.status = "paused"`. The app reports the decision with `gate_resolved(approved, by=…)` after the resume.
+
+**Stamping.** Any span that starts on Agent Lab's provider while a node is running, and lacks them, gets `agentlab.app`, `agentlab.run` and `agentlab.node`, so another instrumentor's spans (an HTTP client, a vector store) group under the right node. Outside a run nothing is stamped. Attributes stamped onto other instrumentors' spans pass through to every backend untouched.
+
+### 8.3 Span events
+
+On the running node's span (outside any run: OpenTelemetry's current span, if recording; else dropped). Each attribute is present only when given.
+
+| event | attributes | written by |
+|---|---|---|
+| `agentlab.decision` | `agentlab.decision.reason` (content), `agentlab.decision.cited` (str[]: corpus item ids), `agentlab.decision.branch`, `agentlab.decision.confidence` (double) | `decision(reason, cited=, branch=, confidence=)` |
+| `agentlab.check` | `agentlab.check.name`, `agentlab.check.passed` (bool), `agentlab.check.detail` (content), `agentlab.check.evidence` (str[]), `agentlab.check.kind`, `agentlab.check.words` (JSON `{passed?, failed?}`) | `check(name, passed, detail=, evidence=, kind=, words=)` |
+| `agentlab.gate.waiting` | `agentlab.gate.proposed` (JSON, content), `agentlab.gate.reason` (content) | the integration, or `gate_waiting(proposed, reason=)` |
+| `agentlab.gate.resolved` | `agentlab.gate.approved` (bool), `agentlab.gate.by`, `agentlab.gate.reason` (content) | `gate_resolved(approved, by=, reason=)` |
+| `agentlab.event` | `agentlab.event.type`, `agentlab.event.data` (JSON, content) | `event(type, data)`: a bespoke fact a story renders |
+
+`outcome(label)` sets `agentlab.run.outcome` on the run span; it is not an event. `retrieved(corpus, hits, query=)` makes a retrieval span (8.2), and `corpus(id, title=, items=, description=, kind=)` registers a corpus for the manifest (8.5).
+
+**Which branch was taken.** `decision.branch` is optional: the bench derives the branch from what ran next (section 4's succession rule), which is unambiguous whenever each target of a node is reached by one branch. A node with a many-to-one path map must pass `branch=` (R5, R10).
+
+### 8.4 Content and redaction
+
+Content is anything derived from the user's input or the model's words: `agentlab.run.input`/`.output`, the chat span's system, input and output messages, the retrieval query and document text, `decision.reason`, `check.detail`, `gate.proposed`, `gate.reason` and `event.data`.
+- `redact` (a function of one JSON-like value) is applied to each content value as Agent Lab emits it; `agentlab.content_mode = "redacted"`. If it raises, the value is dropped, never sent unmasked.
+- The bench exporter also applies `redact` to other instrumentors' content attributes (the GenAI and OpenInference message, tool and document attributes, `input.value`/`output.value`) before they leave the process. A SpanProcessor can't do this: the SDK freezes a span's attributes before any processor sees its end. Masking another backend's copy is that backend's job (Langfuse `mask=`, OpenInference `TraceConfig`).
+- `capture_content=False` emits no content at all; `agentlab.content_mode = "absent"`. Ids, titles, scores, counts and words still go.
+
+### 8.5 The manifest (the map each run carries)
+
+The manifest **is a `bench-topology/0` map** (section 4), built by the library from the framework's graph, the words, the app facts and the corpora; nothing in it is typed outside the app's code. The additive fields are in `schema/bench-topology.schema.json`: `app.baseline`; `nodes[].doc`, `nodes[].parent`, `nodes[].branches_unknown`; `story` as `{id, sha256}`; and top-level `derived`:
+
+```json
+"derived": {
+  "from": "langgraph", "library": "agentlab 0.1.0", "framework": "langgraph 1.2.12",
+  "hashes": { "structure": "…", "words": "…", "corpora": "…" },
+  "warnings": [ { "code": "R3", "severity": "error", "node": "router_x", "message": "branches unknown: add a path_map or a Literal return type" } ],
+  "fingerprints": { "node:classify": "confirmed", "paths:classify": "changed" }
+}
+```
+
+**Derivation.**
+- **Nodes:** the framework's nodes, minus its start and end markers (an Agent Spec flow keeps its `StartNode`/`EndNode`s: they run; see the Agent Spec bullet below). `label` = the id's last segment with `_` as spaces, unless the framework's definition names its nodes (Agent Spec: the component's `name`). `plain_label`, `moment` and `x-not-needed` come only from the step's words (`@step(label, says=, moment=, not_needed=)`); `description` comes from the words' `says`, else from the definition's own node description (Agent Spec). `doc` = the node function's own docstring (Engineering's description; Presentation never shows it). `kind` = the words' `kind`, else from their `actor` (`ai`→`llm`, `person`→`gate`, `rule`→`check`, else `step`), else `terminal` when every exit goes to the end, else `step`. `actor` = the words' `actor`, else section 4's default from `kind`. A subgraph's node has id `container/inner` and `parent`.
+- **Edges:** the framework's plain edges, minus edges from the start and edges to the end; then every branch of every conditional edge (`from_branch` = the branch label as a string, `True`/`False` for booleans; every label kept, many-to-one included) and every `Command` destination (`from_branch` = the target id). A branch to the end goes to a synthesized node `__end__` (`label: "end"`, `kind: terminal`). A node whose branches the framework can't list gets `branches_unknown: true` and no branch edges (R3). An edge's `plain_label`/`description` come from `@step(paths={branch: path(label, says=)})` on its source.
+- **Sources:** one per registered corpus (filtered by `instrument(corpora=)`), `count` = its items, items `{id, title}` only. Taken as the corpora are when each run starts.
+- **App, actions, never:** from `App(...)`; `never` = `Never.words[t]` for each `t` in `Never.types`, in order. `app.id` = `App.id`, else the resource's `service.name`, else from `App.name` (lowercased, other characters as `-`).
+- **Panels:** the story's panels in order, then the generic `llm` (`llm_call`), `tools` (`tool_call`) and `errors` (`error`) panels (`mode: append`, `audience: engineering`) unless a story panel has the same id.
+- **Story:** `{id: app.id, sha256: <the story file's sha256>}`. The story's JS never travels over telemetry (8.6).
+- **From an Open Agent Spec flow** (`agentspec.manifest_from(path)` in the library, `derived.from: "agentspec"`, `framework: "agentspec <agentspec_version>"`): the flow file is the structure. Nodes are the flow's nodes, with id = the component `id` (the node name pyagentspec's LangGraph loader gives each node at runtime) and a `FlowNode`'s subflow as `container/inner`. `label`, `description`, `kind` and `actor` come from the component's `name`, `description` and `component_type` (`LlmNode`/`AgentNode` → `llm`/`ai`; `ToolNode`/`ApiNode` → `tool`/`app`; `BranchingNode` → `step`/`rule`; `InputMessageNode` → `gate`/`person`; `EndNode` → `terminal`; anything else `step`/`app`); step words given with `steps=` override them. Control-flow edges keep their `from_branch` (null = the node's `next` branch); a node whose only branch is `next` gets plain edges. A file error is R14. Agent Spec Tracing is not read: it is an in-process span API, not OpenTelemetry (roadmap).
+
+**Hashes.** sha256, hex, over the canonical JSON encoding: `json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")`.
+- `structure`: `{"nodes": [{id, parent?, branches_unknown?}], "edges": [{from, to, from_branch?}]}`, each list sorted by its items' canonical encoding (declaration order doesn't move it).
+- `words`: the authored inputs: `{"app": {name, description, privacy_note, track_record, baseline}, "steps": {node_id: the step's words with its paths}, "docs": {node_id: docstring}, "actions", "never", "panels": the story's panels, "story": the story file's sha256}`, plus `"node_facts": {node_id: {label?, description?, kind?, actor?}}` only when the framework's definition names and types its nodes (Agent Spec), so a LangGraph map's hash is unaffected.
+- `corpora`: the manifest's `sources` list.
+- `agentlab.manifest.hash`: the whole manifest (`derived` included), so a receiver recomputes it over the parsed JSON. The manifest JSON on the wire is that same canonical encoding.
+
+The full manifest is sent on every invoke; there is no send-once-per-hash optimization, because a restarted bench can't ask for a map it lost.
+
+### 8.6 How the bench reads it
+
+| span / event | bench event |
+|---|---|
+| the run's first span to arrive (normally the manifest span) | `run_started` (`node: "_run"`; `data`: `via: "agentlab"`, `app`, `thread`, `map_hash` or `map_error`, and `input` when the run span is already there) |
+| run span | `run_updated` (`node: "_run"`) with what `run_started` lacked (`input`; a `map_hash` that came late), then, unless `paused`, `run_finished` (`status`, `outcome`, `output`, `latency_ms`, `baseline` from the manifest's `app.baseline`) |
+| node span | `step_started` / `step_finished` with `node` = `agentlab.node`; an error status adds an `error` event |
+| `agentlab.decision` | `decision` (`rationale`, `cited`, `branch`, `confidence`) |
+| `agentlab.check` | `check_result` (`name`, `passed`, `state`, `detail`, `evidence`, `kind`, `words`) |
+| `agentlab.gate.waiting` / `.resolved` | `gate_waiting` (`proposed`, `reason`) / `gate_resolved` (`approved`, `by`, `reason`) |
+| `agentlab.event` | an event of type `agentlab.event.type` with `agentlab.event.data` as its data |
+| chat span | `llm_call` (6b), plus `params.json_schema` from `agentlab.request.json_schema`, and `cost_usd` + `cost_source: "estimated"` + `cost_basis` from `agentlab.cost.usd` and `agentlab.cost.basis` |
+| retrieval span | `retrieval` (6b), plus `corpus_hash` (`agentlab.corpus.hash`) and `stale_index: true` when it differs from the sha256 of that source's entry in the run's map |
+| any other span carrying `agentlab.node` (another instrumentor's, stamped) | its content events (6b: `llm_call`, `tool_call`, `retrieval`, `check_result`, `error`) on that node's step; never a step of its own |
+
+`run_updated` exists because a run's input travels on its run span, which ends last, while the map ships first so a live screen can draw it at once. The viewer merges it into `run_started`; `bench.record` folds it in, so recordings never contain it. A model call or search is content of its node's step (`step_id` = the node span's), not a nested step.
+
+- **The run is the `agentlab.kind = run` span, not the trace's root.** With the default private provider the run span's parent is often the app's own span (an HTTP request), which goes to the app's provider and never reaches the bench, so the run span arrives with a `parentSpanId` the bench will never see. The bench identifies runs by `agentlab.kind`/`agentlab.run`, never by rootness.
+- **Grouping:** any span carrying `agentlab.node` belongs to that node, whatever its parent. A span belongs to run `agentlab.run` when present, else to its trace. `seq` and run state are kept per run id. A second run span for a known run id is a continuation: no second `run_started`. A run span with `agentlab.run.resume = true` whose run id is unknown joins the most recent `paused` run of the same `agentlab.app` and `agentlab.thread`; with none, it is its own run. Run-level facts (`agentlab.app`, `agentlab.thread`, `agentlab.run.resume`, `agentlab.content_mode`, `session.id`) are read from any span of the run, first seen wins, across the whole request before any event is made, so the order spans arrive in within a request changes nothing. `agentlab.content_mode` overrides content detection exactly as `bench.content_mode` does. `agentlab.` counts as AI work (6b), so a trace holding only Agent Lab spans is kept.
+- **A trace that holds an Agent Lab run** (shared provider: the app's own spans reach the bench too): its other AI spans join that run under their own node (6b's node rules); its spans that are not AI work (the app's HTTP handler around the run) are dropped, never a second run.
+- **A gate is one step.** A node span carrying `agentlab.gate.waiting` gets no `step_finished` (the step is open while it waits); the resume's re-run of that node continues the same step (no second `step_started`, the same `step_id`), and its `step_finished.latency_ms` is the work before and after the pause, not the wait.
+- **Maps per run:** on a manifest span the bench recomputes the hash over the parsed JSON. A match is stored once per hash and served at `GET /maps/<hash>`; `run_started.data.map_hash` names it, and the viewer draws each run with its own map (two code versions can be live at once). A mismatch or unparseable manifest (e.g. cut by `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`), or one that isn't a valid map, is R13: `run_started.data.map_error` says why and the run uses the trace-inferred map, never a half-parsed one. Stored maps (`data/maps/<hash>.json`, `BENCH_MAPS_DIR`) are re-checked against their name when read back.
+- **Stories:** never read from telemetry. `AGENT_LAB_STORIES="<app_id>=<path>[;…]"` names trusted story files; `GET /apps/<app_id>/story.js[?sha256=<the run's story.sha256>]` serves one only when its sha256 equals the run manifest's `story.sha256` (without `?sha256=`, the app's latest run's), else a 404 whose `X-Agent-Lab-Story` header says why ("story file differs from the one this run was built with", or that no file is trusted), and the generic views render.
+- **Files:** `uv run python -m bench.record --otlp <file.json> --out <dir> --name <stem> [--title …] [--group …] [--stories <app_id>=<path>] [--t0 <unix seconds>] [--regen-id …]` turns an OTLP/JSON request (what the library's `testing.to_otlp_json` writes) into one recording per run (`<stem>`, or `<stem>-1`, `-2`, … for several) through the same reader. Header: the run's own verified map, the trusted story it names (sha256-checked), `title`, `group`, `regen_id`. Stable for diffs: `run_id` = the stem, `step_id` = `<run_id>:<node>:<n>`, `session_id` = `"recording"`, `ts` moved so the first event is `--t0`. It writes nothing and exits 1 when a run has no usable map, a named story is missing or differs, or an event doesn't validate.
+- **Ids:** span and trace ids are read as hex whether they arrive as hex (OTLP/JSON) or base64 (protobuf's JSON mapping), so both encodings give the same `step_id`s.
+- **The declared-map tier stays.** `PUT /apps` with a hand-written map (section 3) remains supported, documented and not deprecated, for apps with no library (today: TypeScript apps). A run that carries its own map is drawn with it, not with a registered one; the bench logs one line when an app does both. `POST /ingest` remains the documented low-level path for native senders and tests. The library uses neither.
+- **Checks on this map** (Engineering): the viewer's `mapChecks(map, events)` (`viewer/logic.js`) lists the map's `derived.warnings` (R0–R6, R12, from the app's own `verify`), then R7–R11 computed from the run's events and R13 from `map_error`; errors first. R7–R11 need a map the app stands behind, so a trace-inferred map gets none.
+
+**Node identity without the library (Level 0).** For spans from other instrumentors, the node is the first present of: `agentlab.node`; `langsmith.metadata.langgraph_node`; `langfuse.observation.metadata.langgraph_node`; OpenInference's `metadata` attribute (a JSON string) and its `langgraph_node` key; OpenLLMetry's `traceloop.association.properties.langgraph_node`. The last two were seen on 10-03-26 (openinference-instrumentation-langchain 0.1.78, opentelemetry-instrumentation-langchain 0.62.4, LangGraph 1.2.12: a two-node graph with a fake chat model): each puts the key on both the node's span and the model call's span. Both also carry `langgraph_checkpoint_ns` (OpenInference inside `metadata`, OpenLLMetry as `traceloop.association.properties.langgraph_checkpoint_ns`); where it is present, the node is derived from it by the rule above, so a subgraph's node is `container/inner`, not the bare inner name.
+
+### 8.7 Verification
+
+`agentlab.verify(graph, strict=False)` runs in an app's tests (`python -m agentlab verify MODULE:FACTORY [--strict]` in CI). It raises `VerificationError` (an `AssertionError`) listing every **error**; with `strict=True` it also raises on R6. Every finding also goes into the manifest's `derived.warnings`, and the bench adds the runtime rules per run. Engineering shows them all in one list: errors red, warnings amber, info plain.
+
+| rule | severity | where | what |
+|---|---|---|---|
+| R0 | error | verify | A worded value the map can't hold: an `actor` or `kind` outside its set (the value is left out), an `App.id` that isn't a valid app id (it is slugged), a story file that can't be read. |
+| R1 | error | verify | A `steps=` key, `Story.reads` id or `Panel.nodes` id that is not a node id; or one node worded in both `@step` and `steps=`. |
+| R2 | error | verify | A `paths` key that is not a branch id of that node. |
+| R3 | error | verify | A node whose branches are unknown (an untyped router, `Send`, an unannotated `Command`): "branches unknown: add a path_map or a Literal return type". |
+| R4 | error | verify | `never(types, words=)`: words missing for a type, or words for a type the list doesn't have. |
+| R5 | info | verify | A many-to-one path map: that node must pass `decision(branch=…)`. |
+| R6 | warning | verify | A fingerprint is `changed`: the code a wording describes changed since `lock` last confirmed it. |
+| R7 | warning | bench | An event or stamped span names a node not in the manifest (also the "unmapped" row). |
+| R8 | error | bench | `decision.branch` is not a branch of its node. |
+| R9 | warning | bench | `decision.cited` / `check.evidence` ids in no corpus; a retrieval's corpus not in `sources`; `agentlab.corpus.hash` ≠ that source's hash in the manifest ("stale index": the index was rebuilt elsewhere). |
+| R10 | warning | bench | A run took a many-to-one branch with no `decision.branch` (edge not lit; shown as ambiguous). |
+| R11 | warning | bench | A node with `actor` `rule` or `app` made a model call. |
+| R12 | info | verify | A node or branch with no words; fingerprints `unconfirmed`. |
+| R13 | error | bench | The manifest's hash doesn't match its content (8.6). |
+| R14 | error | verify | The framework's own definition is wrong (Agent Spec today): a control-flow edge leaves from a branch its node doesn't declare, two edges leave one branch, or an edge names a node its flow doesn't list. The edge is still drawn (or, when its node is missing, left out). |
+
+**Fingerprints.** Verification is referential: it proves every word names something the code has. It can't prove a word still describes what the code does, so it flags change for a person to re-confirm. The lock file (`agentlab.lock.json`, checked in, named by `instrument(lock=)`) is `{"v": "agentlab-lock/0", "fingerprints": {key: sha256}}` with, for each worded node, `node:<id>` = sha256 of the node function's source (dedented, trailing whitespace stripped), and for each node with worded paths, `paths:<id>` = sha256 of its routers' sources plus its canonical branch map. At `instrument` time each is `confirmed` (matches), `changed` (differs: R6) or `unconfirmed` (no lock, no entry, or no source available, e.g. a deploy without `.py` files). `agentlab.lock(graph)` / `python -m agentlab lock MODULE:FACTORY` rewrites the file: a deliberate act, like updating a snapshot, needed only after worded code changed.

@@ -1,0 +1,46 @@
+{
+  "v": "bench-topology/0",
+  "app": { "id": "slack-helpdesk", "name": "Slack Helpdesk Agent", "description": "Answers IT questions in Slack.",
+           "privacy_note": "Names and emails are masked on this screen.", "track_record": "evals run 09-30-26",
+           "baseline": "~10–15 minutes" },
+  "nodes": [
+    { "id": "classify", "label": "classify", "plain_label": "Decide what kind of request",
+      "description": "The AI reads the message and decides what kind of request it is.",
+      "doc": "Classify the request with the model.", "kind": "llm", "actor": "ai", "moment": true },
+    { "id": "grounding_check", "label": "grounding check", "plain_label": "Check the answer",
+      "kind": "check", "actor": "rule", "moment": true,
+      "x-not-needed": "Not needed this time: the AI didn't write an answer." },
+    { "id": "sub", "label": "sub", "kind": "step", "actor": "app" },
+    { "id": "sub/inner", "label": "inner", "kind": "step", "actor": "app", "parent": "sub" },
+    { "id": "router_x", "label": "router x", "kind": "step", "actor": "app", "branches_unknown": true },
+    { "id": "__end__", "label": "end", "kind": "terminal", "actor": "app" }
+  ],
+  "edges": [
+    { "from": "classify", "to": "grounding_check", "from_branch": "answerable",
+      "plain_label": "it can answer", "description": "It decided the handbook answers this." },
+    { "from": "classify", "to": "sub", "from_branch": "needs_write" },
+    { "from": "grounding_check", "to": "__end__", "from_branch": "grounded" }
+  ],
+  "sources": [
+    { "id": "handbook", "title": "IT/Ops handbook", "kind": "documents", "description": "", "count": 1,
+      "items": [ { "id": "sec-1", "title": "VPN" } ] }
+  ],
+  "actions": [ { "id": "create_ticket", "title": "Open an IT ticket", "description": "Files a ticket." } ],
+  "never": [ "Reset two-factor sign-in" ],
+  "panels": [
+    { "id": "classify", "title": "Classification", "plain_title": "The path it picked",
+      "event_types": ["decision"], "nodes": ["classify"], "audience": "both", "story": true },
+    { "id": "llm", "title": "Model calls", "event_types": ["llm_call"], "mode": "append", "audience": "engineering" }
+  ],
+  "story": { "id": "slack-helpdesk", "sha256": "0000000000000000000000000000000000000000000000000000000000000000" },
+  "derived": {
+    "from": "langgraph", "library": "agentlab 0.1.0", "framework": "langgraph 1.2.12",
+    "hashes": { "structure": "1111111111111111111111111111111111111111111111111111111111111111",
+                "words": "2222222222222222222222222222222222222222222222222222222222222222",
+                "corpora": "3333333333333333333333333333333333333333333333333333333333333333" },
+    "warnings": [ { "code": "R3", "severity": "error", "node": "router_x",
+                    "message": "branches unknown: add a path_map or a Literal return type" },
+                  { "code": "R12", "severity": "info", "node": "sub", "branch": "x", "message": "branch has no words" } ],
+    "fingerprints": { "node:classify": "confirmed", "paths:classify": "changed", "node:grounding_check": "unconfirmed" }
+  }
+}
