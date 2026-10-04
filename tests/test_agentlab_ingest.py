@@ -91,6 +91,9 @@ def test_a_run_reads_as_bench_events(lib):
     steps = {e["node"]: e["step_id"] for e in evs if e["event_type"] == "step_started"}
     assert llm["step_id"] == steps["classify"] and by["retrieval"]["step_id"] == steps["retrieve"]
     assert by["retrieval"]["data"]["source"] == "handbook" and "stale_index" not in by["retrieval"]["data"]
+    # a retriever's other numeric scores reach the event (a story may show them)
+    hit = by["retrieval"]["data"]["hits"][0]
+    assert hit["score"] == 0.9 and hit["bm25"] == 7.25 and "bm25" not in by["retrieval"]["data"]["hits"][1]
     rf = by["run_finished"]["data"]
     assert rf == {**rf, "status": "ok", "outcome": "answered", "output": {"reply": "Use the self-service portal."},
                   "baseline": "~10 minutes"}

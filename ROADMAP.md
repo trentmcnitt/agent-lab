@@ -26,7 +26,7 @@ The idea it grows from: the bench is to an AI app what comments are to code. Com
 - [x] Level 0: OTLP protobuf and gzip, a map inferred from the spans, verified with Pydantic AI and OpenInference (10-03-26).
 - [ ] Edge routing in the flowchart: back edges (an agent loop) and long edges currently cut through boxes.
 - [ ] A "rules say no" helpdesk recording: the permission check refusing a write. Needs one live run (a few cents).
-- [ ] The requester (name and role) on helpdesk runs, for the Presentation header.
+- [x] The requester (name and role) on helpdesk runs, for the Presentation header: `App(requester=...)`, checked against the graph's state.
 - [ ] Technical sub-labels under each step in Presentation: both non-technical testers wanted them hidden; the spec keeps them. Trent's call.
 - [ ] Per-model cost breakdown when a run mixes models.
 - [ ] Bespoke live mode on the site: replay by default, "try it yourself", a small model picker, per-visitor limits and a daily cap.
@@ -36,22 +36,22 @@ The idea it grows from: the bench is to an AI app what comments are to code. Com
 
 - [ ] Scenario 2: an MCP server on the bench.
 - [ ] Before and after: two architectures for the same job side by side (the common failure mode, then the fix), with the flow and the numbers changing between them.
-- [ ] Open Agent Spec flow importer (flow files as maps): no app needs it yet, and the node names it produces must match what the runtime emits before it's useful.
 - [ ] Forwarding to Langfuse, Logfire and Phoenix from the bench: an OpenTelemetry Collector fan-out does this today (README, "What it isn't"), and the bench should never sit on the path to a team's real tracing.
-- [ ] Client libraries (Python, TypeScript) and a PyPI package: the OTel env vars and two HTTP calls cover hooking up for now.
-- [ ] Browser extension that hosts the bench in a side panel: apps that send `X-Frame-Options` or a strict CSP refuse the shell's iframe, but opening the bench in its own window beside the app already works, and an extension is a separate channel (store review, permissions).
+- [ ] A TypeScript library with the Python one's names, and a PyPI package for the Python one: Python apps depend on `sdk/python` by path for now; other languages use Level 0 or a declared map.
+- [ ] Browser extension that puts the bench in the browser's side panel beside any web app tab, for live demos: it removes the iframe limit (apps that send `X-Frame-Options` or a strict CSP refuse the shell), and it can tag that tab's requests so the right person's runs reach the right screen automatically (today the app must carry the session id itself). Later, not now: it's a separate channel (store review, permissions), and recorded runs already cover most meetings.
 - [ ] Live approve/deny at the gate during a replay: a recording can't change its ending, so today the paired recording ("See what happens if they deny ▸") shows the other outcome.
 - [ ] Reading Agent Spec Tracing spans directly: Agent Spec runtimes reach the bench through their OTel export meanwhile.
-- [ ] OpenLLMetry and Vercel `ai.*` span aliases.
+- [ ] Vercel `ai.*` span aliases (OpenLLMetry's and OpenInference's LangGraph node keys are read since 10-03-26).
 - [ ] A dated price table, so OTLP calls without a reported cost get an estimate instead of "unknown".
 - [ ] Streaming (`chunk`) rendering.
 
 ## Done
 
+- [x] Nothing hand-written can drift (10-03-26): the `agentlab` Python library sends each run's map, read from the app's own LangGraph graph, over OpenTelemetry; words sit next to the code and `lab.verify` checks them; facts come from one line where each is produced. The bench keeps every map by hash and draws each run with its own. An Open Agent Spec flow file is read as a map too.
 - [x] Event format, map and schemas (v0), aligned with Open Agent Spec's edge vocabulary; opened 10-03-26 with `x-` extension keys, plain labels, actors, moments, sources, actions, `check_result` and baselines, all optional.
 - [x] Receiver: register, ingest, OTLP/HTTP (protobuf or JSON, gzip, hex or base64 ids), live stream by session or app.
 - [x] Viewer: flow with the path taken lit and paced, waterfall, Model I/O, stories, declared panels, raw toggles, event log.
-- [x] Presentation mode: NOW card, "What the AI was given", four question rows, time split, cost in words, step-through with auto-pauses.
+- [x] Presentation mode: the map with one callout per step, the recap, "What the AI was given", time split, cost in words, step-through with auto-pauses, clicker keys and deep links.
 - [x] Side-by-side shell, the "Open in Agent Lab" chip, postMessage sync for static sites, and "Step through it" after a live run.
 - [x] Replay with original timing; self-contained recordings; static export.
 - [x] The Slack Helpdesk Agent and the Bespoke playground registered, live and recorded, with prompts.

@@ -68,6 +68,12 @@
     this.selectedNode = null;
     this.source = this.opts.source || 'live';   // replay | parent | live: picks the default mode
     this.inferred = null;                        // Level 0: {appId, name} when no map was registered
+    // Live: each run is drawn with the map it carried (SPEC 8.6), fetched once per hash.
+    this.mapsBase = null;                        // set by useRunMaps(base); null = maps arrive with the events
+    this.maps = {};                              // hash -> map | 'loading' | 'failed'
+    this.mapHash = null;                         // the hash of the map on screen, when it came from a run
+    this.storyNote = null;                       // why the run's story wasn't served (Engineering)
+    this._storyKeys = {};
     this.transport = null;
     this.tstate = null;
     this.picker = null;
@@ -181,19 +187,62 @@
   Bench.prototype.renderEvent = function (ev, raw) {
     var mode = this.mode;
     var r = !raw && this.story().renderers && this.story().renderers[ev.event_type];
-    if (r) { try { return r(ev, { h: lg().helpersFor(mode), mode: mode }); } catch (e) { /* fall through to the generic view */ } }
+    if (r) { try { return r(ev, { h: lg().helpersFor(mode), mode: mode, topo: this.topo }); } catch (e) { /* fall through to the generic view */ } }
     return raw ? '<div class="row mono"><span class="tag">' + esc(ev.event_type) + '</span> ' + esc(ev.node) + '</div>' + flatKV(ev.data) : lg().renderGeneric(ev, { mode: mode });
   };
 
-  /* Loads an app's story: `source` is its script text (from a recording), else the bench
+  /* Loads an app's story: `source` is its script text (from a recording); else, for a map that
+     names its story by hash (`story: {id, sha256}`, a library app), the bench serves the trusted
+     file only when its hash matches (SPEC 8.6), and says why when it doesn't; else the bench
      serves what the app registered at <base>apps/<id>/story.js. */
-  Bench.prototype.loadStory = function (appId, source, base) {
+  Bench.prototype.loadStory = function (appId, source, base, sha256) {
     var self = this;
-    storyListeners.push(function (id) { if (self.topo && id === self.topo.app.id) { self._buildPanels(); self.render(); } });
-    var s = document.createElement('script');
-    if (source) s.textContent = source;
-    else s.src = (base || '') + 'apps/' + encodeURIComponent(appId) + '/story.js';
-    document.head.appendChild(s);
+    if (!this._storyListening) {
+      this._storyListening = true;
+      storyListeners.push(function (id) { if (self.topo && id === self.topo.app.id) { self._buildPanels(); self.render(); } });
+    }
+    function inject(text, src) {
+      var s = document.createElement('script');
+      if (src) s.src = src; else s.textContent = text;
+      document.head.appendChild(s);
+    }
+    if (source) { inject(source); return; }
+    var url = (base || '') + 'apps/' + encodeURIComponent(appId) + '/story.js';
+    if (!sha256) { inject(null, url); return; }
+    if (this._storyKeys[appId + '#' + sha256]) return;
+    this._storyKeys[appId + '#' + sha256] = true;
+    fetch(url + '?sha256=' + encodeURIComponent(sha256)).then(function (r) {
+      if (r.ok) return r.text().then(function (t) { self.storyNote = null; inject(t); });
+      self.storyNote = r.headers.get('X-Agent-Lab-Story') || ('the bench did not serve the story (' + r.status + ')');
+      self.render();
+    }).catch(function (e) { self.storyNote = 'the story could not be fetched: ' + e.message; self.render(); });
+  };
+
+  /* Live: draw each run with the map it carried. A run_started/run_updated names its map's hash;
+     the bench serves the map at <base>maps/<hash>. Two code versions can be live at once: the run
+     on screen picks the map. A run with no map hash keeps whatever map is on screen. */
+  Bench.prototype.useRunMaps = function (base) { this.mapsBase = base || ''; this._followRunMap(); };
+  Bench.prototype._followRunMap = function () {
+    var run = this.current && this.runs[this.current], h = run && run.mapHash, self = this;
+    if (this.mapsBase == null || !h || h === this.mapHash) return;
+    var m = this.maps[h];
+    if (m && typeof m === 'object') { this._applyRunMap(h, m); return; }
+    if (m) return;                                   // loading, or failed once: keep the map on screen
+    this.maps[h] = 'loading';
+    fetch(this.mapsBase + 'maps/' + encodeURIComponent(h)).then(function (r) {
+      if (!r.ok) throw new Error(String(r.status));
+      return r.json();
+    }).then(function (map) {
+      self.maps[h] = map;
+      var cur = self.current && self.runs[self.current];
+      if (cur && cur.mapHash === h) self._applyRunMap(h, map);
+    }).catch(function () { self.maps[h] = 'failed'; });
+  };
+  Bench.prototype._applyRunMap = function (h, map) {
+    this.mapHash = h;
+    this.inferred = null;                            // a run that carries its map is never Level 0
+    this.setTopology(map);
+    if (map.story && typeof map.story === 'object' && map.story.sha256) this.loadStory(map.app.id, null, this.mapsBase, map.story.sha256);
   };
 
   // Show everything received as already happened: no pacing (e.g. "skip to end", stepping back).
@@ -348,7 +397,7 @@
     topo.edges.forEach(function (e, i) {
       var r = Lay.edges[i];
       if (!r) return;
-      var name = (e.from_branch || e.when || '').replace(/_/g, ' ');
+      var name = global.BenchLayout.edgeText(topo, r, false);   // parallel branches: one line, joined names
       svg += '<g class="edge' + (r.routed ? ' routed' : '') + '" data-edge="' + i + '"><path d="' + r.d + '" marker-end="url(#arr)"/>' +
         (name && r.label ? '<text x="' + r.label.x + '" y="' + r.label.y + '"' + (r.label.anchor === 'end' ? ' text-anchor="end"' : '') + '>' + esc(name) + '</text>' : '') + '</g>';
     });
@@ -415,6 +464,7 @@
   };
 
   Bench.prototype.render = function () {
+    this._followRunMap();
     if (!this.topo) return;
     var self = this, run = this.current ? this.runs[this.current] : null;
     // run selector
@@ -425,7 +475,9 @@
       sel.innerHTML = this.runOrder.map(function (id, i) {
         var r = self.runs[id];
         // An OTLP run's label is its root span's name ("invoke_agent x", the same every run); its request tells runs apart.
-        var lab = r.started && r.started.via === 'otlp' && r.input ? (typeof r.input === 'string' ? r.input : JSON.stringify(r.input)) : r.label;
+        // A run whose input is the app's state object: its request (the map's declared field, else a guess).
+        var req = r.input && typeof r.input === 'object' ? lg().requestOf(r.events, self.topo).text : null;
+        var lab = req || (r.started && r.started.via === 'otlp' && r.input ? (typeof r.input === 'string' ? r.input : JSON.stringify(r.input)) : r.label);
         return '<option value="' + esc(id) + '">#' + (i + 1) + ' ' + esc(lab ? short(lab, 40) : id) + (r.status && r.status !== 'ok' ? ' · ' + esc(r.status) : '') + '</option>';
       }).join('');
     }
@@ -553,9 +605,10 @@
       n.querySelector('.gp').textContent = shownOpen ? '' : L.preview(steps, 'engineering', null, node.kind === 'check', self.topo);
     });
     g.querySelectorAll('.edge').forEach(function (e) {
-      var ed = self.topo.edges[+e.getAttribute('data-edge')];
+      var i0 = +e.getAttribute('data-edge'), ed = self.topo.edges[i0], r = self.layout && self.layout.edges[i0];
       var k = ed.from + '>' + ed.to;
-      var c = 'edge' + (taken[k] ? ' taken' + (S.openNode === ed.to ? ' flowing' : '') : finished ? ' untaken' : '') + (ed.description ? ' described' : '');
+      var described = ((r && r.edges) || [i0]).some(function (j) { return self.topo.edges[j] && self.topo.edges[j].description; });
+      var c = 'edge' + (taken[k] ? ' taken' + (S.openNode === ed.to ? ' flowing' : '') : finished ? ' untaken' : '') + (described ? ' described' : '');
       if (e.getAttribute('class') !== c) e.setAttribute('class', c);
     });
     var unm = Object.keys(ran).filter(function (n) { return !L.nodeOf(self.topo, n); });
@@ -591,7 +644,7 @@
   };
 
   Bench.prototype._storyCtx = function (run, evs, mode) {
-    return { run: run, h: lg().helpersFor(mode), all: evs, mode: mode };
+    return { run: run, h: lg().helpersFor(mode), all: evs, mode: mode, topo: this.topo };
   };
 
   Bench.prototype._renderPanels = function (run) {
@@ -656,6 +709,9 @@
      this run shows. Errors red, warnings amber, info plain. */
   Bench.prototype._renderMapChecks = function (P, run) {
     var rows = lg().mapChecks(this.topo, run.events);
+    // A story the bench wouldn't serve (its file differs from the one this run was built with, or
+    // isn't trusted) is a finding about this map too: the generic views render instead.
+    if (this.storyNote) rows = [{ code: 'story', severity: 'warning', message: this.storyNote, from: 'run' }].concat(rows);
     var bad = rows.filter(function (r) { return r.severity !== 'info'; }).length;
     P.el.classList.toggle('empty', !rows.length);
     P.count.textContent = bad ? ' ' + bad : '';
@@ -810,7 +866,7 @@
       if (!r) return;
       // No labels on the stage's edges: a branching step's badge names the path it took.
       svg += '<g class="edge' + (r.routed ? ' routed' : '') + '" data-edge="' + i + '"><path d="' + r.d + '" marker-end="url(#parr)"/>' +
-        (e.description ? '<path class="hit" d="' + r.d + '"/>' : '') + '</g>';
+        (r.edges.some(function (k) { return topo.edges[k].description; }) ? '<path class="hit" d="' + r.d + '"/>' : '') + '</g>';
     });
     svg += '</svg>';
     var boxes = topo.nodes.map(function (n) {
@@ -845,11 +901,16 @@
     // A path's own words on hover or tap: on a dashed path, why it wasn't taken.
     var tip = this.p.tip;
     g.querySelectorAll('.edge').forEach(function (eg) {
-      var ed = topo.edges[+eg.getAttribute('data-edge')];
-      if (!ed.description) return;
+      var i0 = +eg.getAttribute('data-edge'), r = Lay.edges[i0];
+      // A line may draw several parallel branches: each one's words.
+      var eds = ((r && r.edges) || [i0]).map(function (k) { return topo.edges[k]; }).filter(function (x) { return x.description; });
+      if (!eds.length) return;
       function show(ev) {
         var cls = eg.getAttribute('class');
-        tip.innerHTML = '<b>' + esc(/untaken/.test(cls) ? 'Not taken this time' : /\btaken\b/.test(cls) ? 'Taken' : 'Path') + (ed.plain_label || ed.from_branch ? ': ' + esc(ed.plain_label || ed.from_branch.replace(/_/g, ' ')) : '') + '</b> ' + esc(ed.description);
+        var state = /untaken/.test(cls) ? 'Not taken this time' : /\btaken\b/.test(cls) ? 'Taken' : 'Path';
+        tip.innerHTML = eds.map(function (ed, j) {
+          return '<b>' + esc(j ? 'Or' : state) + (ed.plain_label || ed.from_branch ? ': ' + esc(ed.plain_label || ed.from_branch.replace(/_/g, ' ')) : '') + '</b> ' + esc(ed.description);
+        }).join('<br>');
         tip.hidden = false;
         var rb = sec.getBoundingClientRect();
         tip.style.left = Math.min(Math.max(4, ev.clientX - rb.left + 10), Math.max(4, rb.width - 300)) + 'px';
@@ -892,22 +953,17 @@
       num.hidden = !nv;
       // A past step keeps one badge: the path it took, or its verdict, or what it found.
       var badge = '';
-      if (steps.length && focus !== id && !S.starting[id]) {
-        var outs = L.takenOut(topo, S.events, id).filter(function (ed) { return ed.from_branch || ed.when; });
-        var hitsCount = null;
-        steps.forEach(function (s) { s.events.forEach(function (e) { if (e.event_type === 'retrieval' && e.data && e.data.hits && e.data.hits[0]) hitsCount = counts[e.data.hits[0].id]; }); });
-        var pv = L.preview(steps, 'presentation', hitsCount, node.kind === 'check', topo);
-        badge = node.kind !== 'check' && outs.length ? '→ ' + (outs[0].plain_label || L.human(outs[0].from_branch || outs[0].when)) : pv;
-        if (/^\d+ (of \d+|found)$/.test(badge)) badge = 'found ' + badge.replace(/ found$/, '');
-      } else if (!steps.length && finished && node.kind === 'check') badge = '– not needed';
+      if (steps.length && focus !== id && !S.starting[id]) badge = L.stepBadge(topo, S.events, id, steps, counts);
+      else if (!steps.length && finished && node.kind === 'check') badge = '– not needed';
       var gp = n.querySelector('.gp');
       if (gp.textContent !== badge) gp.textContent = badge;
       gp.parentNode.hidden = !badge;
     });
     g.querySelectorAll('.edge').forEach(function (e) {
-      var ed = topo.edges[+e.getAttribute('data-edge')];
+      var i0 = +e.getAttribute('data-edge'), ed = topo.edges[i0], r = self.layout && self.layout.edges[i0];
       var k = ed.from + '>' + ed.to;
-      var c = 'edge' + (taken[k] ? ' taken' + (S.openNode === ed.to ? ' flowing' : '') : finished ? ' untaken' : '') + (ed.description ? ' described' : '');
+      var described = ((r && r.edges) || [i0]).some(function (j) { return topo.edges[j] && topo.edges[j].description; });
+      var c = 'edge' + (taken[k] ? ' taken' + (S.openNode === ed.to ? ' flowing' : '') : finished ? ' untaken' : '') + (described ? ' described' : '');
       if (e.getAttribute('class') !== c) e.setAttribute('class', c);
     });
     var busy = S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; });
@@ -1002,7 +1058,7 @@
     this._tstateShown = tstate;
 
     // Header: who asked and what (beside a live app its own pane shows them), and where it stands.
-    var req = run ? L.requestOf(run.events) : { text: null, who: '' };
+    var req = run ? L.requestOf(run.events, topo) : { text: null, who: '' };
     var beside = this.source === 'parent';
     setHTML(p.req, beside ? '' : req.text ? '<span title="' + esc(req.text) + '">“' + esc(req.text.replace(/\s+/g, ' ')) + '”</span>' : '<span class="muted">' + (run ? '' : 'Waiting for a request…') + '</span>');
     setHTML(p.who, beside ? '' : esc(req.who));
@@ -1148,7 +1204,7 @@
 
   Bench.prototype._bubbleHTML = function (run, events, id, finished, S) {
     var L = lg(), topo = this.topo, self = this;
-    var reply = L.replyOf(run.output);
+    var reply = L.replyOf(run.output, topo);
     var c = L.callout(topo, events, id, { finished: finished, last: S.lastNode, numbers: S.numbers, reply: reply });
     var tag = this.selectedNode ? 'Selected' : STATUS_TAG[c.status] || '';
     var head = '<div class="bb-head">' + (c.n ? '<span class="bb-num">' + c.n + '</span>' : '') +

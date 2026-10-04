@@ -8,9 +8,12 @@
    loads the story in a sandbox with a stub BenchStory and the viewer's real ctx.h helpers
    (viewer/logic.js helpersFor), folds each recording's events into a run with the viewer's own
    reduce(), and calls every story panel (map panels with "story": true) and every story
-   renderer after each event, in "presentation" and "engineering". A call fails on a throw, a
-   non-string or empty result where the panel has events, or output containing "undefined",
-   "NaN" or "[object Object]". Prints a JSON summary; exits 1 on any failure. No dependencies. */
+   renderer after each event, in "presentation" and "engineering" (a panel whose audience is
+   "engineering" only in Engineering, as the viewer does). ctx is the viewer's: {run, h, all,
+   mode, topo}. A call fails on a throw, a non-string result, an empty result in Engineering
+   where the panel has events (in Presentation a story panel adds to the generic callout, so ""
+   means "nothing to add for this step" and is allowed), or output containing "undefined", "NaN"
+   or "[object Object]". Prints a JSON summary; exits 1 on any failure. No dependencies. */
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -44,9 +47,9 @@ function readRecording(p) {
   return { header, events: rows };
 }
 
-function check(out, where, failures) {
+function check(out, where, failures, emptyOk) {
   if (typeof out !== 'string') { failures.push(where + ': returned ' + (out === undefined ? 'undefined' : typeof out)); return; }
-  if (!out.trim()) { failures.push(where + ': empty output'); return; }
+  if (!out.trim()) { if (!emptyOk) failures.push(where + ': empty output'); return; }
   const m = BAD.exec(out);
   if (m) failures.push(where + ': output contains "' + m[0] + '": …' + out.slice(Math.max(0, m.index - 60), m.index + 30).replace(/\s+/g, ' ') + '…');
 }
@@ -82,18 +85,19 @@ async function main() {
         for (const p of panels) {
           const fn = story.panels && story.panels[p.id];
           if (typeof fn !== 'function') continue;
+          if (mode === 'presentation' && p.audience === 'engineering') continue;
           const evs = run.events.filter((e) => p.event_types.indexOf(e.event_type) >= 0 && (!p.nodes || p.nodes.indexOf(e.node) >= 0));
           if (!evs.length) continue;
           const list = p.mode === 'append' ? evs : evs.slice(-1);
           const where = name + ' @' + i + ' ' + mode + ' panel ' + p.id;
           calls++;
-          try { check(fn(list, { run, h, all: evs, mode }), where, failures); } catch (e) { failures.push(where + ': threw ' + e.message); }
+          try { check(fn(list, { run, h, all: evs, mode, topo }), where, failures, mode === 'presentation'); } catch (e) { failures.push(where + ': threw ' + e.message); }
         }
         const r = renderers[ev.event_type];
         if (typeof r === 'function') {
           const where = name + ' @' + i + ' ' + mode + ' renderer ' + ev.event_type;
           calls++;
-          try { check(r(ev, { h, mode }), where, failures); } catch (e) { failures.push(where + ': threw ' + e.message); }
+          try { check(r(ev, { h, mode, topo }), where, failures); } catch (e) { failures.push(where + ': threw ' + e.message); }
         }
       }
     });

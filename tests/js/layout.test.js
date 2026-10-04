@@ -117,3 +117,22 @@ test('layout: a back edge and a row-skipping edge in a made-up map stay clear of
     assert.deepEqual(labelsInBoxes(topo, L), []);
   }
 });
+
+test('two branches between the same two steps are one line with joined words', () => {
+  const topo = {
+    app: { id: 'm', name: 'M' },
+    nodes: [{ id: 'classify' }, { id: 'answer' }, { id: 'handoff' }],
+    edges: [
+      { from: 'classify', to: 'answer', from_branch: 'answerable', plain_label: 'can answer' },
+      { from: 'classify', to: 'handoff', from_branch: 'needs_write', plain_label: 'needs a change' },
+      { from: 'classify', to: 'handoff', from_branch: 'unsure', plain_label: 'not sure' },
+    ],
+  };
+  const L = layout(topo, layout.GEOM);
+  assert.ok(L.edges[1] && L.edges[2] === null, 'the second parallel edge is not drawn again');
+  assert.deepEqual([...L.edges[1].edges], [1, 2]);
+  assert.deepEqual([...L.edges[0].edges], [0]);
+  assert.equal(layout.edgeText(topo, L.edges[1], false), 'needs write · unsure');
+  assert.equal(layout.edgeText(topo, L.edges[1], true), 'needs a change · not sure');
+  assert.equal(layout.edgeText(topo, L.edges[0], true), 'can answer');
+});

@@ -3,11 +3,15 @@
    bench and the lab's front door draw a map the same way; node --test loads it with vm.
 
    BenchLayout(topo, geom) -> { pos: {id: {x, y}}, W, H, g, edges: [routed edge | null] }
-   A routed edge (same index as topo.edges) is { from, to, d, pieces, routed, label }:
+   A routed edge (same index as topo.edges) is { from, to, d, pieces, routed, label, edges }:
    - pieces: cubic Béziers [[x0,y0],[x1,y1],[x2,y2],[x3,y3]] (a straight run is a cubic too),
      so a test can sample the exact curve that's drawn;
    - routed: true when the edge skips rows (or goes back up) and runs in a channel;
-   - label: {x, y, anchor} where the edge's branch label goes, or null.
+   - label: {x, y, anchor} where the edge's branch label goes, or null;
+   - edges: the topo.edges indices this one line draws. Two branches between the same two steps
+     (a many-to-one path map: "needs a change" and "unsure" both to "hand off") are one line with
+     joined labels (BenchLayout.edgeText); the later ones' entries are null, like an edge whose
+     end isn't on the map, so nothing is drawn twice.
 
    An edge between adjacent rows is the usual S-curve through the gap between them. A longer
    edge (Sugiyama's long edge) leaves its source through the gap below it, runs straight down a
@@ -52,6 +56,16 @@
   function branchText(e) {
     var a = String(e.plain_label || ''), b = String(e.from_branch || e.when || '');
     return a.length > b.length ? a : b;
+  }
+  /* The words on one drawn line: each of its branches' words (`plain`: the plain_label, else the
+     branch name; otherwise the branch name), joined. */
+  function edgeText(topo, routed, plain) {
+    var seen = {}, out = [];
+    ((routed && routed.edges) || []).forEach(function (k) {
+      var e = topo.edges[k], t = e ? String((plain && e.plain_label) || e.from_branch || e.when || '').replace(/_/g, ' ') : '';
+      if (t && !seen[t]) { seen[t] = true; out.push(t); }
+    });
+    return out.join(' · ');
   }
 
   function layout(topo, geom) {
@@ -119,12 +133,23 @@
     var minBox = Infinity, maxBox = -Infinity;
     ids.forEach(function (id) { minBox = Math.min(minBox, pos[id].x); maxBox = Math.max(maxBox, pos[id].x + G.w); });
 
+    // Parallel edges (same from and to) are one line: the first carries every index.
+    var firstOf = {}, group = {};
+    topo.edges.forEach(function (e, i) {
+      var k = e.from + '\u0000' + e.to;
+      if (firstOf[k] == null) { firstOf[k] = i; group[i] = [i]; } else group[firstOf[k]].push(i);
+    });
     // Long edges first-come, in map order; short ones don't need a channel.
-    var edges = topo.edges.map(function (e) {
+    var edges = topo.edges.map(function (e, i) {
       var a = pos[e.from], b = pos[e.to];
-      if (!a || !b) return null;
+      if (!a || !b || !group[i]) return null;
+      var r = route(e, a, b, group[i].map(function (k) { return branchText(topo.edges[k]); }).filter(Boolean).join(' · '));
+      r.edges = group[i];
+      return r;
+    });
+    function route(e, a, b, text) {
       var x1 = a.x + G.w / 2, y1 = a.y + G.h, x2 = b.x + G.w / 2, y2 = b.y;
-      var ls = row[e.from], lt = row[e.to], text = branchText(e);
+      var ls = row[e.from], lt = row[e.to];
       if (lt === ls + 1) {
         var dy = Math.max(G.gy > 20 ? 18 : 12, (y2 - y1) / 2);
         var p = cubic([x1, y1], [x1, y1 + dy], [x2, y2 - dy], [x2, y2]);
@@ -187,7 +212,7 @@
         label.w = text.length * CHAR_W;
       }
       return { from: e.from, to: e.to, pieces: pieces, routed: true, label: label };
-    });
+    }
 
     // Lanes outside the columns (and their labels) widen the map: shift everything to fit.
     var minX = 0, maxX = W0, minY = 0, maxY = G.pad * 2 + Math.max(0, layers.length * G.h + (layers.length - 1) * G.gy);
@@ -217,5 +242,6 @@
   layout.STAGE_GEOM = STAGE_GEOM;
   layout.PANE_GEOM = PANE_GEOM;
   layout.at = at;
+  layout.edgeText = edgeText;
   global.BenchLayout = layout;
 })(typeof window !== 'undefined' ? window : this);

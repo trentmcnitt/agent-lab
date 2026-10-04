@@ -33,6 +33,8 @@ APP = lab.App(
     id="support-assistant",
     description="Answers product questions from the help-center FAQ, or hands them to a person.",
     baseline="~5 minutes for a support agent to look up and write",
+    request="question",                 # the state fields a person reads (verify checks them, R15)
+    reply="answer",
 )
 
 CITATION = re.compile(r"\[([\w-]+)\]")

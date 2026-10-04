@@ -115,6 +115,13 @@ def never(types: Iterable[str], *, words: Mapping[str, str]) -> Never:
 
 @dataclass(frozen=True)
 class App:
+    """The app-level facts, handed to `instrument(app=...)`.
+
+    `request`, `reply` and `requester` say which fields of the run's input and output state a
+    person reads: the request ("message"), the answer the run ended with ("final_response") and
+    who asked (("requester_name", "requester_role"), joined with " · "). They are field names of
+    the graph's own state, so `verify` checks them against its input and output schema (R15);
+    without them the viewer guesses from field names, which is only good enough for Level 0."""
     name: str
     id: str | None = None                  # default: the resource's service.name, else from name
     description: str | None = None
@@ -123,6 +130,9 @@ class App:
     baseline: str | None = None            # what the job takes a person, e.g. config.MANUAL_ESTIMATE
     never: Never | None = None
     actions: Sequence[Action] = ()
+    request: str | None = None             # the input field holding the request
+    reply: str | None = None               # the output field holding the reply
+    requester: Sequence[str] = ()          # input fields naming who asked, in display order
 
 
 @dataclass(frozen=True)

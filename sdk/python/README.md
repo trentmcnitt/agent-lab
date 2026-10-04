@@ -36,6 +36,8 @@ graph.invoke({"question": q}, {"configurable": {"thread_id": tid}})
 
 `instrument` reads the map from the compiled graph: nodes and plain edges from `get_graph()`, every branch label from the path maps (or a `Literal` return type), `Command` destinations, subgraph nodes as `container/inner`. At runtime it uses LangGraph's own callback metadata to put a run span around each invoke, a node span around each node, and every model call, tool call and fact (`lab.decision`, `lab.check`, ...) under the node that made it. The app never passes a node id. Interrupts become gates; a resume continues the same run. A router with no path map and no `Literal` return type can't be read, and `verify` says so (R3) rather than guessing.
 
+Say which fields of the graph's state a person reads, and the screen shows the request, who asked and the reply instead of the whole state: `lab.App(name=..., request="message", reply="final_response", requester=("requester_name", "requester_role"))`. They're the state's own field names, so `verify` checks them against the graph's input and output schema (R15). A graph built from a definition that knows more than the compiled graph (an Agent Spec flow, below) passes that structure: `instrument(graph, app=..., structure=agentspec.structure_from("flow.yaml"))`.
+
 Install with the extra: `agentlab[langgraph]`. A complete, runnable app is in [`examples/langgraph_quickstart`](../../examples/langgraph_quickstart) (a scripted model, so no API key).
 
 ## Open Agent Spec

@@ -82,6 +82,8 @@ class Structure:
     source: str = "code"                          # derived.from, e.g. "langgraph", "agentspec"
     framework: str | None = None                  # e.g. "langgraph 1.2.12"
     findings: Sequence["Finding"] = ()            # what the reader found wrong in the definition itself
+    inputs: Sequence[str] | None = None           # the run input's field names, None = not known
+    outputs: Sequence[str] | None = None          # the run output's field names, None = not known
 
 
 # ---------------------------------------------------------------- findings
@@ -378,6 +380,23 @@ class Instrumentation:
             never = [wmap[t] for t in types if t in wmap]
         actions = [{"id": a.id, "title": a.title, "description": a.description} for a in app.actions]
 
+        # which input/output fields a person reads (R15: they must be fields the graph has)
+        io: dict[str, Any] = {}
+        declared = [("request", app.request, s.inputs, "input"), ("reply", app.reply, s.outputs, "output")]
+        declared += [("requester", f, s.inputs, "input") for f in app.requester]
+        for key, fld, have, side in declared:
+            if not fld:
+                continue
+            if have is not None and fld not in have:
+                fields = ", ".join(sorted(have)) or "none"
+                findings.append(Finding("R15", "error", f"App.{key} names {fld!r}, which is not a field of the "
+                                                        f"graph's {side} (its fields: {fields})"))
+                continue
+            if key == "requester":
+                io.setdefault("requester", []).append(str(fld))
+            else:
+                io[key] = str(fld)
+
         # story and panels
         story_entry = None
         story_sha = None
@@ -431,6 +450,7 @@ class Instrumentation:
         }
         words_payload = {
             "app": {k: getattr(app, k) for k in ("name", "description", "privacy_note", "track_record", "baseline")},
+            **({"io": io} if io else {}),     # only when declared, so an app without it hashes as before
             "steps": {nid: _words_json(w) for nid, w in sorted(words.items())},
             "docs": {n["id"]: n["doc"] for n in nodes if "doc" in n},
             "actions": actions, "never": never, "panels": [p for p in panels if p["id"] in story_ids],
@@ -443,7 +463,7 @@ class Instrumentation:
             words_payload["node_facts"] = dict(sorted(node_facts.items()))
         self._current_fingerprints = current
         self._static = {
-            "nodes": nodes, "edges": edges, "actions": actions, "never": never, "panels": panels,
+            "nodes": nodes, "edges": edges, "actions": actions, "never": never, "panels": panels, "io": io,
             "story_sha": story_sha, "findings": tuple(findings), "fingerprints": fingerprints,
             "hashes": {"structure": hash_obj(structure_payload), "words": hash_obj(words_payload)},
         }
@@ -493,6 +513,8 @@ class Instrumentation:
             value = getattr(app, key)
             if value:
                 app_entry[key] = value
+        if st["io"]:
+            app_entry["io"] = copy.deepcopy(st["io"])
         m: dict[str, Any] = {"v": "bench-topology/0", "app": app_entry, "nodes": st["nodes"], "edges": st["edges"]}
         if sources:
             m["sources"] = sources

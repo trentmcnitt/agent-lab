@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version as _dist_version
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from uuid import UUID
 
 try:
@@ -88,7 +88,18 @@ def structure_from(compiled: Any) -> Structure:
     edges: list[tuple[str, str]] = []
     branches: list[BranchSpec] = []
     _read(compiled, "", None, nodes, edges, branches)
-    return Structure(nodes=nodes, edges=edges, branches=branches, source="langgraph", framework=_framework())
+    return Structure(nodes=nodes, edges=edges, branches=branches, source="langgraph", framework=_framework(),
+                     inputs=_fields(compiled.get_input_jsonschema), outputs=_fields(compiled.get_output_jsonschema))
+
+
+def _fields(schema_of: Callable[[], Mapping[str, Any]]) -> list[str] | None:
+    """The top-level field names of the graph's input or output state, None when its schema
+    can't be read or names none (then App.request/reply/requester are not checked)."""
+    try:
+        props = schema_of().get("properties")
+    except Exception:  # noqa: BLE001 - an exotic state schema only means "not checked"
+        return None
+    return sorted(props) if isinstance(props, Mapping) and props else None
 
 
 def _read(compiled: Any, prefix: str, container: str | None, nodes: list[NodeSpec],
@@ -619,7 +630,8 @@ def _without_agentlab(compiled: Any) -> Any:
 
 def instrument(compiled: Any, *, app: App, story: Story | None = None,
                steps: Mapping[str, StepWords] | None = None, corpora: Sequence[str] | None = None,
-               lock: str | os.PathLike | None = None, llm_spans: bool = True) -> Any:
+               lock: str | os.PathLike | None = None, llm_spans: bool = True,
+               structure: Structure | None = None) -> Any:
     """Attach Agent Lab to a compiled LangGraph graph; returns the graph to invoke instead.
 
     - `app`: `lab.App(name=..., ...)`, the app-level facts.
@@ -631,6 +643,10 @@ def instrument(compiled: Any, *, app: App, story: Story | None = None,
       that calls `instrument` (the working directory from a REPL). None: wording fingerprints
       are reported "unconfirmed".
     - `llm_spans`: False when the app already traces its LangChain model calls elsewhere.
+    - `structure`: the map's structure when the graph was built from a definition that knows more
+      than the compiled graph does, e.g. `agentlab.agentspec.structure_from(flow_file)` for a graph
+      pyagentspec's loader made from that file (its node ids are the file's). Default: read from
+      `compiled`.
 
     The map is built here, once, from `compiled.get_graph()` and `compiled.builder`; it is not
     stored anywhere and travels with each run. Never raises: if the graph can't be read it logs a
@@ -638,7 +654,7 @@ def instrument(compiled: Any, *, app: App, story: Story | None = None,
     Instrumenting an already instrumented graph replaces the earlier instrumentation."""
     try:
         base = _caller_dir()
-        structure = structure_from(compiled)
+        structure = structure if structure is not None else structure_from(compiled)
         if story is not None:
             story = dataclasses.replace(story, file=_relative_to(base, story.file))
         inst = Instrumentation(structure, app=app, story=story, steps=steps, corpora=corpora,

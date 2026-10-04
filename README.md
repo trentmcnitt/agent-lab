@@ -37,15 +37,15 @@ It sits on top of the tracing you already have. It doesn't replace your observab
 
 ## ✨ Features
 
-- **🗺️ The whole flow, not just the trace.** Apps declare every step and branch they *could* take, so the paths a run didn't take show up too. Branch names follow [Open Agent Spec](https://github.com/oracle/agent-spec).
+- **🗺️ The whole flow, not just the trace.** The map of every step and branch an app *could* take is read from its own code (a LangGraph graph, or an [Open Agent Spec](https://github.com/oracle/agent-spec) flow file), so the paths a run didn't take show up too, and the map can't drift from the code.
 - **👀 Presentation and Engineering.** Presentation is for a room: plain step names, what the app looked at, how it was checked, who signed off, and time and cost in words, stepped through at the presenter's pace. Engineering shows every field, every id and the raw event log.
-- **📚 What it could see, and what it used.** An app declares its sources (a handbook, a database, the message). Each run shows which items were given to the AI, verified by matching their text in the prompt, and which ones its answer rests on.
+- **📚 What it could see, and what it used.** An app reports its sources where it builds them (a handbook's sections, from the index itself). Each run shows which items were given to the AI, verified by matching their text in the prompt, and which ones its answer rests on.
 - **✅ Checks and sign-offs.** Every check that guards the app, whether it passed this run, and whether a person approved.
 - **⟨⟩ The exact prompt.** Model I/O shows what the model was told, word for word, and exactly what it returned, per call. In Presentation, "What the AI was given" shows the same thing as readable blocks.
 - **⏱️ Time and cost.** Per-step latency, with AI time split from time spent waiting for a person; tokens and cost per call. A call with no price shows its cost as unknown, never as $0.
 - **🧩 Stories.** An app can register its own panels that explain its runs, the way comments explain code. Custom panels never hide data: every one has a raw toggle.
 - **🪟 Side by side.** A shell puts the real app on the left and the bench on the right, live or from a recording. On a phone it becomes two tabs.
-- **🔌 Plugs into OpenTelemetry.** Point an OTLP exporter at the bench and it draws a map from your spans, with no code. Or send bench events from any language.
+- **🔌 Plugs into OpenTelemetry.** Point an OTLP exporter at the bench and it draws a map from your spans, with no code. The `agentlab` library adds the real map, plain words and checked facts, on the same wire.
 - **📼 Replay anywhere.** Recordings carry their own map and story, so a static site can replay them with no server.
 
 ## 🚀 Quickstart
@@ -99,17 +99,33 @@ uv run examples/level0_pydantic_ai.py "How do I reset my VPN password?"
 
 A run with no content says "not captured", never "masked". [SPEC](SPEC.md) section 6b has the full span mapping.
 
-### Level 1: declare the map
+### Level 1: the `agentlab` library (Python, LangGraph)
 
-The inferred map shows what a run happened to do. A declared map shows everything the app *could* do, in plain words, with this run lit. It's one JSON file:
+The inferred map shows what a run happened to do. The library sends the map of everything the app *could* do, read from the compiled graph, with each run, plus the facts a trace can't know. Nothing is typed twice, and whatever is written by hand sits next to the code it describes and is checked against it.
 
-- **Steps** (`nodes`): `plain_label` (the Presentation name), `description` (what the step does: its note), `actor` (`ai`, `rule`, `person` or `app`), `kind` (`llm`, `tool`, `retrieval`, `gate`, `check`, ...) and `moment` (Play pauses here).
-- **Branches** (`edges`): `from_branch`, plus a `description` that also explains a branch the run didn't take.
-- **Sources**: what the app can read, with its items (`{id, title}`; the text arrives in retrieval events). The bench works out which items were given to the AI and which ones its answer rests on.
-- **Checks**: nodes of `kind: "check"`, filled in by `check_result` events.
-- Optionally `actions`, `never` ("what it can never do, the app says"), `app.privacy_note` and `app.track_record`. Anything the app claims is shown attributed to it.
+```python
+import agentlab as lab
+from agentlab.langgraph import instrument
 
-The fastest start from Level 0: open `?app=my-app&mode=engineering` and click **⤓ map as topology.json**. It has the node ids your spans actually produce (e.g. `chat my_agent`, `execute_tool lookup_order`, the same ids the event log shows). Fill in the plain words, then register it:
+lab.init()       # no settings when the bench runs on this machine; a silent no-op when it isn't running
+
+@lab.step("Decide what kind of request", actor="ai", paths={"escalate": lab.path("needs a person")})
+def classify(state):
+    """The docstring is Engineering's description of this step."""
+    ...
+    lab.decision(parsed.rationale, cited=parsed.cited)     # one line where the fact is produced
+
+graph = instrument(builder.compile(), app=lab.App(name="Support assistant", request="question", reply="answer"),
+                   lock="agentlab.lock.json")
+```
+
+- **Structure** (steps, branches, subgraphs) comes from the graph: `get_graph()` and the path maps. A router whose branches can't be read is an error, never a guess.
+- **Facts** come from one line each, where they happen: `lab.corpus(...)` where an index is built (so its items are the index's), `lab.retrieved`, `lab.decision`, `lab.check`, `lab.gate_resolved`, `lab.outcome`, `lab.event` for anything bespoke. Model calls, tool calls, prompts, tokens, cost and approval pauses come from LangGraph's own callbacks.
+- **Words** (plain labels, branch words, check words, which state fields are the request and the reply) live on the code they describe. `lab.verify(graph)` in a test fails when one names a step, branch or field the code no longer has; `python -m agentlab lock` records the code each wording describes, and Engineering flags wording whose code changed since.
+
+Everything travels as OpenTelemetry span attributes ([SPEC](SPEC.md) section 8), so Langfuse, Phoenix and the rest see it too. [`examples/langgraph_quickstart`](examples/langgraph_quickstart) is a runnable app with no API key, and [`sdk/python`](sdk/python) is the library's own guide. An app defined as an Open Agent Spec flow gets its map from the flow file ([`examples/agentspec`](examples/agentspec)).
+
+**No library for your language yet?** Declare the map as JSON instead. Open `?app=my-app&mode=engineering` on a Level 0 run and click **⤓ map as topology.json**: it has the node ids your spans actually produce. Fill in the plain words, then register it:
 
 ```bash
 curl -X PUT http://127.0.0.1:8790/apps/my-app \
@@ -117,7 +133,7 @@ curl -X PUT http://127.0.0.1:8790/apps/my-app \
   -d @my-app.registration.json          # {"topology": {...}, "story": null}
 ```
 
-Registration validates the map against [`schema/bench-topology.schema.json`](schema/bench-topology.schema.json); keys starting with `x-` are yours. [`examples/hello-agent.topology.json`](examples/hello-agent.topology.json) uses every field, and [`examples/make_hello.py`](examples/make_hello.py) builds it with a story and recordings.
+Registration validates the map against [`schema/bench-topology.schema.json`](schema/bench-topology.schema.json); keys starting with `x-` are yours. [`examples/hello-agent.topology.json`](examples/hello-agent.topology.json) uses every field. A declared map is typed by hand, so it can drift from the code; a run that carries its own map always wins over it.
 
 Not using OpenTelemetry? Send bench events instead, one at a time or in batches:
 
@@ -131,7 +147,7 @@ curl -X POST http://127.0.0.1:8790/ingest -H 'Content-Type: application/json' -d
 
 ### Level 2: tell the story
 
-For what plain data can't explain, an app registers a **story**: JavaScript panels that draw its own runs (`BenchStory.register('<app id>', {panels, renderers})`, sent as the `story` string at registration). Each panel gets `ctx.mode` (`"presentation"` or `"engineering"`), so one panel can speak plainly to a room and show every score to an engineer. A map panel's `audience` (`both`, `presentation` or `engineering`) says which mode shows it.
+For what plain data can't explain (a situation too bespoke for any universal view, or extra color someone wants to add), an app ships a **story**: JavaScript panels that draw its own runs (`BenchStory.register('<app id>', {panels, renderers})`). With the library it's `instrument(..., story=lab.Story(file="story.js", panels=[...]))`: each run names the story file by its hash, and the bench serves it only from a file you trust (`AGENT_LAB_STORIES="<app id>=<path>"`) whose hash matches; a declared map sends it as the `story` string at registration. Story panels add to the generic views and never replace them. Each panel gets `ctx.mode` (`"presentation"` or `"engineering"`), so one panel can speak plainly to a room and show every score to an engineer. A map panel's `audience` (`both`, `presentation` or `engineering`) says which mode shows it.
 
 Test a story before anyone sees it. The story harness renders every panel at every event of your recordings, in both modes, and fails on a throw, an empty panel, `undefined`, `NaN` or `[object Object]`:
 
@@ -206,7 +222,7 @@ The Langfuse settings follow [Langfuse's OpenTelemetry docs](https://langfuse.co
 
 ## 🗺️ Roadmap
 
-Deploying the new lab, edge routing for loops in the flowchart, before-and-after comparisons of two architectures, and more scenarios. A client library, forwarding, an Agent Spec importer and a browser extension are on the Later list, with the reasons. See [ROADMAP.md](ROADMAP.md).
+Deploying the new lab, before-and-after comparisons of two architectures, and more scenarios. A TypeScript library, forwarding and a browser extension are on the Later list, with the reasons. See [ROADMAP.md](ROADMAP.md).
 
 ## 🧑‍💻 Development
 

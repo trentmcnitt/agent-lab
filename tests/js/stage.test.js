@@ -33,7 +33,19 @@ function ending(r) {
 }
 
 // ---- request, reply, numbers ---------------------------------------------------------------------
-test('request and reply: strings as they are; objects by field name, else the longest string', () => {
+test('request and reply: a map that declares its fields (app.io) is read exactly, never guessed', () => {
+  const topo = { app: { id: 'a', name: 'A', io: { request: 'body', reply: 'final', requester: ['who', 'team'] } } };
+  const ev = [{ event_type: 'run_started', node: '_run', ts: 0,
+                data: { input: { body: 'the request', message: 'a decoy named like a message', who: 'Ana', team: 'Ops', user_name: 'decoy' } } }];
+  assert.deepEqual(L.requestOf(ev, topo), { text: 'the request', who: 'Ana · Ops' });
+  assert.equal(L.replyOf({ final: 'the reply', answer: 'a decoy named like a reply' }, topo), 'the reply');
+  // a declared field that's empty this run is empty, not a guess from another field
+  assert.equal(L.replyOf({ final: null, answer: 'a decoy' }, topo), null);
+  assert.equal(L.requestOf([{ event_type: 'run_started', node: '_run', ts: 0, data: { input: { message: 'decoy' } } }], topo).text, null);
+  // a string input or output needs no declaration
+  assert.equal(L.replyOf('Done.', topo), 'Done.');
+});
+test('request and reply with no declaration (Level 0): strings as they are; objects by field name, else the longest string', () => {
   const ev = (input) => [{ event_type: 'run_started', node: '_run', ts: 0, data: { input } }];
   assert.deepEqual(L.requestOf(ev('hi there')), { text: 'hi there', who: '' });
   assert.equal(L.requestOf(ev({ run_id: 'r1', message: 'reset my VPN', user_name: 'Ana', role: 'admin' })).text, 'reset my VPN');
@@ -166,4 +178,14 @@ test('helpdesk req-020 at the end: handed over, the reply, and the AI\'s reason 
 test('helpdesk req-012 at the end: done, with the action\'s own title', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
   const c = ending(desk('req-012-approved'));
   assert.match(text(c.headline), /^Done: Open an IT ticket, approved by a person/);
+});
+
+test('a past step\'s badge: the path it took in the map\'s words, a search\'s count, a check\'s verdict', { skip: !haveDesk }, () => {
+  const r = desk('req-012-approved');
+  const steps = (id) => [{ events: r.events.filter((e) => e.node === id) }];
+  const edge = r.topo.edges.find((e) => e.from === 'classify' && e.from_branch === 'needs_write');
+  assert.equal(L.stepBadge(r.topo, r.events, 'classify', steps('classify')), '→ ' + edge.plain_label);
+  const handbook = r.topo.sources.find((s) => s.id === 'handbook');
+  assert.match(L.stepBadge(r.topo, r.events, 'retrieve', steps('retrieve')), new RegExp('^found \\d+ of ' + handbook.count + '$'));
+  assert.match(L.stepBadge(r.topo, r.events, 'approval_gate', steps('approval_gate')), /^✓ approved$|^→ /);
 });

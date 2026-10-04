@@ -119,3 +119,43 @@ def test_a_library_app_shows_up_live(bench):
     gate = [e["event_type"] for e in evs if e["node"] == "approval_gate"]
     assert gate == ["step_started", "gate_waiting", "gate_resolved", "step_finished"]
     assert [e["event_type"] for e in evs].count("run_started") == 1
+
+
+def test_the_quickstart_langgraph_app_shows_up_live(bench):
+    """The real LangGraph integration over a real socket: the example app, unchanged, run as its
+    README says, with only AGENT_LAB_URL pointing at this bench's port."""
+    example = ROOT / "examples/langgraph_quickstart"
+    env = {**os.environ, "AGENT_LAB_URL": BASE}
+    env.pop("VIRTUAL_ENV", None)
+    r = subprocess.run(["uv", "run", "--quiet", "--project", str(example), "python", "-m", "support_bot",
+                        "How do I reset my password?"], capture_output=True, text=True, timeout=300,
+                       cwd=example, env=env)
+    assert r.returncode == 0, r.stderr[-3000:]
+
+    end, runs = time.time() + 10, []
+    while time.time() < end:
+        runs = json.loads(_get("/runs")[2])
+        if runs and runs[0].get("status") == "ok":
+            break
+        time.sleep(0.2)
+    assert len(runs) == 1 and runs[0]["app"] == "support-assistant" and runs[0]["status"] == "ok", runs
+    manifest = json.loads(_get(f"/maps/{runs[0]['map_hash']}")[2])
+    assert manifest["derived"]["from"] == "langgraph" and manifest["app"]["io"] == {"request": "question", "reply": "answer"}
+    assert not [w for w in manifest["derived"]["warnings"] if w["severity"] == "error"]
+
+    with urllib.request.urlopen(BASE + "/stream?app=support-assistant", timeout=5) as resp:
+        evs = []
+        while not any(e["event_type"] == "run_finished" for e in evs):
+            line = resp.readline().decode()
+            if line.startswith("data: "):
+                evs.append(json.loads(line[6:]))
+    nodes = []
+    for e in evs:
+        if e["event_type"] == "step_started":
+            nodes.append(e["node"])
+    assert nodes == ["retrieve", "classify", "draft_answer", "check_grounding", "respond"]
+    on = {(e["node"], e["event_type"]) for e in evs}
+    assert {("retrieve", "retrieval"), ("classify", "llm_call"), ("classify", "decision"),
+            ("draft_answer", "llm_call"), ("check_grounding", "check_result")} <= on
+    started = next(e for e in evs if e["event_type"] == "run_started")
+    assert started["data"]["map_hash"] == runs[0]["map_hash"]

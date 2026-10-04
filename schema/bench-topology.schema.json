@@ -45,6 +45,28 @@
         "baseline": {
           "type": "string",
           "description": "What this job takes a person, as the app states it (e.g. \"~10-15 minutes\"); shown attributed. The viewer uses it when run_finished.data.baseline is absent."
+        },
+        "io": {
+          "type": "object",
+          "description": "Which fields of the run's input and output a person reads (written by the agentlab library from App(request=, reply=, requester=), each verified against the graph's state). Without it the viewer guesses from field names.",
+          "properties": {
+            "request": {
+              "type": "string",
+              "description": "The input field holding the request."
+            },
+            "reply": {
+              "type": "string",
+              "description": "The output field holding the reply."
+            },
+            "requester": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Input fields naming who asked, joined with ' · '."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "patternProperties": {

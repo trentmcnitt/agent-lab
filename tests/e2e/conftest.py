@@ -110,7 +110,8 @@ def live_bench(tmp_path_factory):
     if not _port_free(LIVE_PORT):
         pytest.skip(f"port {LIVE_PORT} is busy")
     tmp = tmp_path_factory.mktemp("live")
-    env = dict(os.environ, BENCH_LOG_DIR=str(tmp / "log"), BENCH_APPS_DIR=str(tmp / "apps"), BENCH_RECORDINGS_DIR=str(tmp / "rec"))
+    env = dict(os.environ, BENCH_LOG_DIR=str(tmp / "log"), BENCH_APPS_DIR=str(tmp / "apps"), BENCH_RECORDINGS_DIR=str(tmp / "rec"),
+               BENCH_MAPS_DIR=str(tmp / "maps"))
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "bench.server:app", "--port", str(LIVE_PORT), "--host", "127.0.0.1",
                              "--log-level", "warning"], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:

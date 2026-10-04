@@ -29,6 +29,10 @@ def test_run_manifest_node_spans_and_parents():
     assert node_span.parent.span_id == run_span.context.span_id
     assert attrs(manifest)["agentlab.manifest"] == doc().json
     assert attrs(manifest)["agentlab.manifest.hash"] == doc().hash
+    # the run-level facts the bench needs before the run span (exported last) arrives; no content
+    m = attrs(manifest)
+    assert m["agentlab.thread"] == "t1" and m["agentlab.run.resume"] is False and m["session.id"] == "s-1"
+    assert m["agentlab.content_mode"] == "full" and "agentlab.run.input" not in m
     a = attrs(run_span)
     assert a["agentlab.manifest.hash"] == doc().hash and "agentlab.manifest" not in a
     assert a["agentlab.kind"] == "run" and a["agentlab.app"] == "helpdesk" and a["agentlab.run"] == "t1:abcd1234"

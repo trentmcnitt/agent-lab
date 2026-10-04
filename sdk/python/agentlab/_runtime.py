@@ -161,9 +161,17 @@ def start_run(*, app_id: str, run_id: str, manifest: ManifestDoc | None = None,
         _set(attrs, sc.RUN_INPUT, _state.content(input))
     span = tracer.start_span(f"agentlab.run {app_id}", context=parent, attributes=attrs)
     if manifest is not None:
+        # The manifest span is exported first and the run span last, so the run-level facts the
+        # bench needs from the first moment (none of them content) ride on both: the thread and
+        # resume flag (a new-process resume joins its paused run at first sight), the content mode
+        # (no early event is mislabelled) and the session (a session-filtered stream sees step 1).
         m_attrs = common(app_id, run_id, None, sc.KIND_MANIFEST)
         m_attrs[sc.MANIFEST] = manifest.json
         m_attrs[sc.MANIFEST_HASH] = manifest.hash
+        m_attrs[sc.CONTENT_MODE] = state.content_mode
+        m_attrs[sc.RUN_RESUME] = bool(resume)
+        _set(m_attrs, sc.THREAD, thread)
+        _set(m_attrs, sc.SESSION_ID, session_id)
         tracer.start_span("agentlab.manifest", context=trace.set_span_in_context(span),
                           attributes=m_attrs).end()
     return Run(span, app_id, run_id)

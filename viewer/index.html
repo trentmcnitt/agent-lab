@@ -536,12 +536,15 @@
     getJSON(topoUrl).then(function (t) {
       if (t === null && q.get('app')) { var e404 = new Error('no map'); e404.status = 404; throw e404; }
       bench.setTopology(t);
-      if (t.story) bench.loadStory(t.app.id, null, base);
+      // A library app's map names its story by hash; the bench serves the trusted file only on a match.
+      if (t.story) bench.loadStory(t.app.id, null, base, typeof t.story === 'object' ? t.story.sha256 : null);
+      bench.useRunMaps(base);
       new BenchSources.LiveSource(bench, base, q.get('session'), q.get('app')).start();
     }).catch(function (e) {
       // Level 0: the app sends spans but never registered a map. Draw one from what arrives.
       if (e.status === 404 && q.get('app')) {
         bench.useInferredMap(q.get('app'));
+        bench.useRunMaps(base);           // a run that does carry a map replaces the inferred one
         new BenchSources.LiveSource(bench, base, q.get('session'), q.get('app')).start();
       } else fail('Could not load the map for this app: ' + e.message + '. Has the app registered with the bench?');
     });

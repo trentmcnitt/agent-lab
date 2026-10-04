@@ -27,8 +27,9 @@ def bench_adapter():
 
 
 def test_otlp_json_is_read_by_the_bench_adapter():
-    """The bench doesn't know agentlab.* yet (that is the bench step), but our spans are standard
-    OTLP + GenAI: today's reader already turns them into valid bench events."""
+    """What to_otlp_json writes is what the bench reads: one run (keyed by agentlab.run), with the
+    node as a step, the model call and the decision on it, all schema-valid bench events. The
+    full agentlab.* mapping is the bench's own suite (tests/test_agentlab_ingest.py)."""
     with testing.capture() as spans:
         run = _runtime.start_run(app_id="demo", run_id="r", input={"text": "hi"})
         node = run.open_node("classify")
@@ -47,3 +48,8 @@ def test_otlp_json_is_read_by_the_bench_adapter():
     assert events and all(not list(validator.iter_errors(e)) for e in events)
     llm = [e for e in events if e["event_type"] == "llm_call"]
     assert llm and llm[0]["data"]["input_tokens"] == 10
+    assert {e["run_id"] for e in events} == {"r"}
+    assert [e["event_type"] for e in events if e["node"] == "classify"] == \
+        ["step_started", "llm_call", "decision", "step_finished"]
+    decision = next(e for e in events if e["event_type"] == "decision")
+    assert decision["data"]["rationale"] == "because"

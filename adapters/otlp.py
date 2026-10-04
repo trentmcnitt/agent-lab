@@ -27,6 +27,7 @@ import base64
 import binascii
 import hashlib
 import json
+import math
 import re
 from collections import OrderedDict
 from pathlib import Path
@@ -307,6 +308,12 @@ def _hits(docs: Any, source: str | None) -> list[dict]:
         text = _first(d, "content", "text")
         if text is not None:
             h["text"] = text if isinstance(text, str) else json.dumps(text)
+        # Other numeric keys a retriever reports (e.g. bm25 beside a fused score) are kept, as the
+        # library sends them (SPEC 8.3): an app's story may show them.
+        for k, v in d.items():
+            if (k not in h and k not in ("id", "title", "score", "content", "text") and isinstance(v, (int, float))
+                    and not isinstance(v, bool) and math.isfinite(v)):
+                h[k] = v
         out.append(h)
     return out
 

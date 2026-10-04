@@ -105,7 +105,7 @@ def answer_run(inst, *, run_id="t1:aaaa0001", thread="t1", parent=None, redacted
     with activate(run.target(n, "retrieve")):
         if stale:  # the index is rebuilt after the run's map was taken: the search ran on another version
             register_handbook(HANDBOOK + [("sec-4", "4. Printers")])
-        lab.retrieved("handbook", [{"id": "sec-1", "title": "1. Passwords", "score": 0.9, "text": TEXT["sec-1"]},
+        lab.retrieved("handbook", [{"id": "sec-1", "title": "1. Passwords", "score": 0.9, "bm25": 7.25, "text": TEXT["sec-1"]},
                                    {"id": "sec-3", "title": "3. Access requests", "score": 0.4, "text": TEXT["sec-3"]}],
                       query="reset password")
     run.end_node(n)

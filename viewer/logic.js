@@ -192,6 +192,8 @@ export function reduce(run, ev, now) {
   var d = ev.data || {};
   var t = ev.event_type;
   if (t === 'step_started') run.explicit = true;
+  // The map this run carried (a run_updated may bring it late): the viewer draws the run with it.
+  if ((t === 'run_started' || t === 'run_updated') && typeof d.map_hash === 'string') run.mapHash = d.map_hash;
   if (t === 'run_started') { run.label = d.label || (d.input ? short(d.input, 90) : null); run.input = d.input; run.started = d; return; }
   // What the bench learned about the run after opening it (an agentlab run's input arrives on its
   // run span, which ends last; a map can arrive after the first steps): merged into run_started.
@@ -362,8 +364,12 @@ export function takenEdges(topo, events, seq) {
   return taken;
 }
 export function takenOut(topo, events, id) {
-  var taken = takenEdges(topo, events);
-  return ((topo && topo.edges) || []).filter(function (ed) { return ed.from === id && taken[ed.from + '>' + ed.to]; });
+  var taken = takenEdges(topo, events), picked = null;
+  var outs = ((topo && topo.edges) || []).filter(function (ed) { return ed.from === id && taken[ed.from + '>' + ed.to]; });
+  // Two branches to the same next step (a many-to-one path map): the run's decision names which.
+  events.forEach(function (e) { if (e.event_type === 'decision' && e.node === id && e.data && e.data.branch != null) picked = e.data.branch; });
+  var exact = picked == null ? [] : outs.filter(function (ed) { return ed.from_branch === picked; });
+  return exact.length ? exact : outs;
 }
 
 /* One line on a node box saying what it produced (extracted from bench.js's node preview).
@@ -398,6 +404,26 @@ export function preview(steps, mode, sourceCount, isCheck, topo) {
     });
   });
   return out ? String(out).replace(/\s+/g, ' ') : '';
+}
+
+/* A past step's one badge on Presentation's stage (and on the lab's front door, which draws its
+   maps with this same function at build time): the path a branching step took, in the map's
+   words; else its preview (a check's verdict, "found 4 of 16" for a search, a gate's outcome).
+   `steps`: the step's visits ([{events}]); `events`: the run's events shown so far; `counts`
+   (optional): item id -> its source's size, from sourceStates, when the caller already has it. */
+export function stepBadge(topo, events, id, steps, counts) {
+  var node = nodeOf(topo, id) || {};
+  if (!counts) {
+    counts = {};
+    sourceStates(topo, events).forEach(function (s) { s.items.forEach(function (it) { counts[it.id] = s.count; }); });
+  }
+  var outs = takenOut(topo, events, id).filter(function (ed) { return ed.from_branch || ed.when; });
+  var hitsCount = null;
+  steps.forEach(function (s) { s.events.forEach(function (e) { if (e.event_type === 'retrieval' && e.data && e.data.hits && e.data.hits[0]) hitsCount = counts[e.data.hits[0].id]; }); });
+  var badge = node.kind !== 'check' && outs.length ? '→ ' + (outs[0].plain_label || human(outs[0].from_branch || outs[0].when))
+    : preview(steps, 'presentation', hitsCount, node.kind === 'check', topo);
+  if (/^\d+ (of \d+|found)$/.test(badge)) badge = 'found ' + badge.replace(/ found$/, '');
+  return badge;
 }
 
 // ---- checks -------------------------------------------------------------------------------
@@ -1101,10 +1127,11 @@ export function mapChecks(topo, events) {
    bench.js only turns these objects into HTML. */
 
 /* The run's request and reply. A run's input/output may be a string or the app's own state object
-   (an agentlab run carries the graph's input and final state). For an object, the request text is
-   the first string field named like a message, the reply the first named like a response; failing
-   that, the longest string field. This key-name reading is a stopgap until the run declares which
-   field is the request and which the reply (see the 10-03 UI report's handoffs). */
+   (an agentlab run carries the graph's input and final state). A library app declares which fields
+   a person reads (map `app.io`: request, reply, requester; SPEC section 4, checked against the
+   graph's state by verify's R15), and those are read exactly. Only a run whose map declares
+   nothing (Level 0, an app with no library) falls back to guessing from field names: the first
+   string field named like a message or a response, else the longest string field. */
 var REQUEST_KEY = /(^|_)(message|text|query|question|prompt|input|request|content|task)$/i;
 var REPLY_KEY = /(^|_)(reply|response|answer|output|result|completion)$/i;
 var WHO_KEY = /^(requester|user|sender|author|customer|from|caller|asker)(_?name)?$/i;
@@ -1122,25 +1149,45 @@ function pickText(v, re) {
   var longest = keys.sort(function (a, b) { return v[b].length - v[a].length; })[0];
   return longest ? v[longest].trim() : null;
 }
-/* {text, who}: who is "<name> · <role>" when the input or run_started.data names them. */
-export function requestOf(events) {
-  var started = null;
+function isObj(v) { return v != null && typeof v === 'object' && !Array.isArray(v); }
+function ioOf(topo) { return (topo && topo.app && isObj(topo.app.io)) ? topo.app.io : {}; }
+function declared(v, field) {
+  if (!isObj(v) || !field) return undefined;               // undefined: nothing declared to read
+  var x = v[field];
+  if (x == null) return null;
+  if (typeof x === 'string') return x.trim() || null;
+  return JSON.stringify(x);
+}
+/* {text, who}: who is "<name> · <role>" from the declared requester fields, else when the input
+   or run_started.data names them. `topo` is the run's map (optional). */
+export function requestOf(events, topo) {
+  var started = null, io = ioOf(topo);
   events.forEach(function (e) { if (e.event_type === 'run_started' || e.event_type === 'run_updated') started = Object.assign({}, started || {}, e.data || {}); });
   var input = started && started.input;
-  var who = requesterOf(events);
-  if (!who && input && typeof input === 'object' && !Array.isArray(input)) {
-    var keys = stringFields(input);
-    var name = keys.filter(function (k) { return WHO_KEY.test(k); })[0];
-    var role = keys.filter(function (k) { return ROLE_KEY.test(k); })[0];
-    who = [name && input[name], role && input[role]].filter(Boolean).join(' · ');
+  var who = '';
+  if (isObj(input) && Array.isArray(io.requester) && io.requester.length) {
+    who = io.requester.map(function (f) { return declared(input, f); }).filter(Boolean).join(' · ');
+  } else {
+    who = requesterOf(events);
+    if (!who && isObj(input)) {
+      var keys = stringFields(input);
+      var name = keys.filter(function (k) { return WHO_KEY.test(k); })[0];
+      var role = keys.filter(function (k) { return ROLE_KEY.test(k); })[0];
+      who = [name && input[name], role && input[role]].filter(Boolean).join(' · ');
+    }
   }
-  return { text: pickText(input, REQUEST_KEY) || (started && started.label) || null, who: who || '' };
+  var text = declared(input, io.request);
+  if (text === undefined) text = pickText(input, REQUEST_KEY);
+  return { text: text || (started && started.label) || null, who: who || '' };
 }
-// The reply the run ended with, as text (a string output, or the response-named field of an object).
-export function replyOf(output) {
+// The reply the run ended with, as text: a string output, the map's declared reply field, else
+// (no declaration) the response-named field of an object.
+export function replyOf(output, topo) {
   if (output == null) return null;
   if (typeof output === 'string') return output.trim() || null;
-  if (typeof output !== 'object' || Array.isArray(output)) return null;
+  if (!isObj(output)) return null;
+  var d = declared(output, ioOf(topo).reply);
+  if (d !== undefined) return d;
   var keys = stringFields(output).filter(function (k) { return REPLY_KEY.test(k); });
   return keys.length ? output[keys[0]].trim() : null;
 }

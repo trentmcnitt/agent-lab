@@ -42,7 +42,7 @@ The reader is plain parsing (the `agentlab[agentspec]` extra is just PyYAML), ne
 
 1. **Declared map, with node ids that line up.** `python -m agentlab.agentspec flow.yaml --register http://127.0.0.1:8790` registers the map with a bench (`PUT /apps/<app_id>`, the declared-map tier). The bench uses it for that app's runs that don't carry a map of their own; a run from other OpenTelemetry instrumentation is that app's when its `service.name` equals the map's `app.id` (`adapters/otlp.py`), so pass `--app-id <service.name>` when the flow's name doesn't slug to it. Node ids are Agent Spec component ids, and pyagentspec's LangGraph loader names each LangGraph node with that same id (`_langgraphconverter.py:447`, `add_node(node_id, runnable)` where `node_id` is `node.id`). So any runtime telemetry keyed by LangGraph node lands on the right node.
 
-2. **Live runs through pyagentspec's LangGraph loader + `agentlab.langgraph.instrument`.** This works now, and every span is attributed:
+2. **Live runs through pyagentspec's LangGraph loader + `agentlab.langgraph.instrument`.** Every span is attributed:
 
    ```python
    from pyagentspec.adapters.langgraph import AgentSpecLoader
@@ -55,7 +55,14 @@ The reader is plain parsing (the `agentlab[agentspec]` extra is just PyYAML), ne
 
    Checked 10-03-26 (pyagentspec 26.4.0.dev0, LangGraph 1.2.12, a flow with no model nodes so nothing was called). Node spans carry the Agent Spec ids, and a `FlowNode`'s inner nodes come out as `container/inner` (`ask/inner_start`, `ask/inner_branch`, ...), the same ids this reader puts in the map. **But the map those runs carry is read from the loader's LangGraph graph, not from the flow file.** That means component ids as labels instead of names, every transition as a branch called `next` (the loader makes every edge conditional, `_langgraphconverter.py:367-379`), no descriptions or types, and no `FlowNode` inner nodes (the loader runs a subflow inside one node function, so the graph doesn't show them; their spans then arrive as R7 "node not in the map").
 
-3. **The missing piece (a handoff, not built):** let `agentlab.langgraph.instrument` take the structure it should attach, `instrument(graph, app=..., structure=agentspec.structure_from("flow.yaml"))`. The handler and the runtime attribution stay as they are; the runs then carry the flow file's map, whose ids match (point 2).
+3. **The flow file's map on live runs:** pass the file's structure to `instrument`, and the runs carry the flow file's map (names, descriptions, types, `FlowNode` inner nodes), whose ids match the spans (point 2):
+
+   ```python
+   from agentlab import agentspec
+   graph = instrument(graph, app=lab.App(name="Helpdesk triage"), structure=agentspec.structure_from("flow.yaml"))
+   ```
+
+   `instrument(structure=)` is tested in the library suite (`tests/test_app_io.py`) with a hand-built structure; a run through pyagentspec's loader with it was not re-run here (pyagentspec is in no dependency group).
 
 **Agent Spec Tracing is not read.** It is an in-process span API (`pyagentspec.tracing`: `SpanProcessor`, with span types such as `NodeExecutionSpan`, `LlmGenerationSpan`, `ToolExecutionSpan`, `AgentExecutionSpan`, `FlowExecutionSpan`), not OpenTelemetry. Mapping it is on the roadmap (architecture A10). `NodeExecutionSpan` carries the `Node` itself, so its component id is available to match the map's ids.
 

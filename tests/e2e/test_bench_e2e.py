@@ -240,6 +240,39 @@ def test_level0_pydantic_ai_draws_an_inferred_map(page, live_bench):
     assert "printer" not in p.inner_text(".eng select[data-f=runs]").lower()
 
 
+# ---- a library app, live: the run's own map, the declared request and reply -------------------
+def test_a_langgraph_app_live_draws_the_map_its_run_carried(page, live_bench):
+    """The page is open before the app ever runs (no map yet: Level 0). The quickstart's run
+    carries its map; the page switches to it and reads the request and reply the app declared."""
+    if not shutil.which("uv"):
+        pytest.skip("uv not installed")
+    p = page.page
+    p.goto(f"{live_bench}/?app=support-assistant&mode=presentation")
+    p.wait_for_selector("#bench.mode-presentation")
+    example = ROOT / "examples/langgraph_quickstart"
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    r = subprocess.run(["uv", "run", "--quiet", "--project", str(example), "python", "-m", "support_bot",
+                        "How do I reset my password?"], cwd=example, env={**env, "AGENT_LAB_URL": live_bench},
+                       capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stderr[-2000:]
+    # The run's own map (its words), not an inferred one.
+    p.locator(".pres .gnode[data-node=check_grounding]").wait_for(timeout=15_000)
+    assert not p.locator(".pres [data-p=inferred]").is_visible()
+    p.locator("[data-p=status]", has_text="Finished").wait_for(timeout=15_000)
+    # The declared fields: the request, and the reply rather than the whole final state as JSON.
+    assert "How do I reset my password?" in p.inner_text("[data-p=req]")
+    reply = p.locator("[data-p=bubble] .bb-quote.reply")
+    reply.wait_for(timeout=15_000)
+    said = r.stdout.strip().splitlines()[-1]
+    assert " ".join(reply.inner_text().split()) == " ".join(said.split()), (reply.inner_text(), said)
+    # Engineering: the map's own checks (from the app's verify, and from this run) are clean.
+    p.click(".pres .viewtoggle button[data-v=engineering]")
+    checks = p.locator(".eng .panel", has_text="Checks on this map")
+    checks.wait_for()
+    assert checks.locator(".mc-error, .mc-warning").count() == 0, checks.inner_text()
+    p.evaluate("localStorage.removeItem('bench.mode')")
+
+
 # ---- the stage: deep links, the presenter's keys, the recap ------------------------------------
 def test_deep_link_opens_paused_at_the_gate_with_the_exact_proposal(page, site):
     w = page

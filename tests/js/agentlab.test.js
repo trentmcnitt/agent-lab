@@ -173,3 +173,22 @@ test('mapChecks: an inferred map gets no run rules (it was made from these event
   assert.deepEqual(L.mapChecks(clean, [ev('_run', 'run_started', {}), ev('retrieve', 'step_started'),
     ev('classify', 'decision', { branch: 'answerable', cited: ['sec-1'] }), ev('grounding_check', 'step_started')]), []);
 });
+
+test('a run remembers the map it carried, through a late run_updated and a re-sort', () => {
+  const r = L.newRun('r');
+  L.reduce(r, ev('_run', 'run_started', { app: 'desk' }), 0);
+  assert.equal(r.mapHash, undefined);
+  L.reduce(r, ev('_run', 'run_updated', { map_hash: 'abc' }), 0);
+  assert.equal(r.mapHash, 'abc');
+  const rebuilt = L.rebuildRun(r, ev('retrieve', 'step_started', {}, { ts: 50 }), 0);
+  assert.equal(rebuilt.mapHash, 'abc');
+});
+
+test('two branches to the same step: the run\'s decision says which one it took', () => {
+  const topo = { app: { id: 'm', name: 'M' }, nodes: [{ id: 'c' }, { id: 'h' }],
+                 edges: [{ from: 'c', to: 'h', from_branch: 'needs_write' }, { from: 'c', to: 'h', from_branch: 'unsure' }] };
+  const events = [ev('c', 'step_started'), ev('c', 'decision', { branch: 'unsure' }), ev('c', 'step_finished'), ev('h', 'step_started')];
+  assert.deepEqual(L.takenOut(topo, events, 'c').map((e) => e.from_branch), ['unsure']);
+  // with no decision both are lit (R10 reports the ambiguity)
+  assert.equal(L.takenOut(topo, events.filter((e) => e.event_type !== 'decision'), 'c').length, 2);
+});
