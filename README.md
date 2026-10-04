@@ -307,7 +307,7 @@ The Langfuse settings follow [Langfuse's OpenTelemetry docs](https://langfuse.co
 
 **[agentlab.trentmcnitt.com](https://agentlab.trentmcnitt.com)** runs real apps on the bench, from recordings of real model calls:
 
-- **Slack Helpdesk Agent**: an example agent that answers IT requests, looks things up in a handbook, and asks a person before it changes anything.
+- **[Slack Helpdesk Agent](https://github.com/trentmcnitt/agent-lab-helpdesk)**: an example agent that answers IT requests, looks things up in a handbook, and asks a person before it changes anything.
 - **[Bespoke](https://github.com/trentmcnitt/bespoke-ai-vscode-ext)**: AI autocomplete for VS Code, across five models.
 - **[OpenTask](https://github.com/trentmcnitt/opentask)**: coming soon.
 
