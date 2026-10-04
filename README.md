@@ -192,7 +192,7 @@ uv run python -m agentlab lock my_app.graph:build_graph              # after re-
 
 In the same usability run, the engineer renamed a node, split one document index into two and added a branch, with nothing else touched. The renamed step, the new branch and both document sets appeared on the next run, and earlier runs kept their own map. `verify --strict` failed with R1 (a panel still naming the old step) and R6 (worded code changed since `lock`); a separate branch rename failed with R2 (a branch word naming a branch the code no longer has, with the real ones listed). It passed again once the words were fixed and re-locked.
 
-[`examples/langgraph_quickstart`](examples/langgraph_quickstart) is a complete app with every kind of line, a scripted model (no API key) and its own CI test. [`sdk/python`](sdk/python) is the library's guide: redaction, cost, sharing your app's OpenTelemetry provider, gates and every rule.
+[`examples/langgraph_quickstart`](examples/langgraph_quickstart) is a complete app with every kind of line, a scripted model (no API key) and its own CI test. [`examples/agent_loop`](examples/agent_loop) is one step that runs a whole tool-using agent (the bench shows its model and tool calls in the order they started, two of them at once). [`sdk/python`](sdk/python) is the library's guide: redaction, cost, sharing your app's OpenTelemetry provider, gates and every rule.
 
 ### 3. Open Agent Spec
 
