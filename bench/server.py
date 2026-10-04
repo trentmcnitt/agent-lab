@@ -32,17 +32,20 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from adapters import otlp as otlp_adapter
-from bench.stories import read_story, trusted_stories
+from bench.stories import dev_mode, read_story, trusted_stories
 
 ROOT = Path(__file__).resolve().parents[1]
 EVENT_SCHEMA = Draft202012Validator(json.loads((ROOT / "schema/bench-event.schema.json").read_text()))
 TOPO_SCHEMA = Draft202012Validator(json.loads((ROOT / "schema/bench-topology.schema.json").read_text()))
-LOG_DIR = Path(os.environ.get("BENCH_LOG_DIR", ROOT / "data/log"))
-APPS_DIR = Path(os.environ.get("BENCH_APPS_DIR", ROOT / "data/apps"))
+# Everything the bench keeps goes under one directory: BENCH_DATA_DIR (default: data/ in this
+# checkout), so a separate project's runs can be kept apart. Each part can still be moved on its own.
+DATA_DIR = Path(os.environ.get("BENCH_DATA_DIR", ROOT / "data")).expanduser()
+LOG_DIR = Path(os.environ.get("BENCH_LOG_DIR", DATA_DIR / "log"))
+APPS_DIR = Path(os.environ.get("BENCH_APPS_DIR", DATA_DIR / "apps"))
 # Recordings an app hands over (e.g. its demo runs) go here; the bench's own examples ship in examples/.
-REC_DIR = Path(os.environ.get("BENCH_RECORDINGS_DIR", ROOT / "data/recordings"))
+REC_DIR = Path(os.environ.get("BENCH_RECORDINGS_DIR", DATA_DIR / "recordings"))
 # Maps library apps sent with their runs, one file per hash (deduplicated across runs).
-MAPS_DIR = Path(os.environ.get("BENCH_MAPS_DIR", ROOT / "data/maps"))
+MAPS_DIR = Path(os.environ.get("BENCH_MAPS_DIR", DATA_DIR / "maps"))
 MAX_STORY = 512 * 1024
 MAX_EVENTS = int(os.environ.get("BENCH_MAX_EVENTS", "50000"))
 MAX_BODY = 5 * 1024 * 1024
@@ -160,7 +163,7 @@ class Store:
             want = st.get("sha256") if isinstance(st, dict) else None
         if want is None:
             return None, "no story: this app's map names none"
-        return read_story(path, app_id, want)
+        return read_story(path, app_id, want, dev=dev_mode())
 
     @staticmethod
     def matches(ev: dict, app_of: str | None, sid: str | None, app: str | None) -> bool:
@@ -291,6 +294,9 @@ async def stream(request: Request) -> Response:
             if backlog:
                 for ev in store.backlog(sid, app_id):
                     yield f"data: {json.dumps(ev)}\n\n"
+                # What came before this line already happened: the viewer shows it at once rather
+                # than replaying it at the live pace (a named event, so older viewers ignore it).
+                yield "event: caught_up\ndata: {}\n\n"
             while True:
                 try:
                     ev = await asyncio.wait_for(q.get(), timeout=15)
@@ -347,7 +353,10 @@ async def get_story(request: Request) -> Response:
     if src is None:
         return Response(f"/* {why} */", media_type="text/javascript", status_code=404,
                         headers={"X-Agent-Lab-Story": why})
-    return Response(src, media_type="text/javascript", headers={"Cache-Control": "no-store"})
+    headers = {"Cache-Control": "no-store"}
+    if why != "ok":                       # served anyway (dev mode): Engineering says so
+        headers["X-Agent-Lab-Story"] = why
+    return Response(src, media_type="text/javascript", headers=headers)
 
 
 async def get_map(request: Request) -> Response:

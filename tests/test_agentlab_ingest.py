@@ -389,6 +389,22 @@ def test_a_story_is_served_only_from_a_trusted_file_with_the_runs_hash(c, lib, t
     assert c.get(f"/apps/{APP}/story.js?sha256={'f' * 64}").status_code == 404
 
 
+def test_story_dev_mode_serves_the_edited_file_and_says_so(c, lib, tmp_path, monkeypatch):
+    """Writing a story: with AGENT_LAB_STORIES_DEV the trusted file is served as it is now, with a
+    header the viewer shows in Engineering; without it, the hash is enforced (as above)."""
+    c.post("/v1/traces", json=lib["answer"]["batches"][0])
+    want = lib["answer"]["manifest"]["story"]["sha256"]
+    changed = tmp_path / "changed.js"
+    changed.write_text(lib["_story"].read_text() + "// edited\n")
+    srv.store.story_files = {APP: changed}
+    monkeypatch.setenv("AGENT_LAB_STORIES_DEV", "1")
+    r = c.get(f"/apps/{APP}/story.js?sha256={want}")
+    assert r.status_code == 200 and r.text.endswith("// edited\n")
+    assert "dev mode" in r.headers["x-agent-lab-story"]
+    monkeypatch.delenv("AGENT_LAB_STORIES_DEV")
+    assert c.get(f"/apps/{APP}/story.js?sha256={want}").status_code == 404
+
+
 def test_trusted_stories_parsing(tmp_path):
     got = srv.trusted_stories(f"a={tmp_path}/a.js; b = {tmp_path}/b.js ;bogus;")
     assert got == {"a": tmp_path / "a.js", "b": tmp_path / "b.js"}

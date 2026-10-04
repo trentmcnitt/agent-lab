@@ -120,7 +120,7 @@
               "person",
               "app"
             ],
-            "description": "Who does this step. Default from kind: llm->ai, gate->person, check->rule, anything else->app."
+            "description": "Who does this step. Default from kind: llm->ai, gate->person, check->rule; anything else: ai when the run shows the step called the model, else app."
           },
           "moment": {
             "type": "boolean",

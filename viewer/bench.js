@@ -212,10 +212,12 @@
     if (this._storyKeys[appId + '#' + sha256]) return;
     this._storyKeys[appId + '#' + sha256] = true;
     fetch(url + '?sha256=' + encodeURIComponent(sha256)).then(function (r) {
-      if (r.ok) return r.text().then(function (t) { self.storyNote = null; inject(t); });
-      self.storyNote = r.headers.get('X-Agent-Lab-Story') || ('the bench did not serve the story (' + r.status + ')');
+      // Served with a note (the bench's story dev mode): shown, and said in Engineering.
+      var why = r.headers.get('X-Agent-Lab-Story');
+      if (r.ok) return r.text().then(function (t) { self.storyNote = why ? { severity: 'info', message: why } : null; inject(t); });
+      self.storyNote = { severity: 'warning', message: why || ('the bench did not serve the story (' + r.status + ')') };
       self.render();
-    }).catch(function (e) { self.storyNote = 'the story could not be fetched: ' + e.message; self.render(); });
+    }).catch(function (e) { self.storyNote = { severity: 'warning', message: 'the story could not be fetched: ' + e.message }; self.render(); });
   };
 
   /* Live: draw each run with the map it carried. A run_started/run_updated names its map's hash;
@@ -711,7 +713,7 @@
     var rows = lg().mapChecks(this.topo, run.events);
     // A story the bench wouldn't serve (its file differs from the one this run was built with, or
     // isn't trusted) is a finding about this map too: the generic views render instead.
-    if (this.storyNote) rows = [{ code: 'story', severity: 'warning', message: this.storyNote, from: 'run' }].concat(rows);
+    if (this.storyNote) rows = [{ code: 'story', severity: this.storyNote.severity, message: this.storyNote.message, from: 'run' }].concat(rows);
     var bad = rows.filter(function (r) { return r.severity !== 'info'; }).length;
     P.el.classList.toggle('empty', !rows.length);
     P.count.textContent = bad ? ' ' + bad : '';
@@ -834,6 +836,14 @@
     }).join(''));
   };
 
+  // A badge too long for its box ends at a word, with "…" (the whole of it in the tooltip).
+  function clipWords(s, max) {
+    s = String(s || '');
+    if (s.length <= max) return s;
+    var cut = s.slice(0, max - 1), sp = cut.lastIndexOf(' ');
+    return (sp > max * 0.5 ? cut.slice(0, sp) : cut).replace(/[\s,.;:–-]+$/, '') + '…';
+  }
+
   // ---- Presentation: the stage ------------------------------------------------------------
   /* The map is the stage (layout.js at a presentation geometry), the run's path lit and numbered
      in run order, past steps keeping a one-line badge. ONE callout bubble beside it, joined to the
@@ -881,16 +891,17 @@
     // Fit the whole map in its column, by width and height (stacked on a phone: by width only).
     function fit() {
       var availW = sec.clientWidth - 8 || Lay.W, availH = sec.clientHeight - 8;
-      var k = Math.min(1, availW / Lay.W);
+      // The map alone (M) has the whole stage: it grows into it, up to half again its size.
+      var k = Math.min(self.mapOnly ? 1.5 : 1, availW / Lay.W);
       if (global.innerWidth > 640 && availH > 80) k = Math.min(k, availH / Lay.H);
       k = Math.max(k, 0.3);
       self._fitK = k;
-      gr.style.transform = k < 1 ? 'scale(' + k + ')' : '';
+      gr.style.transform = k !== 1 ? 'scale(' + k + ')' : '';
       gr.style.transformOrigin = 'top left';
       var padX = Math.max(0, (availW - Lay.W * k) / 2), padY = global.innerWidth > 640 ? Math.max(0, (availH - Lay.H * k) / 2) : 0;
       gr.style.marginLeft = padX + 'px';
       gr.style.marginTop = padY + 'px';
-      gr.style.marginBottom = k < 1 ? (-(1 - k) * Lay.H) + 'px' : '';
+      gr.style.marginBottom = k !== 1 ? (-(1 - k) * Lay.H) + 'px' : '';
     }
     this._fit = fit;
     fit();
@@ -935,7 +946,8 @@
     g.querySelectorAll('.gnode').forEach(function (n) {
       var id = n.getAttribute('data-node'), steps = ran[id] || [], last = steps[steps.length - 1];
       var node = L.nodeOf(topo, id) || {};
-      var cls = 'gnode snode a-' + L.actorOf(node) + ' kind-' + (node.kind || 'step');
+      var actor = L.actorOf(node, S.events);
+      var cls = 'gnode snode a-' + actor + ' kind-' + (node.kind || 'step');
       var shownOpen = last && last.ve > now;
       if (!steps.length) cls += finished ? ' untaken' : ' idle';
       else if (last.status === 'error' && !shownOpen) cls += ' error';
@@ -947,6 +959,9 @@
       if (focus === id) cls += ' focus';
       if (self.selectedNode === id) cls += ' selected';
       if (n.className !== cls) n.className = cls;
+      // An unworded step's actor is read from the run (it called the AI: the AI's), so its chip follows.
+      var chip = n.querySelector('.actor'), cw = ACTOR_CHIP[actor] || actor;
+      if (chip && chip.textContent !== cw) { chip.textContent = cw; chip.className = 'actor actor-' + actor; }
       var num = n.querySelector('.s-num');
       var nv = nums[id] ? String(nums[id]) : '';
       if (num.textContent !== nv) num.textContent = nv;
@@ -954,9 +969,10 @@
       // A past step keeps one badge: the path it took, or its verdict, or what it found.
       var badge = '';
       if (steps.length && focus !== id && !S.starting[id]) badge = L.stepBadge(topo, S.events, id, steps, counts);
-      else if (!steps.length && finished && node.kind === 'check') badge = '– not needed';
-      var gp = n.querySelector('.gp');
-      if (gp.textContent !== badge) gp.textContent = badge;
+      // Finished: every box the run didn't reach says so, so none reads as still to come.
+      else if (!steps.length && finished) badge = '– not needed';
+      var gp = n.querySelector('.gp'), shown = clipWords(badge, self._stageGeom === 'pane' ? 20 : 25);
+      if (gp.textContent !== shown) { gp.textContent = shown; gp.title = shown === badge ? '' : badge; }
       gp.parentNode.hidden = !badge;
     });
     g.querySelectorAll('.edge').forEach(function (e) {
@@ -999,6 +1015,7 @@
     else if (act === 'bigtext') { this.bigText = !this.bigText; }
     else if (act === 'maponly') { this.toggleMapOnly(); return; }
     else if (act === 'recap') { this.recapOpen = !this.recapOpen; this.selectedNode = null; }
+    else if (act === 'keys') { this.keysOpen = !this.keysOpen; }
     else if (act === 'stepthrough') { this.selectedNode = null; this.recapOpen = false; this.stepThrough(); return; }
     else if (this.transport && this.transport[act]) { this.selectedNode = null; this.recapOpen = false; this.presItem = null; this.transport[act](); return; }
     else return;
@@ -1012,11 +1029,17 @@
   Bench.prototype.openRecap = function (on) { this.recapOpen = on !== false; this.selectedNode = null; this.render(); };
 
   /* A presenter's keys, and a clicker's (it sends PageUp/PageDown): → Space PageDown go forward one
-     step (and from the last step to the recap), ← PageUp go back (out of the recap first), M shows
-     the map alone, R the recap, Esc closes what's open. */
+     step (and from the last step to the recap), ← PageUp go back (out of the recap first), Home the
+     first step, End the end, M shows the map alone, R the recap, ? the keys, Esc closes what's
+     open. In the recap, the forward and back keys (and ↓ ↑) scroll it first when it's taller than
+     the screen, so the whole recap can be shown from a clicker. */
+  var KEYS_HELP = [['→  Space  PageDown', 'next step (from the last: the recap)'], ['←  PageUp', 'back one step'],
+                   ['Home', 'the first step'], ['End', 'the end'], ['R', 'the recap: the run in four answers'], ['M', 'the map alone'],
+                   ['?', 'these keys'], ['Esc', 'close what’s open']];
   Bench.prototype._presKey = function (e) {
     if (e.key === 'Escape') {
-      if (this.overlay) this.overlay = null;
+      if (this.keysOpen) this.keysOpen = false;
+      else if (this.overlay) this.overlay = null;
       else if (this.recapOpen) this.recapOpen = false;
       else if (this.selectedNode) this.selectedNode = null;
       else return;
@@ -1027,15 +1050,32 @@
     var tag = (e.target && e.target.tagName) || '';
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;
     var k = e.key;
+    if (k === '?') { e.preventDefault(); this.keysOpen = !this.keysOpen; this.render(); return; }
     if (k === 'm' || k === 'M') { e.preventDefault(); this.toggleMapOnly(); return; }
     if (k === 'r' || k === 'R') { e.preventDefault(); this.openRecap(!this.recapOpen); return; }
     var fwd = k === 'ArrowRight' || k === 'PageDown' || k === ' ', back = k === 'ArrowLeft' || k === 'PageUp';
+    var down = k === 'ArrowDown', up = k === 'ArrowUp';
+    if (this.recapOpen && (fwd || back || down || up)) {
+      var b = this.p.bubble, room = b.scrollHeight - b.clientHeight;
+      var by = (down || up) ? 80 : Math.max(80, b.clientHeight * 0.8);
+      if ((fwd || down) && b.scrollTop < room - 1) { e.preventDefault(); b.scrollTop = Math.min(room, b.scrollTop + by); return; }
+      if ((back || up) && b.scrollTop > 0) { e.preventDefault(); b.scrollTop = Math.max(0, b.scrollTop - by); return; }
+      if (down || up) { e.preventDefault(); return; }
+    }
+    if (this.keysOpen) { this.keysOpen = false; this.render(); }
+    if (k === 'Home' || k === 'End') {
+      e.preventDefault();
+      this.presItem = null; this.selectedNode = null; this.recapOpen = false;
+      var go = this.transport && this.transport[k === 'Home' ? 'first' : 'end'];
+      if (go) go(); else this.render();
+      return;
+    }
     if (!fwd && !back) return;
     e.preventDefault();
     this.presItem = null;
     if (back && this.recapOpen) { this.openRecap(false); return; }
     if (this.selectedNode) { this.selectedNode = null; this.render(); return; }
-    var atEnd = this._tstateShown === 'done' || (!this.transport && this._lastShown && this._lastShown.finished);
+    var atEnd = this.tstate === 'done' || (!this.transport && this._lastShown && this._lastShown.finished);
     if (fwd && atEnd) { if (!this.recapOpen) this.openRecap(true); return; }
     if (!this.transport) return;
     this.transport[fwd ? 'next' : 'back']();
@@ -1060,13 +1100,17 @@
     // Header: who asked and what (beside a live app its own pane shows them), and where it stands.
     var req = run ? L.requestOf(run.events, topo) : { text: null, who: '' };
     var beside = this.source === 'parent';
-    setHTML(p.req, beside ? '' : req.text ? '<span title="' + esc(req.text) + '">“' + esc(req.text.replace(/\s+/g, ' ')) + '”</span>' : '<span class="muted">' + (run ? '' : 'Waiting for a request…') + '</span>');
+    // The whole request, always: a trick hidden at its end is the point of some runs. A long one
+    // is set smaller rather than cut.
+    var rlen = req.text ? req.text.length : 0;
+    p.req.className = 'ps-req' + (rlen > 320 ? ' r-xlong' : rlen > 170 ? ' r-long' : '');
+    setHTML(p.req, beside ? '' : req.text ? '<span>“' + esc(req.text.replace(/\s+/g, ' ')) + '”</span>' : '<span class="muted">' + (run ? '' : 'Waiting for a request…') + '</span>');
     setHTML(p.who, beside ? '' : esc(req.who));
     var oc = run ? L.outcome(topo, events) : { text: '', done: false };
     var st = !run ? { cls: 'idle', text: 'Waiting for a request' }
-      : oc.done ? { cls: /^Handed/.test(oc.text) ? 'handed' : /^(Stopped|Something)/.test(oc.text) ? 'bad' : 'ok', text: 'Finished · ' + oc.text }
+      : oc.done ? { cls: /^Handed/.test(oc.text) ? 'handed' : /^(Stopped|Something)/.test(oc.text) ? 'bad' : 'ok', text: oc.text === 'Finished' ? 'Finished' : 'Finished · ' + oc.text }
       : /^Waiting/.test(oc.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' }
-      : (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping') ? { cls: 'paused', text: 'Paused · → for the next step' }
+      : (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping') ? { cls: 'paused', text: 'Paused · → or PageDown: next step · ? keys' }
       : { cls: 'running', text: oc.text === 'Something went wrong' ? oc.text : 'Running' };
     setHTML(p.status, '<span class="ps-pill st-' + st.cls + '"><i></i>' + esc(st.text) + '</span>');
     setHTML(p.transport, this._transportHTML(finished, run, S));
@@ -1081,6 +1125,8 @@
     if (!run) html = '<div class="bb bb-empty"><p class="bb-headline">' + (beside ? 'Nothing has run yet. Pick a request in the app, and this side shows what the AI does with it.' : 'Nothing has run yet.') + '</p></div>';
     else if (this.recapOpen) html = this._recapHTML(run, events, finished, S);
     else html = S.focus ? this._bubbleHTML(run, events, S.focus, finished, S) : '<div class="bb bb-empty"><p class="bb-headline">Starting…</p></div>';
+    if (this.keysOpen) html = '<div class="bb ps-keys"><div class="bb-head"><span class="bb-name">Keys</span><button class="p-x" data-act="keys" title="Close (Esc)">✕</button></div>' +
+      '<dl class="bb-fields">' + KEYS_HELP.map(function (x) { return '<dt><kbd>' + esc(x[0]) + '</kbd></dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl></div>';
     setHTML(p.bubble, html);
     p.bubble.classList.toggle('is-recap', !!(run && this.recapOpen));
     if (this.overlay && run) {
@@ -1177,8 +1223,8 @@
     var self = this;
     var nums = '<div class="bb-counts">' +
       (s.count != null ? '<span><b>' + lg().fmtNum(s.count) + '</b> available</span><i>→</i>' : '') +
-      (!s.asked ? '<span class="c-given"><b>' + s.found + '</b> found · given to the AI: <b class="unk">not yet</b></span>'
-        : s.givenKnown ? '<span class="c-given"><b>' + s.given + '</b> given to the AI</span>' : '<span class="c-given"><b>' + s.found + '</b> found · given to the AI: <b class="unk">not known</b></span>') +
+      (!s.asked ? '<span class="c-given"><b>' + s.found + '</b> found <span class="unk">(the AI hasn’t been asked anything yet)</span></span>'
+        : s.givenKnown ? '<span class="c-given"><b>' + s.given + '</b> given to the AI</span>' : '<span class="c-given"><b>' + s.found + '</b> found <span class="unk">(whether the AI was given them isn’t recorded)</span></span>') +
       (s.asked ? '<i>→</i><span class="c-relied"><b>' + s.relied + '</b> relied on</span>' : '') + '</div>';
     var compact = s.items.length > 24;
     var tiles = '<div class="bb-tiles' + (compact ? ' compact' : '') + '">' + s.items.map(function (it, i) {
@@ -1186,8 +1232,11 @@
       return '<button class="bb-tile st-' + esc(it.state) + (it.relied ? ' relied' : '') + (self.presItem === it.id ? ' sel' : '') + '" data-act="item" data-arg="' + esc(it.id) + '" title="' + esc(it.title) + '">' +
         '<span class="t-face">' + esc(face) + '</span><span class="t-title">' + esc(it.title) + '</span>' + (it.rank ? '<span class="t-rank">#' + it.rank + '</span>' : '') + '</button>';
     }).join('') + '</div>';
-    var legend = '<div class="bb-legend"><span><i class="lg st-could"></i>available</span><span><i class="lg st-given"></i>given to the AI</span><span><i class="lg relied"></i>relied on</span>' +
-      (s.items.some(function (it) { return it.state === 'found'; }) ? '<span><i class="lg st-found"></i>found, not given</span>' : '') + '</div>';
+    var ranked = s.items.some(function (it) { return it.rank; });
+    var legend = '<div class="bb-legend"><span><i class="lg st-could"></i>available</span>' +
+      (s.items.some(function (it) { return it.state === 'found'; }) ? '<span><i class="lg st-found"></i>found by the search</span>' : '') +
+      '<span><i class="lg st-given"></i>given to the AI</span><span><i class="lg relied"></i>relied on</span>' +
+      (ranked && !compact ? '<span class="lg-r"><b class="lg-rank">#1</b>the search’s best match</span>' : '') + '</div>';
     var sel = s.items.filter(function (it) { return it.id === self.presItem; })[0];
     var item = sel ? '<div class="b-item"><b>' + esc(sel.title) + '</b> <span class="muted">' + esc(sel.text ? (sel.state === 'given' ? '· given to the AI, word for word' : '· found by the search') : '· not read this run') + '</span>' +
       (sel.text ? '<pre class="io">' + esc(sel.text) + '</pre>' : '') + '</div>' : '';
@@ -1310,9 +1359,12 @@
     var lookedA = rc.looked.length === 1 ? '<b>' + esc(rc.looked[0].title) + ':</b> ' + esc(rc.looked[0].line)
       : rc.looked.length ? esc(rc.looked.some(function (s) { return s.found; }) ? 'What it was given, and what its answer rests on' : 'Nothing was looked up this time') : 'The app doesn’t say';
     var checks = rc.checked.length ? '<ul class="rc-checks">' + rc.checked.map(function (c) {
-      return '<li class="c-' + esc(c.state) + '"><span class="bb-sym">' + ({ passed: '✓', failed: '✕', not_on_path: '–', ran: '•', running: '…', pending: '·' }[c.state] || '•') + '</span><b>' + esc(c.label.replace(/^./, function (x) { return x.toUpperCase(); })) + '</b> ' + esc(c.line.replace(/^[✓✕–]\s*/, '')) + '</li>';
+      return '<li class="c-' + esc(c.state) + '"><span class="bb-sym">' + ({ passed: '✓', failed: '✕', not_on_path: '–', ran: '•', running: '…', pending: '·' }[c.state] || '•') + '</span><span><b>' + esc(c.label.replace(/^./, function (x) { return x.toUpperCase(); })) + '</b> ' + esc(c.line.replace(/^[✓✕–]\s*/, '')) + '</span></li>';
     }).join('') + '</ul>' : '';
-    var nChecks = rc.checked.length;
+    var cc = rc.checkCount;
+    var checkedA = !rc.checked.length ? 'The app declares no checks'
+      : [cc.ran ? cc.ran + (cc.ran === 1 ? ' check ran' : ' checks ran') : 'No check ran',
+         cc.notNeeded ? cc.notNeeded + ' not needed this time' : '', cc.pending ? cc.pending + ' not reached yet' : ''].filter(Boolean).join(' · ');
     var signed = rc.signed.line + (rc.signed.state === 'approved' || rc.signed.state === 'denied' ? '' : '');
     var pair = this.pair && (rc.signed.state === 'approved' || rc.signed.state === 'denied') ? '<a class="p-btn" href="' + esc(this.pair.href) + '">' + esc(this.pair.text) + '</a>' : '';
     var tr = topo.app && topo.app.track_record;
@@ -1320,9 +1372,10 @@
       '<div class="bb-head"><span class="rc-k">Recap</span><span class="bb-name">The run in four answers</span>' + (finished ? '' : '<span class="bb-tag t-now">So far</span>') +
         '<button class="p-x" data-act="recap" title="Back to the steps (← or Esc)">✕</button></div>' +
       '<div class="bb-body">' +
-      q('What did it do?', '<b>' + esc(rc.did.text) + '</b>', path) +
+      q('What did it do?', '<b>' + esc(rc.did.text) + '</b>', path +
+        (rc.did.why ? '<div class="rc-why"><span>Why, in the AI’s words:</span><blockquote class="bb-quote">' + esc(rc.did.why) + '</blockquote></div>' : '')) +
       q('What did it look at?', lookedA, looked) +
-      q('How was it checked?', nChecks ? esc(nChecks + (nChecks === 1 ? ' check' : ' checks')) : 'The app declares no checks', checks) +
+      q('How was it checked?', esc(checkedA), checks) +
       q('Did a person sign off?', esc(signed), pair) +
       (rc.never.length ? '<p class="rc-never"><span>It can never:</span> ' + rc.never.map(esc).join(' · ') + '</p>' : '') +
       (tr ? '<p class="rc-record"><span>How it’s been tested (the app says):</span> ' + esc(tr) + '</p>' : '') +
@@ -1342,9 +1395,11 @@
     if (cl) bits.push(esc(cl));
     var base = finished ? L.baselineOf(events, topo) : null;
     var never = topo.never || [];
-    if (base) bits.push('<span class="muted">By hand:</span> ' + esc(base));
-    else if (never.length) bits.push('<span class="muted">Can never:</span> ' + never.map(esc).join(' · '));
-    return '<div class="p-bline">' + bits.join(' <span class="sep">·</span> ') + '</div>';
+    if (base) bits.push('<span class="muted">A person doing this by hand takes</span> ' + esc(base));
+    else if (never.length) bits.push('<span class="muted">It can never:</span> ' + never.map(esc).join(' · '));
+    var line = bits.join(' <span class="sep">·</span> ');
+    // One line that never wraps (a wrap would move the stage between presses); all of it on hover.
+    return '<div class="p-bline" title="' + esc(line.replace(/<[^>]+>/g, '')) + '">' + line + '</div>';
   };
 
   // "What the AI was given": the run's model calls, as plain blocks, with retrieved text marked.
@@ -1352,24 +1407,30 @@
     var L = lg(), calls = L.givenBlocks(this.topo, events), focus = this.overlay && this.overlay.focus;
     var note = L.privacyLine(this.topo, events);
     var anyHit = false;
+    var anyRelied = false;
+    // A value with the map's words beside it: "needs a change (needs_write)".
+    function worded(v, w) { return w ? '<b>' + esc(w) + '</b> <span class="muted">(' + esc(v) + ')</span>' : esc(v); }
     var body = calls.map(function (c) {
-      var blocks = c.blocks.map(function (b) {
+      // The answer first: it is what the room is waiting for; what it was given follows.
+      var ordered = c.blocks.filter(function (b) { return b.role === 'output'; }).concat(c.blocks.filter(function (b) { return b.role !== 'output'; }));
+      var blocks = ordered.map(function (b) {
         if (b.role === 'form') {
           return '<div class="g-block g-form"><div class="g-role">' + esc(b.label) + '</div><div class="g-note">The app sent this with its request: the fields the AI\u2019s answer had to fill in, and what it was told each one means.</div>' +
             '<dl class="g-fields">' + b.fields.map(function (f) {
-              return '<dt>' + esc(f.name.replace(/_/g, ' ')) + '</dt><dd>' + (f.description ? esc(f.description) : '<span class="muted">no description</span>') +
-                (f.choices ? '<div class="muted">one of: ' + esc(f.choices.join(' · ')) + '</div>' : '') + '</dd>';
+              return '<dt>' + esc(f.name.replace(/_/g, ' ')) + '</dt><dd>' + (f.description ? esc(f.description) : '') +
+                (f.choices ? '<div class="g-choices">one of: ' + f.choices.map(function (x, i) { return worded(x, f.plain && f.plain[i]); }).join(' · ') + '</div>' : '') + '</dd>';
             }).join('') + '</dl></div>';
         }
         var segs = b.segments.map(function (sg) {
           if (!sg.hit) return esc(sg.text);
           anyHit = true;
-          return '<span class="hlwrap"><span class="hltag">from ' + esc(sg.hit.source ? sg.hit.source + ': ' : '') + esc(sg.hit.title) + '</span><mark>' + esc(sg.text) + '</mark></span>';
+          if (sg.hit.relied) anyRelied = true;
+          return '<span class="hlwrap' + (sg.hit.relied ? ' relied' : '') + '"><span class="hltag">' + (sg.hit.relied ? '★ relied on · ' : '') + 'from ' + esc(sg.hit.source ? sg.hit.source + ': ' : '') + esc(sg.hit.title) + '</span><mark>' + esc(sg.text) + '</mark></span>';
         }).join('');
         // A one-object JSON answer reads as a filled-in form; its exact text stays one click away.
         if (b.answer) {
           return '<div class="g-block g-output"><div class="g-role">' + esc(b.label) + '</div><dl class="g-fields g-answer">' + b.answer.map(function (f) {
-              return '<dt>' + esc(f.name.replace(/_/g, ' ')) + '</dt><dd>' + esc(f.value) + (/confidence/i.test(f.name) ? ' <span class="muted">(the AI\u2019s own estimate, not measured accuracy)</span>' : '') + '</dd>';
+              return '<dt>' + esc(f.name.replace(/_/g, ' ')) + '</dt><dd>' + worded(f.value, f.plain) + (/confidence/i.test(f.name) ? ' <span class="muted">(the AI\u2019s own estimate, not measured accuracy)</span>' : '') + '</dd>';
             }).join('') + '</dl><details class="g-raw"><summary>its exact text</summary><pre class="g-text">' + segs + '</pre></details></div>';
         }
         return '<div class="g-block g-' + esc(b.role || 'x') + '"><div class="g-role">' + esc(b.label) + '</div><pre class="g-text">' + segs + '</pre></div>';
@@ -1379,7 +1440,8 @@
     return '<div class="g-panel' + (this.bigText ? ' big' : '') + '"><div class="g-head"><b>What the AI was given</b><span class="muted">every time the AI was asked something in this run, word for word as the app recorded it</span>' +
       '<button class="g-big" data-act="bigtext" title="Larger or smaller text">' + (this.bigText ? 'A\u2212 Smaller text' : 'A+ Larger text') + '</button>' +
       '<button class="p-close" data-act="close" title="Close (Esc)">\u2715 Close</button></div>' +
-      (anyHit ? '<div class="g-note"><mark class="g-key">highlighted</mark> text was found by the search and pasted into the AI\u2019s prompt, word for word; the label above each says where it came from.</div>' : '') +
+      (anyHit ? '<div class="g-note"><mark class="g-key">highlighted</mark> text was found by the search and pasted into the AI\u2019s prompt, word for word; the label above each says where it came from.' +
+        (anyRelied ? ' <mark class="g-key relied">★ relied on</mark> marks what its answer rests on.' : '') + '</div>' : '') +
       (note ? '<div class="g-note">' + esc(note) + '</div>' : '') +
       '<div class="g-body">' + (body || '<div class="muted">The AI hasn\u2019t been asked anything yet.</div>') + '</div></div>';
   };

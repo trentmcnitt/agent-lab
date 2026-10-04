@@ -109,7 +109,7 @@ def test_nodes_words_docs_and_defaults():
     assert g["x-not-needed"] == "Not needed this time: the AI didn't write an answer."
     assert node(m, "retrieve")["kind"] == "retrieval" and node(m, "retrieve")["actor"] == "rule"
     # unworded: humanized name, terminal when every exit is END, no plain_label
-    assert node(m, "respond") == {"id": "respond", "label": "respond", "kind": "terminal", "actor": "app"}
+    assert node(m, "respond") == {"id": "respond", "label": "respond", "kind": "terminal"}
     assert "doc" not in node(m, "respond")       # no docstring of its own
 
 
@@ -130,7 +130,7 @@ def test_conditional_end_synthesizes_an_end_node(topology_validator):
     s = structure(branches=[BranchSpec("classify", {"done": "__end__", "more": "retrieve"}, route)])
     m = build(structure=s).manifest()
     assert list(topology_validator.iter_errors(m)) == []
-    assert node(m, "__end__") == {"id": "__end__", "label": "end", "kind": "terminal", "actor": "app"}
+    assert node(m, "__end__") == {"id": "__end__", "label": "end", "kind": "terminal"}
     assert {"from": "classify", "to": "__end__", "from_branch": "done"} in m["edges"]
 
 
@@ -250,6 +250,24 @@ def test_r1_unknown_keys_and_double_wording(tmp_path):
     assert any("renamed" in m for m in msgs) and any("old_node" in m for m in msgs)
 
 
+def test_panels_and_reads_may_name_a_step_by_its_function(tmp_path):
+    """A node named by its function can't go stale on a rename: it resolves to the node's id, and a
+    function that is no step of the graph is an R1 error naming it."""
+    story = tmp_path / "s.js"
+    story.write_text("x")
+
+    def not_a_step(state):
+        pass
+
+    inst = build(story=lab.Story(story, panels=[lab.Panel("p", "P", ["decision"], nodes=[classify, "retrieve"])],
+                                 reads=[grounding_check]))
+    assert [f for f in inst.findings() if f.code == "R1"] == []
+    assert next(p for p in inst.manifest()["panels"] if p["id"] == "p")["nodes"] == ["classify", "retrieve"]
+    bad = build(story=lab.Story(story, panels=[lab.Panel("p", "P", ["decision"], nodes=[not_a_step])]))
+    (f,) = [f for f in bad.findings() if f.code == "R1"]
+    assert "not_a_step" in f.message and f.severity == "error"
+
+
 def test_r2_paths_key_not_a_branch():
     inst = build(steps={"respond": lab.step("x", paths={"nowhere": "y"})})
     (f,) = [f for f in inst.findings() if f.code == "R2"]
@@ -275,7 +293,7 @@ def test_subgraph_nodes_carry_parent_and_their_own_label(topology_validator):
     inst = build(structure=s, steps={"sub/inner": lab.step("Do the inner thing")})
     m = inst.manifest()
     assert node(m, "sub/inner") == {"id": "sub/inner", "label": "inner", "plain_label": "Do the inner thing",
-                                    "doc": "The subgraph's one step.", "kind": "step", "actor": "app", "parent": "sub"}
+                                    "doc": "The subgraph's one step.", "kind": "step", "parent": "sub"}
     assert list(topology_validator.iter_errors(m)) == []
     flat = build(structure=structure(nodes=list(s.nodes[:-1]) + [NodeSpec("sub/inner", inner)], edges=s.edges))
     assert flat.manifest()["derived"]["hashes"]["structure"] != m["derived"]["hashes"]["structure"]

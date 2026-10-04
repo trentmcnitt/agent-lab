@@ -140,7 +140,7 @@ class Panel:
     id: str
     title: str
     event_types: Sequence[str]
-    nodes: Sequence[str] = ()
+    nodes: Sequence[str | Callable[..., Any]] = ()   # node ids, or the node functions themselves (rename-proof)
     plain_title: str | None = None
     audience: Literal["both", "presentation", "engineering"] = "both"
     mode: Literal["latest", "append"] = "latest"
@@ -152,7 +152,7 @@ class Panel:
 class Story:
     file: str | os.PathLike                # the story JS; hashed, never sent over telemetry
     panels: Sequence[Panel] = ()
-    reads: Sequence[str] = ()              # every node id the JS refers to outside its panels' nodes
+    reads: Sequence[str | Callable[..., Any]] = ()   # every node the JS refers to outside its panels' nodes
 
 
 __all__ = ["StepWords", "PathWords", "step", "path", "words_of", "Action", "Never", "never", "App",

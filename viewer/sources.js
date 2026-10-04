@@ -20,6 +20,9 @@
     this.es.onmessage = function (m) {
       try { self.bench.push(JSON.parse(m.data)); } catch (e) { /* a malformed line never stops the stream */ }
     };
+    // The receiver's backlog is over: those runs already happened, so they're shown finished, not
+    // paced out step by step as if they were running now.
+    this.es.addEventListener('caught_up', function () { self.bench.skipPacing(); });
   };
 
   /* Embedded sync (SPEC section 3a): the shell relays the app's replay as postMessages. The app
@@ -118,12 +121,21 @@
     this.onstate(state);
   };
   ReplaySource.prototype.pause = function () { this.until = null; this._stop('paused'); };
-  // Forward one step (a node visit), played with its timing, then pause.
+  /* Forward one step (a node visit), then pause. The step's events go in at once and the bench's
+     own pacing draws them (each step held lit a moment), so every press counts: two presses in
+     quick succession are two steps, never one step and a press lost to a step still playing out. */
   ReplaySource.prototype.next = function () {
     var L = global.BenchLogic, target = L.nextStop(this.stops.steps, this.i - 1);
+    this.playing = false; clearTimeout(this.timer); this.until = null;
     if (target == null) return this.finish();
-    this.until = target;
-    this.play();
+    while (this.i <= target && this.i < this.events.length) this.push(this.events[this.i++]);
+    if (this.i >= this.events.length) { this.bench.setStatus('Recording · finished', 'ok'); this.onstate('done'); }
+    else { this.bench.setStatus('Recording · paused', 'warn'); this.onstate('stepping'); }
+  };
+  // The first step, paused: where a presenter starts (and the Home key).
+  ReplaySource.prototype.first = function () {
+    this.playing = false; clearTimeout(this.timer); this.until = null;
+    this.seek(this.stops.steps.length ? this.stops.steps[0] : 0);
   };
   // Back one step: reset and replay events[0..previous stop] at once, with pacing skipped.
   ReplaySource.prototype.back = function () {

@@ -25,7 +25,8 @@ MODES = ("presentation", "engineering")
 
 
 def open_replay(w, site, name, mode, pause=False, speed=4):
-    q = f"?replay={RECORDINGS.get(name, name)}&mode={mode}&speed={speed}" + ("" if pause else "&pause=0")
+    # &play=1: these tests watch it play (a recording otherwise opens paused on its first step).
+    q = f"?replay={RECORDINGS.get(name, name)}&mode={mode}&speed={speed}&play=1" + ("" if pause else "&pause=0")
     w.page.goto(f"{site}/bench/{q}")
     w.page.wait_for_selector(f"#bench.mode-{mode}")
     return w.page
@@ -306,3 +307,58 @@ def test_presenter_keys_map_only_and_recap(page, site):
     first = now_title(p)
     p.keyboard.press(" ")
     p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent !== t", arg=first, timeout=15_000)
+
+
+# ---- a presenter with a clicker (usability round v3/6) ------------------------------------------
+def test_a_recording_opens_paused_on_step_one_and_every_press_counts(page, site):
+    w = page
+    w.page.goto(f"{site}/bench/?replay={RECORDINGS['req-012-approved']}&mode=presentation")
+    p = w.page
+    p.wait_for_selector("[data-p=bubble] .bb-num")
+    # Paused on the first step, saying how to go on: the presenter talks first.
+    assert p.inner_text("[data-p=bubble] .bb-num") == "1"
+    status = p.inner_text("[data-p=status]")
+    assert "Paused" in status and "PageDown" in status
+    p.wait_for_timeout(1200)
+    assert p.inner_text("[data-p=bubble] .bb-num") == "1", "it doesn't play by itself"
+    # Two quick presses are two steps (a clicker double-tap), not one press lost.
+    p.keyboard.press("PageDown")
+    p.keyboard.press("PageDown")
+    p.wait_for_function("document.querySelector('[data-p=bubble] .bb-num').textContent === '3'", timeout=10_000)
+    # Home: back to the first step; ? lists the keys.
+    p.keyboard.press("Home")
+    p.wait_for_function("document.querySelector('[data-p=bubble] .bb-num').textContent === '1'", timeout=10_000)
+    p.keyboard.press("?")
+    p.wait_for_selector("[data-p=bubble] .ps-keys")
+    assert "PageDown" in p.inner_text("[data-p=bubble] .ps-keys")
+    p.keyboard.press("Escape")
+    p.wait_for_selector("[data-p=bubble] .ps-keys", state="detached")
+
+
+def test_the_recap_scrolls_from_the_keyboard_and_the_whole_request_shows(page, site):
+    w = page
+    w.page.set_viewport_size({"width": 1280, "height": 620})
+    w.page.goto(f"{site}/bench/?replay=recordings/req-021.recording.jsonl&mode=presentation&at=end&recap=1")
+    p = w.page
+    p.wait_for_selector("[data-p=bubble] .rc")
+    # The request is never cut: a trick at its end is the point of this one.
+    assert "ignore" in p.inner_text("[data-p=req]").lower()
+    room = p.evaluate("(() => { const b = document.querySelector('[data-p=bubble]'); return b.scrollHeight - b.clientHeight; })()")
+    if room > 0:
+        p.keyboard.press("PageDown")
+        p.wait_for_function("document.querySelector('[data-p=bubble]').scrollTop > 0")
+        assert p.locator("[data-p=bubble] .rc").count() == 1, "PageDown scrolls the recap before it does anything else"
+    recap = p.inner_text("[data-p=bubble]").lower()
+    assert "why, in the ai" in recap and "not needed this time" in recap
+
+
+def test_try_another_starts_the_new_request_at_its_first_step(page, site):
+    w = page
+    w.page.goto(f"{site}/bench/?replay={RECORDINGS['req-012-approved']}&mode=presentation&at=classify&recap=1")
+    p = w.page
+    p.wait_for_selector("[data-p=picker] select")
+    p.select_option("[data-p=picker] select", "recordings/req-021.recording.jsonl")
+    p.wait_for_url(re.compile(r"req-021"))
+    assert "at=" not in p.url and "recap=" not in p.url
+    p.wait_for_selector("[data-p=bubble] .bb-num")
+    assert p.inner_text("[data-p=bubble] .bb-num") == "1"

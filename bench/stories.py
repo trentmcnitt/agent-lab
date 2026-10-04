@@ -26,8 +26,20 @@ def trusted_stories(spec: str | None = None) -> dict[str, Path]:
     return out
 
 
-def read_story(path: Path | None, app_id: str, want: str) -> tuple[str | None, str]:
-    """The story at `path` if its sha256 is `want`: (source, "ok"), else (None, why)."""
+DEV_NOTE = ("dev mode: the story file changed since this run was built; showing it as it is now "
+            "(AGENT_LAB_STORIES_DEV is set, so the hash isn't enforced)")
+
+
+def dev_mode() -> bool:
+    """AGENT_LAB_STORIES_DEV=1: while writing a story, serve the trusted file as it is now even when
+    it differs from the one a run was built with, so an edit shows on a reload without re-running
+    the app. Never for recordings (`bench.record` always enforces the hash)."""
+    return os.environ.get("AGENT_LAB_STORIES_DEV", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def read_story(path: Path | None, app_id: str, want: str, *, dev: bool = False) -> tuple[str | None, str]:
+    """The story at `path` if its sha256 is `want`: (source, "ok"), else (None, why). With `dev`, a
+    file that differs is still served: (source, DEV_NOTE)."""
     if path is None:
         return None, f"no story file is trusted for {app_id} (set AGENT_LAB_STORIES={app_id}=<path>)"
     try:
@@ -35,5 +47,7 @@ def read_story(path: Path | None, app_id: str, want: str) -> tuple[str | None, s
     except OSError as exc:
         return None, f"the story file for {app_id} can't be read ({exc.strerror or exc})"
     if hashlib.sha256(raw).hexdigest() != want:
+        if dev:
+            return raw.decode("utf-8", errors="replace"), DEV_NOTE
         return None, "story file differs from the one this run was built with"
     return raw.decode("utf-8", errors="replace"), "ok"

@@ -153,7 +153,8 @@ test('helpdesk req-012 at the decision: the path from the map, the reason word f
   assert.equal(c.reason.cited.length, 1);
   assert.ok(c.reason.cited[0].title !== c.reason.cited[0].id, 'cited items are shown by their titles');
   assert.ok(c.checks.length === 1 && c.checks[0].state === 'passed');
-  assert.equal(c.checks[0].word, 'Didn\'t trigger');   // the check's own words, sent with it
+  const sent = evs.find((e) => e.event_type === 'check_result' && e.node === 'classify').data.words;
+  assert.equal(c.checks[0].word, sent.passed);   // the check's own words, sent with it
 });
 test('helpdesk req-012 at the gate: waiting, the proposal in the map\'s words', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
   const r = desk('req-012-approved');
@@ -188,4 +189,89 @@ test('a past step\'s badge: the path it took in the map\'s words, a search\'s co
   const handbook = r.topo.sources.find((s) => s.id === 'handbook');
   assert.match(L.stepBadge(r.topo, r.events, 'retrieve', steps('retrieve')), new RegExp('^found \\d+ of ' + handbook.count + '$'));
   assert.match(L.stepBadge(r.topo, r.events, 'approval_gate', steps('approval_gate')), /^✓ approved$|^→ /);
+});
+
+// ---- usability round v3/6 (the presenter's and the engineer's walks) -----------------------------
+// A zero-word library map: no actors declared, two corpora searched by one step.
+function zeroWords() {
+  return {
+    v: 'bench-topology/0', app: { id: 'z', name: 'Z' },
+    nodes: [{ id: 'lookup', label: 'lookup', kind: 'step' }, { id: 'triage', label: 'triage', kind: 'step' },
+            { id: 'answer', label: 'answer', kind: 'terminal' }],
+    edges: [{ from: 'lookup', to: 'triage' }, { from: 'triage', to: 'answer' }],
+    sources: [{ id: 'leave', title: 'Leave policies', kind: 'documents', count: 2, items: [{ id: 'pto', title: 'PTO' }, { id: 'sick', title: 'Sick leave' }] },
+              { id: 'money', title: 'Money and work', kind: 'documents', count: 3, items: [{ id: 'exp', title: 'Expenses' }, { id: 'pay', title: 'Payroll' }, { id: 'remote', title: 'Remote work' }] }]
+  };
+}
+function zeroRun() {
+  const e = (seq, node, event_type, data) => ({ v: 'bench/0', run_id: 'r', seq, ts: seq, node, event_type, step_id: 'r:' + node + ':1', data: data || {} });
+  return [
+    { v: 'bench/0', run_id: 'r', seq: 0, ts: 0, node: '_run', event_type: 'run_started', data: { input: 'Can I expense a train ticket?' } },
+    e(1, 'lookup', 'step_started'),
+    e(2, 'lookup', 'retrieval', { source: 'leave', hits: [] }),
+    e(3, 'lookup', 'retrieval', { source: 'money', hits: [{ id: 'exp', title: 'Expenses', text: 'Train tickets are reimbursed with a receipt.' }] }),
+    e(4, 'lookup', 'step_finished', { status: 'ok' }),
+    e(5, 'triage', 'step_started'),
+    e(6, 'triage', 'llm_call', { model: 'fake', system: 'x', messages: [{ role: 'user', content: 'Train tickets are reimbursed with a receipt.' }], output: 'policy' }),
+    e(7, 'triage', 'step_finished', { status: 'ok' }),
+  ];
+}
+
+test('no words: a step that called the AI is the AI\'s, and R11 never blames words nobody wrote', () => {
+  const topo = zeroWords(), events = zeroRun();
+  assert.equal(L.actorOf(L.nodeOf(topo, 'triage'), events), 'ai');
+  assert.equal(L.actorOf(L.nodeOf(topo, 'lookup'), events), 'app');
+  assert.ok(!L.mapChecks(topo, events).some((f) => f.code === 'R11'), 'no R11 on an unworded step');
+  // Words that do say "the app" are still held to it.
+  const said = zeroWords(); said.nodes[1].actor = 'app';
+  assert.ok(L.mapChecks(said, events).some((f) => f.code === 'R11' && f.node === 'triage'));
+  const c = L.callout(topo, events, 'triage', {});
+  assert.equal(c.actor, 'ai');
+});
+
+test('a step that searched two sources counts both: found 1 of 5 in 2 sources, on the badge and in the callout', () => {
+  const topo = zeroWords(), events = zeroRun();
+  const steps = [{ events: events.filter((e) => e.node === 'lookup') }];
+  assert.equal(L.stepBadge(topo, events, 'lookup', steps), 'found 1 of 5');
+  const sr = L.stepSearch(topo, steps[0].events);
+  assert.deepEqual(sr, { found: 1, of: 5, sources: ['leave', 'money'] });
+  const c = L.callout(topo, events, 'lookup', {});
+  assert.equal(text(c.headline), 'Found 1 of 5 in 2 sources; next: triage.');
+  assert.deepEqual(c.sources.map((s) => s.id), ['leave', 'money'], 'a source searched with no hits is shown too');
+});
+
+test('sentences end once: a label ending in "?" gets no extra period', () => {
+  assert.equal(L.endSentence('Is it a policy question?'), 'Is it a policy question?');
+  assert.equal(L.endSentence('Open the ticket'), 'Open the ticket.');
+  const topo = { app: { id: 'q', name: 'Q' }, nodes: [{ id: 'a', plain_label: 'Look it up' }, { id: 'b', plain_label: 'Is it a policy question?' }], edges: [{ from: 'a', to: 'b' }] };
+  const evs = [{ run_id: 'r', ts: 1, node: 'a', event_type: 'llm_call', data: { output: 'x' } }];
+  assert.equal(text(L.callout(topo, evs, 'a', {}).headline), 'The AI worked on this step; next: Is it a policy question?');
+});
+
+test('a value the map has words for is shown in them (an action\'s title, a branch\'s words)', () => {
+  const topo = { actions: [{ id: 'create_ticket', title: 'Open an IT ticket' }], edges: [{ from: 'c', to: 'x', from_branch: 'needs_write', plain_label: 'needs a change' }] };
+  assert.equal(L.plainValue(topo, 'c', 'create_ticket'), 'Open an IT ticket');
+  assert.equal(L.plainValue(topo, 'c', 'needs_write'), 'needs a change');
+  assert.equal(L.plainValue(topo, 'other', 'needs_write'), 'needs_write');
+});
+
+test('helpdesk: the headline that is the whole description isn\'t said twice; "0 of 16" is never said', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
+  const r = desk('req-012-approved');
+  const evs = at(r, 'ingest');
+  const c = L.callout(r.topo, evs, 'ingest', {});
+  assert.ok(!c.about || c.about.text.trim() !== text(c.headline).trim(), JSON.stringify(c.about));
+  const p = L.callout(r.topo, at(r, 'propose_action'), 'propose_action', {});
+  assert.ok(p.given.every((g) => g.n > 0), JSON.stringify(p.given));
+  assert.ok(p.wrote && p.wrote.fields.every((f) => f.value !== '–'), 'no empty fields in what it wrote');
+});
+
+test('helpdesk: the recap counts only the checks that ran, and a hand-off says why in the AI\'s words', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
+  const r = desk('req-021');
+  const rc = L.recap(r.topo, r.events, true, seqOf(r.events));
+  assert.equal(rc.checkCount.ran + rc.checkCount.notNeeded + rc.checkCount.pending, rc.checked.length);
+  assert.ok(rc.checkCount.notNeeded >= 1);
+  assert.match(rc.did.text, /^Handed to a person/);
+  assert.ok(rc.did.why && rc.did.why.length > 20, 'the AI\'s own reason for the hand-off');
+  const ok = desk('req-012-approved');
+  assert.equal(L.recap(ok.topo, ok.events, true, seqOf(ok.events)).did.why, null, 'no "why" on an approval');
 });

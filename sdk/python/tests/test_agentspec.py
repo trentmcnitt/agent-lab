@@ -281,9 +281,11 @@ def test_node_facts_are_defaults_that_words_override():
     m = Instrumentation(s, app=lab.App(name="x")).manifest()
     a, b = nodes(m)["a"], nodes(m)["b"]
     assert (a["label"], a["description"], a["kind"], a["actor"]) == ("Alpha", "first", "llm", "ai")
-    assert (b["label"], b["kind"], b["actor"]) == ("b", "step", "app")      # an unknown kind is ignored
+    assert (b["label"], b["kind"]) == ("b", "step") and "actor" not in b   # an unknown kind is ignored; no one said who
+
     worded = Instrumentation(s, app=lab.App(name="x"), steps={"a": lab.step(says="said", kind="tool")}).manifest()
-    assert (nodes(worded)["a"]["description"], nodes(worded)["a"]["kind"], nodes(worded)["a"]["actor"]) == ("said", "tool", "app")
+    # The words' kind replaces the definition's; its actor goes with it (a tool implies no actor).
+    assert (nodes(worded)["a"]["description"], nodes(worded)["a"]["kind"], nodes(worded)["a"].get("actor")) == ("said", "tool", None)
 
 
 def test_code_first_structures_hash_as_before():

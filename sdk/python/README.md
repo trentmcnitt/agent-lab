@@ -58,7 +58,32 @@ def test_agent_lab_words_match_code():
     lab.verify(build_graph())          # fails on any word naming a step or branch the code lacks
 ```
 
-`python -m agentlab verify app.graph:build_graph [--strict]` does the same in CI. `python -m agentlab lock app.graph:build_graph` records the code each wording describes in `agentlab.lock.json`; when that code later changes, Engineering mode shows the wording as needing a re-read (`--strict` fails on it).
+`python -m agentlab verify app.graph:build_graph [--strict]` does the same in CI. `python -m agentlab lock app.graph:build_graph` records the code each wording describes in `agentlab.lock.json`; when that code later changes, Engineering mode shows the wording as needing a re-read (`--strict` fails on it). Treat it like a snapshot test: after changing a worded step, re-read its words, then run `lock` again.
+
+What the fingerprint covers, exactly: the node function's own source (its decorator included, so editing only its words also asks for a re-lock) and, for a branching node, its router's source and its path map. Code the node calls in another function or module (a retriever, a helper) is not fingerprinted: a change there changes what the step does without flagging its words. Verification checks that every word names something real and flags words whose step changed; it never claims the words are right.
+
+Don't hard-code step names in your own tests either: the quickstart's test checks that every span lands on a step the graph has, so a rename only fails `verify`, with a message that says what to fix.
+
+## Stories (custom panels)
+
+```python
+story = lab.Story("story.js", panels=[
+    lab.Panel("why", "Where the answer came from", ["check_result"], nodes=[check_grounding],
+              plain_title="Where the answer came from", audience="both"),
+])
+graph = instrument(compiled, app=APP, story=story)
+```
+
+`lab.Panel(id, title, event_types, nodes=(), plain_title=None, audience="both", mode="latest", story=True, fields=None)`:
+
+- `event_types`: which events the panel gets (`decision`, `check_result`, `retrieval`, `llm_call`, your own `lab.event` types ...).
+- `nodes`: the steps it shows on, as node ids or, better, the node functions themselves (`nodes=[check_grounding]`): a function can't go stale when the node is renamed, and one that is no step of the graph is a `verify` error (R1). `Story(reads=[...])` takes the same, for steps the JS reads outside its panels.
+- `plain_title`: its heading in Presentation; `audience`: `both`, `presentation` or `engineering`; `mode`: `latest` (the newest event) or `append` (all of them).
+- `story=False` with `fields=[{"key": ..., "label": ..., "format": ...}]` is a declared panel: no JS, the bench formats the fields.
+
+The file's JavaScript registers the panels (`BenchStory.register('<app id>', {panels: {why: (events, ctx) => html}})`); each gets `ctx.mode`, so one panel can speak plainly to a room and show detail to engineers ([SPEC.md section 5](../../SPEC.md)). A fact's text shows in Presentation as you wrote it: `lab.check(..., detail=...)` and `lab.decision(reason)` are read by the room, so write them for it.
+
+The bench serves a story only from a file you trust (`AGENT_LAB_STORIES="<app id>=<path>"`, set when the bench starts) and only when its sha256 is the one the run was built with. While writing one, start the bench with `AGENT_LAB_STORIES_DEV=1` as well: it then serves the file as it is now, so an edit shows on a reload of the viewer without re-running the app (Engineering notes that the file changed). Recordings always enforce the hash.
 
 ## Guarantees
 

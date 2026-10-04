@@ -422,17 +422,18 @@ test('check_words: a check\'s own state words show in the Checks row, the NOW ca
   assert.equal(L.checkStates(plain, ok, true)[0].line, '✓ Passed.');
   assert.equal(L.checkStates(plain, bad, true)[0].line, '✕ Didn’t pass. The AI wasn\'t confident enough in its choice.');
 });
-test('helpdesk: the low-confidence check never says "Passed" anywhere', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
+test('helpdesk: the low-confidence check speaks in the words its code sent with it', { skip: !haveDesk && 'helpdesk repo not found' }, () => {
   for (const name of ['req-020', 'req-012-approved', 'req-005']) {
     const r = desk(name);
     // The library's helpdesk names this check `confidence_check` (its words travel with it).
     const row = L.checkStates(r.topo, r.events, true).find((c) => c.id === 'confidence_check');
     assert.ok(row, name);
-    assert.doesNotMatch(row.line, /Passed/);
-    assert.match(row.line, /Didn't trigger|Triggered: sent to a person/);
+    const sent = r.events.find((e) => e.event_type === 'check_result' && e.data.name === 'confidence_check').data.words;
+    assert.ok(sent && sent.passed && sent.failed, 'the check sends its own words');
+    assert.ok(row.line.includes(row.state === 'passed' ? sent.passed : sent.failed), row.line);
     const n = L.narrate(r.topo, r.events, 'classify', { finished: true });
     const line = n.lines.find((l) => /Confidence check/i.test(l.text));
-    assert.ok(line && /Didn't trigger|Triggered/.test(line.text) && !/Passed/.test(line.text), JSON.stringify(n.lines));
+    assert.ok(line && (line.text.includes(sent.passed) || line.text.includes(sent.failed)), JSON.stringify(n.lines));
   }
 });
 test('NOW card: a line the reply already quotes isn\'t said twice (req-020\'s hand-off)', { skip: !haveDesk && 'helpdesk repo not found' }, () => {

@@ -181,7 +181,9 @@
   .ps-ask { min-width: 0; }
   .ps-who { font-size: var(--fs-small); color: var(--muted); font-weight: 600; }
   .ps-who:empty { display: none; }
-  .ps-req { font-size: var(--fs-req); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* The whole request, never cut (a trick at its end is the point of some runs); long ones set smaller. */
+  .ps-req { font-size: var(--fs-req); line-height: 1.3; }
+  .ps-req.r-long { font-size: calc(var(--fs-req) * .8); } .ps-req.r-xlong { font-size: calc(var(--fs-req) * .66); line-height: 1.25; }
   .ps-req:empty { display: none; }
   .ps-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
   .ps-tools { display: flex; align-items: center; gap: 8px; }
@@ -329,10 +331,18 @@
   .rc-src { margin: 2px 0; } .rc-items { margin: 4px 0 0; padding-left: 1.2em; font-size: var(--fs-small); } .rc-items li.relied { color: #ffe199; font-weight: 600; }
   .rc-checks { list-style: none; margin: 0; padding: 0; } .rc-checks li { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; } .rc-checks b { margin-right: 4px; }
   .rc-never, .rc-record { margin: 12px 0 0; font-size: var(--fs-small); color: #b5bddc; } .rc-never span, .rc-record span { color: var(--muted); }
+  .rc-why { margin-top: 10px; font-size: var(--fs-small); } .rc-why > span { color: var(--muted); display: block; margin-bottom: 4px; }
+  /* On a wide screen the four answers sit in two columns, so the recap fits a 1080p projector. */
+  @media (min-width: 1400px) { .ps-bubble .rc .bb-body { column-count: 2; column-gap: 36px; } .rc-q, .rc-never, .rc-record { break-inside: avoid; } .rc-q:first-child { padding-top: 0; } }
+  .ps-keys kbd { font: 700 var(--fs-small) ui-monospace, monospace; color: var(--accent); } .ps-keys { --ac: var(--accent); }
+  .ps-pane .bb-legend .lg-r { display: none; }   /* the pane's tiles show no ranks */
+  .bb-legend .lg-rank { font-weight: 800; font-size: .85em; background: var(--a-ai); color: #0b1020; border-radius: 5px; padding: 1px 4px; margin-right: 6px; }
+  .bb-counts span.unk { font-size: var(--fs-small); color: var(--muted); }
 
   /* The footer: time, cost in words, by hand or what it can never do; the presenter's controls. */
   .ps-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap; padding: 10px 28px; border-top: 1px solid var(--border); background: rgba(15,20,32,.92); font-size: var(--fs-small); }
   .ps-facts { min-width: 0; flex: 1 1 400px; } .ps-facts .sep { color: var(--muted); margin: 0 4px; }
+  .p-bline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ps-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .ps-key { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 6px 11px; cursor: pointer; font: 600 var(--fs-small)/1 -apple-system, BlinkMacSystemFont, sans-serif; display: inline-flex; align-items: center; gap: 6px; }
   .ps-key kbd { font: 700 1em ui-monospace, monospace; border: 1px solid currentColor; border-radius: 4px; padding: 1px 4px; }
@@ -392,6 +402,17 @@
   .g-answer { border-color: var(--accent); }
   .g-raw summary { cursor: pointer; color: var(--muted); font-size: 11.5px; margin: 4px 0; }
   .g-panel.big .g-text { font-size: 15px; } .g-panel.big .g-fields { font-size: 15px; } .g-panel.big .g-call h4 { font-size: 16px; }
+  .g-choices { color: var(--muted); margin-top: 2px; } .g-choices b { color: var(--text); font-weight: 600; }
+  .hlwrap.relied mark { background: rgba(251,191,36,.16); border-bottom-color: var(--warn); } .hlwrap.relied .hltag { color: var(--warn); }
+  mark.g-key.relied { background: rgba(251,191,36,.16); border-bottom-color: var(--warn); }
+  /* In Presentation the panel is read from across a room: the screen's width, larger type, and
+     "Larger text" enlarges everything in it (labels, the form and the answer too). */
+  .pres .g-panel { max-width: min(1600px, 96vw); padding: 0 24px 28px; }
+  .pres .g-head b { font-size: var(--fs-head); } .pres .g-head .muted, .pres .g-note, .pres .g-raw summary, .pres .p-close, .pres .g-big { font-size: var(--fs-small); }
+  .pres .g-call h4 { font-size: var(--fs); } .pres .g-role, .pres .hltag { font-size: var(--fs-label); }
+  .pres .g-text { font-size: calc(var(--fs) * .8); } .pres .g-fields { font-size: var(--fs); }
+  .pres .g-panel.big .g-text { font-size: var(--fs); } .pres .g-panel.big .g-fields, .pres .g-panel.big .g-call h4 { font-size: calc(var(--fs) * 1.25); }
+  .pres .g-panel.big .g-role, .pres .g-panel.big .hltag, .pres .g-panel.big .g-note, .pres .g-panel.big .g-head .muted { font-size: var(--fs); }
   .badge.dl { background: none; cursor: pointer; color: var(--accent); border-color: var(--accent); font: 11px -apple-system, sans-serif; }
 
   /* A ~960 px pane (the bench beside an app): the same stage, tighter. */
@@ -513,7 +534,8 @@
       });
       bench.setTransport({
         back: function () { src.back(); }, next: function () { src.next(); }, restart: function () { src.start(); },
-        play: function () { src.play(); }, pause: function () { src.pause(); }
+        play: function () { src.play(); }, pause: function () { src.pause(); },
+        first: function () { src.first(); }, end: function () { src.finish(); }
       });
       btn.onclick = function () { if (src.playing) src.pause(); else src.play(); };
       document.getElementById('cBack').onclick = function () { src.back(); };
@@ -524,12 +546,14 @@
       document.getElementById('cSpeed').onchange = function (e) { src.speed = Number(e.target.value); };
       document.getElementById('cAuto').checked = src.autoPause;
       document.getElementById('cAuto').onchange = function (e) { src.autoPause = e.target.checked; };
-      // A presenter's deep link: ?at=<node> opens paused where that step stops (a sign-off at
-      // "waiting"), ?at=end at the end; &recap=1 then opens the recap.
+      // A recording opens paused on its first step, so a presenter can talk first and step with a
+      // clicker (&play=1 plays it instead). A deep link: ?at=<node> opens paused where that step
+      // stops (a sign-off at "waiting"), ?at=end at the end; &recap=1 then opens the recap.
       var at = q.get('at'), stop = at && at !== 'end' ? BenchLogic.stopAt(BenchLogic.sortEvents(events), bench.topo, at) : -1;
       if (at === 'end') src.finish();
       else if (stop >= 0) src.seek(stop);
-      else src.start();
+      else if (q.get('play') === '1') src.start();
+      else src.first();
       if (q.get('recap') === '1') bench.openRecap(true);
     }).catch(function (e) { fail('Could not load the recording: ' + e.message); });
   } else if (topoUrl) {
@@ -575,13 +599,14 @@
         return { path: r.path, group: r.group || '', title: r.plain_title || String(r.title || r.path).replace(topo.app.name + ' · ', '') };
       });
       var cur = mine.filter(function (r) { return r.path === replay; })[0] ? replay : (mine.filter(function (r) { return replay.slice(-r.path.length) === r.path; })[0] || {}).path;
-      bench.setPicker(mine, cur, function (path) { location.search = withParams({ replay: path }); });
+      // Another request starts at its own beginning: the step and recap of this one don't carry over.
+      bench.setPicker(mine, cur, function (path) { location.search = withParams({ replay: path, at: null, recap: null }); });
       var m = /-(approved|denied)(\.recording\.jsonl)$/.exec(cur || replay);
       if (!m) return;
       var other = m[1] === 'approved' ? 'denied' : 'approved';
       var twin = (cur || replay).replace(m[0], '-' + other + m[2]);
       if (mine.some(function (r) { return r.path === twin; })) {
-        bench.setPair({ href: withParams({ replay: twin }), text: other === 'denied' ? 'See what happens if they deny ▸' : 'See what happens if they approve ▸' });
+        bench.setPair({ href: withParams({ replay: twin, at: null, recap: null }), text: other === 'denied' ? 'See what happens if they deny ▸' : 'See what happens if they approve ▸' });
       }
     });
   }

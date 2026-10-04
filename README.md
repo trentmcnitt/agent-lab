@@ -121,7 +121,8 @@ graph = instrument(builder.compile(), app=lab.App(name="Support assistant", requ
 
 - **Structure** (steps, branches, subgraphs) comes from the graph: `get_graph()` and the path maps. A router whose branches can't be read is an error, never a guess.
 - **Facts** come from one line each, where they happen: `lab.corpus(...)` where an index is built (so its items are the index's), `lab.retrieved`, `lab.decision`, `lab.check`, `lab.gate_resolved`, `lab.outcome`, `lab.event` for anything bespoke. Model calls, tool calls, prompts, tokens, cost and approval pauses come from LangGraph's own callbacks.
-- **Words** (plain labels, branch words, check words, which state fields are the request and the reply) live on the code they describe. `lab.verify(graph)` in a test fails when one names a step, branch or field the code no longer has; `python -m agentlab lock` records the code each wording describes, and Engineering flags wording whose code changed since.
+- **Words** (plain labels, branch words, check words, which state fields are the request and the reply) live on the code they describe. `lab.verify(graph)` in a test fails when one names a step, branch or field the code no longer has; `python -m agentlab lock` records the code each wording describes, and Engineering flags wording whose step's own code changed since (the node function and its router; code it calls elsewhere isn't fingerprinted, see [`sdk/python`](sdk/python)). Re-run `lock` after re-reading the words, like updating a snapshot.
+- **Zero words still works.** With only `instrument(graph, app=...)`, steps show by their code names and a step that called the model is shown as the AI's; add words where they pay off.
 
 Everything travels as OpenTelemetry span attributes ([SPEC](SPEC.md) section 8), so Langfuse, Phoenix and the rest see it too. [`examples/langgraph_quickstart`](examples/langgraph_quickstart) is a runnable app with no API key, and [`sdk/python`](sdk/python) is the library's own guide. An app defined as an Open Agent Spec flow gets its map from the flow file ([`examples/agentspec`](examples/agentspec)).
 
@@ -147,7 +148,7 @@ curl -X POST http://127.0.0.1:8790/ingest -H 'Content-Type: application/json' -d
 
 ### Level 2: tell the story
 
-For what plain data can't explain (a situation too bespoke for any universal view, or extra color someone wants to add), an app ships a **story**: JavaScript panels that draw its own runs (`BenchStory.register('<app id>', {panels, renderers})`). With the library it's `instrument(..., story=lab.Story(file="story.js", panels=[...]))`: each run names the story file by its hash, and the bench serves it only from a file you trust (`AGENT_LAB_STORIES="<app id>=<path>"`) whose hash matches; a declared map sends it as the `story` string at registration. Story panels add to the generic views and never replace them. Each panel gets `ctx.mode` (`"presentation"` or `"engineering"`), so one panel can speak plainly to a room and show every score to an engineer. A map panel's `audience` (`both`, `presentation` or `engineering`) says which mode shows it.
+For what plain data can't explain (a situation too bespoke for any universal view, or extra color someone wants to add), an app ships a **story**: JavaScript panels that draw its own runs (`BenchStory.register('<app id>', {panels, renderers})`). With the library it's `instrument(..., story=lab.Story(file="story.js", panels=[lab.Panel(...)]))` (the `Panel` fields are in [`sdk/python`](sdk/python#stories-custom-panels); name a panel's steps by their functions, `nodes=[check_grounding]`, and a rename can't strand it): each run names the story file by its hash, and the bench serves it only from a file you trust (`AGENT_LAB_STORIES="<app id>=<path>"`) whose hash matches; a declared map sends it as the `story` string at registration. While writing a story, add `AGENT_LAB_STORIES_DEV=1`: the bench then serves the file as it is now, so an edit shows on a viewer reload without re-running the app. Story panels add to the generic views and never replace them. Each panel gets `ctx.mode` (`"presentation"` or `"engineering"`), so one panel can speak plainly to a room and show every score to an engineer. A map panel's `audience` (`both`, `presentation` or `engineering`) says which mode shows it.
 
 Test a story before anyone sees it. The story harness renders every panel at every event of your recordings, in both modes, and fails on a throw, an empty panel, `undefined`, `NaN` or `[object Object]`:
 
@@ -164,6 +165,8 @@ node tests/story_harness.js --story path/to/story.js [--topology path/to/map.jso
 | For | a meeting, a demo, a handoff: anyone can drive it | building and debugging the app |
 | Shows | plain step names, a "now" card, what it looked at, how it was checked, who signed off, time and cost in words, "What the AI was given" | everything: tokens, scores, ids, Model I/O, raw JSON, the event log |
 | Pace | recordings: Play pauses at the key moments, ◂ / ▸ step through; live and beside an app it follows the run, then offers "▶ Step through it" | follows the run |
+
+A recording opens paused on its first step, so the presenter can talk first: → / Space / PageDown (what a clicker sends) go forward a step, ← / PageUp back, Home to the first step, End to the end, R the recap, M the map alone, `?` lists the keys. `&play=1` plays it instead; `&at=<step>` opens it at a step, `&at=end&recap=1` on the recap.
 
 Pick one with `?mode=presentation` or `?mode=engineering`, or the toggle in the header. The URL wins, then the viewer's remembered choice, then the default: Presentation for recordings and the side-by-side shell, Engineering on a live bench.
 
@@ -233,6 +236,8 @@ uv run pytest tests/e2e -q                      # just the browser tests (Playwr
 node tests/story_harness.js examples/*.recording.jsonl   # the story harness on hello-agent
 uv run python scripts/export_static.py          # static, replay-only build -> dist/bench/
 ```
+
+The bench keeps what it receives (the event log, maps, registered apps) under `data/` in this checkout; `BENCH_DATA_DIR=<dir>` keeps a project's runs apart from everyone else's.
 
 ## 📄 License
 

@@ -276,10 +276,16 @@ export function nodeOf(topo, id) {
   return ((topo && topo.nodes) || []).find(function (n) { return n.id === id; }) || null;
 }
 var KIND_ACTOR = { llm: 'ai', gate: 'person', check: 'rule' };
-export function actorOf(node) {
+/* Who does a step: the map's `actor`, else what its `kind` implies, else (no words at all) what the
+   run shows: a step that called the AI is the AI's. `events` (optional) is the run's events. */
+export function actorOf(node, events) {
   if (!node) return 'app';
-  return node.actor || KIND_ACTOR[node.kind] || 'app';
+  if (node.actor || KIND_ACTOR[node.kind]) return node.actor || KIND_ACTOR[node.kind];
+  if (events && events.some(function (e) { return e.node === node.id && e.event_type === 'llm_call'; })) return 'ai';
+  return 'app';
 }
+// Whether the map itself says who does the step (its actor, or a kind that implies one).
+export function actorDeclared(node) { return !!(node && (node.actor || KIND_ACTOR[node.kind])); }
 export var ACTOR_WORDS = { ai: 'AI', rule: 'rule', person: 'person', app: 'app' };
 export function plainLabel(node, id) { return node ? (node.plain_label || node.label || node.id) : id; }
 export function techLabel(node, id) { return node ? (node.label || node.id) : id; }
@@ -418,12 +424,48 @@ export function stepBadge(topo, events, id, steps, counts) {
     sourceStates(topo, events).forEach(function (s) { s.items.forEach(function (it) { counts[it.id] = s.count; }); });
   }
   var outs = takenOut(topo, events, id).filter(function (ed) { return ed.from_branch || ed.when; });
-  var hitsCount = null;
-  steps.forEach(function (s) { s.events.forEach(function (e) { if (e.event_type === 'retrieval' && e.data && e.data.hits && e.data.hits[0]) hitsCount = counts[e.data.hits[0].id]; }); });
-  var badge = node.kind !== 'check' && outs.length ? '→ ' + (outs[0].plain_label || human(outs[0].from_branch || outs[0].when))
-    : preview(steps, 'presentation', hitsCount, node.kind === 'check', topo);
-  if (/^\d+ (of \d+|found)$/.test(badge)) badge = 'found ' + badge.replace(/ found$/, '');
+  if (node.kind !== 'check' && outs.length) return '→ ' + (outs[0].plain_label || human(outs[0].from_branch || outs[0].when));
+  var mine = [];
+  steps.forEach(function (s) { mine = mine.concat(s.events); });
+  var badge = preview(steps, 'presentation', null, node.kind === 'check', topo);
+  // A search step: what all its searches found, over everything they searched (several sources
+  // or several searches in one step count once each), never one search's share.
+  var sr = stepSearch(topo, mine);
+  if (sr && /^(\d+ (of \d+|found)|found .*)$/.test(badge)) badge = 'found ' + sr.found + (sr.of != null ? ' of ' + sr.of : '');
   return badge;
+}
+
+/* What one step's searches found, across every search it ran and every source it searched:
+   {found: distinct items found, of: the searched sources' total size (null when one isn't on the
+   map), sources: [source ids searched, in order]}. null when the step searched nothing. A source
+   searched with no hits counts too: it was looked through. `stepEvents`: that step's events. */
+export function stepSearch(topo, stepEvents) {
+  var searched = [], found = {}, any = false;
+  stepEvents.forEach(function (e) {
+    if (e.event_type !== 'retrieval') return;
+    any = true;
+    var d = e.data || {};
+    if (d.source && searched.indexOf(String(d.source)) < 0) searched.push(String(d.source));
+    (d.hits || []).forEach(function (h) {
+      found[h.id] = true;
+      var sid = hitSource(topo, e, h);
+      if (searched.indexOf(sid) < 0) searched.push(sid);
+    });
+  });
+  if (!any) return null;
+  var srcs = (topo && topo.sources) || [], of = 0;
+  searched.forEach(function (sid) {
+    var s = srcs.filter(function (x) { return x.id === sid; })[0];
+    var n = s ? (s.count != null ? s.count : (s.items ? s.items.length : null)) : null;
+    of = of == null || n == null ? null : of + n;
+  });
+  return { found: Object.keys(found).length, of: searched.length ? of : null, sources: searched };
+}
+
+// Ends a sentence once: "Is it a policy question?" stays as it is; anything else gets a period.
+export function endSentence(s) {
+  s = String(s == null ? '' : s).replace(/\s+$/, '');
+  return /[.!?…:]$/.test(s) ? s : s + '.';
 }
 
 // ---- checks -------------------------------------------------------------------------------
@@ -886,7 +928,9 @@ export function givenBlocks(topo, events) {
     if (e.event_type !== 'retrieval') return;
     ((e.data || {}).hits || []).forEach(function (h) {
       var src = states.filter(function (s) { return s.items.some(function (it) { return it.id === h.id; }); })[0];
-      hits.push({ id: h.id, title: h.title || h.id, text: h.text, source: src && !src.undeclared ? src.title : null, node: e.node });
+      var item = src && src.items.filter(function (it) { return it.id === h.id; })[0];
+      hits.push({ id: h.id, title: h.title || h.id, text: h.text, source: src && !src.undeclared ? src.title : null, node: e.node,
+                  relied: !!(item && item.relied) });
     });
   });
   return events.filter(function (e) { return e.event_type === 'llm_call'; }).map(function (e) {
@@ -894,10 +938,18 @@ export function givenBlocks(topo, events) {
     if (d.system != null) blocks.push({ role: 'system', label: ROLE_WORDS.system, text: evText(d.system) });
     (d.messages || []).forEach(function (m) { blocks.push({ role: m.role, label: ROLE_WORDS[m.role] || human(m.role || 'message'), text: evText(m && m.content) }); });
     var form = formFields(d.params);
-    if (form) blocks.push({ role: 'form', label: 'The form it had to fill in', text: '', fields: form });
+    // A choice or an answer the map has words for (one of this step's branches, an action) carries
+    // those words too, so the room reads "needs a change", not only "needs_write".
+    if (form) {
+      form.forEach(function (f) { if (f.choices) f.plain = f.choices.map(function (c) { var w = plainValue(topo, e.node, c); return w === c ? null : w; }); });
+      blocks.push({ role: 'form', label: 'The form it had to fill in', text: '', fields: form });
+    }
     if (d.output != null) {
       var ob = { role: 'output', label: ROLE_WORDS.output, text: evText(d.output) }, obj = answerFields(d.output);
-      if (obj) ob.answer = obj;
+      if (obj) {
+        obj.forEach(function (f) { var w = plainValue(topo, e.node, f.value); if (w !== f.value) f.plain = w; });
+        ob.answer = obj;
+      }
       blocks.push(ob);
     }
     blocks.forEach(function (b) { b.segments = highlightSegments(b.text, hits); });
@@ -1085,7 +1137,8 @@ export function mapChecks(topo, events) {
           add({ code: 'R9', severity: 'warning', node: e.node, from: 'run',
                 message: 'stale index: the search ran on a different version of "' + (d.source || 'its source') + '" than the one this run’s map lists (the index was rebuilt elsewhere?).' });
       }
-      if (e.event_type === 'llm_call' && nodes[e.node]) {                                                         // R11
+      // Only a map that says who does the step can be contradicted: an unworded step is inferred.
+      if (e.event_type === 'llm_call' && nodes[e.node] && actorDeclared(nodes[e.node])) {                       // R11
         var who = actorOf(nodes[e.node]);
         if (who === 'rule' || who === 'app') llmNodes[e.node] = who;
       }
@@ -1269,6 +1322,16 @@ export function proposalCard(proposed, topo) {
            description: typeof o.description === 'string' ? o.description : null, fields: fields };
 }
 
+/* A value an answer gave, in the map's words when the map has some: an action it can take (its
+   title), or one of this step's branches (the path's plain words). Anything else as it is. */
+export function plainValue(topo, id, v) {
+  var s = String(v);
+  var act = ((topo && topo.actions) || []).filter(function (a) { return a.id === s; })[0];
+  if (act) return act.title;
+  var ed = ((topo && topo.edges) || []).filter(function (e) { return e.from === id && e.from_branch === s && e.plain_label; })[0];
+  return ed ? ed.plain_label : s;
+}
+
 /* One source in the callout: what it holds, item by item, with each item's state this run and,
    for what the search found, its rank (1 = best match). */
 function sourceView(s, events) {
@@ -1294,7 +1357,7 @@ function itemTitle(topo, id) {
    reply (text), starting (the run's newest step has started but shown nothing yet)}. */
 export function callout(topo, events, id, opts) {
   opts = opts || {};
-  var node = nodeOf(topo, id), evs = nodeEvents(events, id), actor = actorOf(node), kind = (node && node.kind) || 'step';
+  var node = nodeOf(topo, id), evs = nodeEvents(events, id), actor = actorOf(node, events), kind = (node && node.kind) || 'step';
   var nums = opts.numbers || {};
   var out = { id: id, n: nums[id] || null, title: plainLabel(node, id), technical: techLabel(node, id), actor: actor, kind: kind,
               status: 'done', headline: [], sub: null, choices: [], reason: null, checks: [], sources: [], given: [],
@@ -1331,27 +1394,33 @@ export function callout(topo, events, id, opts) {
                       state: st, word: w || { passed: 'Passed', failed: 'Didn’t pass', not_on_path: 'Not needed' }[st],
                       detail: c.detail || null, evidence: (c.evidence || []).map(function (x) { return { id: x, title: itemTitle(topo, x) }; }) });
   });
-  var hitsHere = evs.some(function (e) { return e.event_type === 'retrieval'; });
+  var search = stepSearch(topo, evs);
   var states = sourceStates(topo, events);
-  if (hitsHere) {
-    var ids = {};
-    evs.forEach(function (e) { if (e.event_type === 'retrieval') ((e.data || {}).hits || []).forEach(function (h) { ids[h.id] = true; }); });
-    out.sources = states.filter(function (s) { return s.items.some(function (it) { return ids[it.id]; }); }).map(function (s) { return sourceView(s, events); });
+  if (search) {
+    // Every source this step searched, in the order it searched them: one with no hits included.
+    out.search = search;
+    out.sources = search.sources.map(function (sid) { return states.filter(function (s) { return s.id === sid; })[0]; })
+      .filter(Boolean).map(function (s) { return sourceView(s, events); });
   }
   var calls = evs.filter(function (e) { return e.event_type === 'llm_call'; });
   if (calls.length) {
     // What this step's own model calls were given from the sources, when the prompts say.
     var txt = calls.map(function (e) { var cd = e.data || {}; return [evText(cd.system)].concat((cd.messages || []).map(function (m) { return evText(m && m.content); })).join('\n'); }).join('\n');
+    // Only what it was given: a step that works from the step before it (given none of a source)
+    // says nothing about that source, rather than "0 of 16" a room reads as a fault.
     if (txt.trim()) states.forEach(function (s) {
       if (!s.found) return;
       var n = s.items.filter(function (it) { var t = matchText(it); return t && txt.indexOf(t) >= 0; }).length;
-      out.given.push({ title: s.title, n: n, of: s.count });
+      if (n) out.given.push({ title: s.title, n: n, of: s.count });
     });
     var last = calls[calls.length - 1].data || {};
     // What it wrote, for a step whose answer isn't already a decision's reason.
     if (!decision && last.output != null) {
       var fields = answerFields(last.output);
-      out.wrote = fields ? { fields: fields.filter(function (f) { return !ENG_ONLY_KEY.test(f.name); }).map(function (f) { return { name: human(f.name), value: f.value }; }) }
+      // A form's empty fields say nothing to a room; a value the map has words for (an action it
+      // can take, a branch's name) is shown in those words.
+      out.wrote = fields ? { fields: fields.filter(function (f) { return !ENG_ONLY_KEY.test(f.name) && f.value !== '–' && String(f.value).trim() !== ''; })
+                                       .map(function (f) { return { name: human(f.name).replace(/^./, function (c) { return c.toUpperCase(); }), value: plainValue(topo, id, f.value) }; }) }
                          : { text: evText(last.output) };
     }
   }
@@ -1381,24 +1450,26 @@ export function callout(topo, events, id, opts) {
     });
   } else if (resolved) {
     var rd = resolved.data || {};
-    head((rd.approved ? 'Approved by ' : 'Not approved: ') + (rd.by || 'a person'), taken ? ', so next: ' + plainLabel(nodeOf(topo, taken.to), taken.to) + '.' : '.');
+    head((rd.approved ? 'Approved by ' : 'Not approved: ') + (rd.by || 'a person'), taken ? ', so next: ' + endSentence(plainLabel(nodeOf(topo, taken.to), taken.to)) : '.');
   } else if (taken) {
     out.sub = taken.description || null;
-    head(SUBJECT[actor] + ' ' + CHOSE[actor] + ' ', { t: branchLabel(taken), em: true }, ', so next: ' + plainLabel(nodeOf(topo, taken.to), taken.to) + '.');
+    head(SUBJECT[actor] + ' ' + CHOSE[actor] + ' ', { t: branchLabel(taken), em: true }, ', so next: ' + endSentence(plainLabel(nodeOf(topo, taken.to), taken.to)));
   } else if (out.choices.length) {
     head(SUBJECT[actor] + ' is choosing one of ' + out.choices.length + ' paths.');
   } else if (isLast) {
     // handled below: the run's ending is this step's headline
-  } else if (out.sources.length) {
-    var s0 = out.sources[0];
-    head('Found ', { t: s0.found + (s0.count != null ? ' of ' + s0.count : ''), em: true }, nextWords ? '; next: ' + nextWords + '.' : '.');
+  } else if (search) {
+    var many = search.sources.length > 1 ? ' in ' + search.sources.length + ' sources' : '';
+    head('Found ', { t: search.found + (search.of != null ? ' of ' + search.of : ''), em: true }, many + (nextWords ? '; next: ' + endSentence(nextWords) : '.'));
   } else if (out.did) {
-    head(out.did.title ? 'Done: ' + out.did.title + '.' : 'Done: ' + out.did.what + '.');
+    head(endSentence('Done: ' + (out.did.title || out.did.what)));
   } else if (calls.length) {
-    head(SUBJECT.ai + ' worked on this step' + (nextWords ? '; next: ' + nextWords + '.' : '.'));
+    head(SUBJECT.ai + ' worked on this step' + (nextWords ? '; next: ' + endSentence(nextWords) : '.'));
   } else {
     var first = about ? String(about).split(/(?<=[.!?])\s+/)[0] : null;
-    head(first || (plainLabel(node, id) + (nextWords ? '; next: ' + nextWords + '.' : '.')));
+    head(first || (plainLabel(node, id) + (nextWords ? '; next: ' + endSentence(nextWords) : '.')));
+    // The headline already says the whole description: don't say it again under "About this step".
+    if (first && out.about && kind !== 'gate' && String(about).trim() === first.trim()) out.about = null;
   }
 
   // The run's ending, on its last step: the outcome, the reply, and (handed over) the AI's reason.
@@ -1420,15 +1491,21 @@ export function callout(topo, events, id, opts) {
 export function recap(topo, events, finished, seq) {
   var oc = outcome(topo, events);
   var states = sourceStates(topo, events);
+  var checked = checkStates(topo, events, finished);
+  var ran = checked.filter(function (c) { return c.state !== 'not_on_path' && c.state !== 'pending'; }).length;
+  var skipped = checked.filter(function (c) { return c.state === 'not_on_path'; }).length;
   return {
-    did: { text: oc.text || (events.length ? 'Still running' : 'Nothing has run yet'), path: (seq || []).map(function (id) { return { id: id, title: plainLabel(nodeOf(topo, id), id), actor: actorOf(nodeOf(topo, id)) }; }) },
+    // Handed over: the AI's own reason is what the room needs (e.g. the instruction it refused).
+    did: { text: oc.text || (events.length ? 'Still running' : 'Nothing has run yet'), why: oc.why || null, path: (seq || []).map(function (id) { return { id: id, title: plainLabel(nodeOf(topo, id), id), actor: actorOf(nodeOf(topo, id), events) }; }) },
     looked: states.map(function (s) {
       var v = sourceView(s, events);
       v.shown = v.items.filter(function (it) { return it.state === 'given' || it.state === 'found'; })
         .sort(function (a, b) { return (b.relied - a.relied) || ((a.rank || 99) - (b.rank || 99)); });
       return v;
     }),
-    checked: checkStates(topo, events, finished),
+    checked: checked,
+    // "1 check ran · 2 not needed this time": only checks that ran are counted as checking it.
+    checkCount: { ran: ran, notNeeded: skipped, pending: checked.length - ran - skipped },
     signed: gateState(topo, events, finished),
     never: (topo && topo.never) || []
   };

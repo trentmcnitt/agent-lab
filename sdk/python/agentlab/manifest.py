@@ -314,7 +314,13 @@ class Instrumentation:
                 else:
                     kind = "step"
             entry["kind"] = kind
-            entry["actor"] = actor or ACTOR_FROM_KIND.get(kind, "app")
+            # Who does the step, only when something says so: the words, the definition, or a kind
+            # that implies it. Otherwise the field is left out and the viewer reads it from the run
+            # (a step that called the AI is the AI's), so a zero-word hookup never claims "the app"
+            # for a step that called the model (SPEC 8.5).
+            actor = actor or ACTOR_FROM_KIND.get(kind)
+            if actor:
+                entry["actor"] = actor
             if nid in parents:
                 entry["parent"] = parents[nid]
             if nid in unknown:
@@ -406,14 +412,36 @@ class Instrumentation:
                 story_sha = sha256_hex(Path(self.story.file).read_bytes())
             except OSError as e:
                 findings.append(Finding("R0", "error", f"story file can't be read: {e}"))
-            for ref in self.story.reads:
-                if ref not in known:
-                    findings.append(Finding("R1", "error", f"the story reads node {ref!r}, which is not in this graph", node=ref))
+            # A node may be named by its function (rename-proof: the name can't go stale) or by its id.
+            by_func = {id(f): nid for nid, f in funcs.items() if f is not None}
+
+            def node_id(ref: Any) -> str | None:
+                if isinstance(ref, str):
+                    return ref
+                f = ref
+                while f is not None:
+                    if id(f) in by_func:
+                        return by_func[id(f)]
+                    f = getattr(f, "__wrapped__", None)
+                return None
+
+            def resolve(refs: Any, what: str) -> list[str]:
+                out = []
+                for ref in refs:
+                    nid = node_id(ref)
+                    if nid is None:
+                        name = getattr(ref, "__qualname__", None) or repr(ref)
+                        findings.append(Finding("R1", "error", f"{what} names the function {name}, which is no step of this graph"))
+                    elif nid not in known:
+                        findings.append(Finding("R1", "error", f"{what} names node {nid!r}, which is not in this graph", node=nid))
+                    else:
+                        out.append(nid)
+                return out
+
+            resolve(self.story.reads, "the story's reads")
             for p in self.story.panels:
-                for ref in p.nodes:
-                    if ref not in known:
-                        findings.append(Finding("R1", "error", f"panel {p.id!r} names node {ref!r}, which is not in this graph", node=ref))
-                panels.append(_panel(p))
+                resolve(p.nodes, f"panel {p.id!r}")
+                panels.append(_panel(p, [node_id(r) or getattr(r, "__qualname__", str(r)) for r in p.nodes]))
         story_ids = {p["id"] for p in panels}
         panels += [dict(g) for g in GENERIC_PANELS if g["id"] not in story_ids]
 
@@ -568,12 +596,12 @@ def _words_json(w: StepWords) -> dict:
     return out
 
 
-def _panel(p: Panel) -> dict:
+def _panel(p: Panel, nodes: list[str]) -> dict:
     out: dict[str, Any] = {"id": p.id, "title": p.title, "event_types": list(p.event_types)}
     if p.plain_title:
         out["plain_title"] = p.plain_title
-    if p.nodes:
-        out["nodes"] = list(p.nodes)
+    if nodes:
+        out["nodes"] = nodes
     if p.mode != "latest":
         out["mode"] = p.mode
     out["audience"] = p.audience
