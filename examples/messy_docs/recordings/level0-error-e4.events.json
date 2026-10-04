@@ -1,0 +1,52 @@
+{
+ "question": "The blender shows error E4, what does that mean?",
+ "openinference_retriever_doc0_attributes": [
+  {
+   "retrieval.documents.0.document.content": "Blender error codes\n\nCodeMeaningWhat to tell the customer\nE1Jar not detectedLock the jar onto the base until it clicks.\nE3Blade jammedUnplug, remove the jar, and clear food from around the blades.\nE4Motor overheatedUnplug for 30 minutes and let it cool; blend in shorter bursts with more liquid.\nE7Controller faultHold power for 5 seconds; if E7 returns, open a warranty claim.",
+   "retrieval.documents.0.document.metadata": "{\"id\": \"troubleshooting/error codes.html#1\", \"source\": \"troubleshooting/error codes.html\", \"title\": \"Blender error codes\", \"passage\": 1, \"passages\": 1, \"score\": 7.9498}"
+  }
+ ],
+ "bench_retrieval_events": [
+  {
+   "v": "bench/0",
+   "run_id": "da6962be8aff0aef710a44bab553911c",
+   "ts": 1791086140.99693,
+   "node": "retrieve",
+   "event_type": "retrieval",
+   "content_mode": "full",
+   "data": {
+    "hits": [
+     {
+      "id": "doc#0",
+      "text": "Blender error codes\n\nCodeMeaningWhat to tell the customer\nE1Jar not detectedLock the jar onto the base until it clicks.\nE3Blade jammedUnplug, remove the jar, and clear food from around the blades.\nE4Motor overheatedUnplug for 30 minutes and let it cool; blend in shorter bursts with more liquid.\nE7Controller faultHold power for 5 seconds; if E7 returns, open a warranty claim."
+     },
+     {
+      "id": "doc#1",
+      "text": "Kettle shows E2 or won't heat\nE2 means the kettle sensed it was empty. Fill above the MIN line and press start again.\nIf the kettle won't heat at all and shows no code, check the base is seated and the outlet works."
+     },
+     {
+      "id": "doc#2",
+      "text": "## Exceptions\n\nLeads can approve a refund outside the window for a defective unit, a shipping error on our side, or a customer who was quoted the wrong policy by an agent. Note the reason in the ticket."
+     },
+     {
+      "id": "doc#3",
+      "text": "## Exceptions\n\nLeads can approve a refund outside the window for a defective unit, a shipping error on our side, or a customer who was quoted the wrong policy by an agent. Note the reason in the ticket."
+     }
+    ],
+    "query": "The blender shows error E4, what does that mean?"
+   },
+   "session_id": "level0",
+   "step_id": "9080fbf12ef29ddd",
+   "parent_step_id": "465171d0664692a8",
+   "seq": 4
+  }
+ ],
+ "bench_event_types": [
+  "llm_call",
+  "retrieval",
+  "run_finished",
+  "run_started",
+  "step_finished",
+  "step_started"
+ ]
+}

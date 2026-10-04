@@ -1,0 +1,7 @@
+called warehouse again re: the Ohio delays. they say the regional carrier is backed up til end of month. for now tell customers 7-10 business days for standard shipping to OH, PA, WV. expedited still 2-3 days.
+
+if a package shows delivered but customer says they don't have it, wait 48 hours then open a carrier trace. don't reship before the trace comes back unless its a lead approval.
+
+PO boxes: standard only, no expedited. APO/FPO fine with standard.
+
+reminder from Dana: damaged-in-transit claims need photos of the box AND the unit. no photos = no claim with the carrier, but we can still replace as a goodwill thing if under $80.

@@ -1,0 +1,52 @@
+{
+ "question": "How long does a customer have to return an item for a refund?",
+ "openinference_retriever_doc0_attributes": [
+  {
+   "retrieval.documents.0.document.content": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it",
+   "retrieval.documents.0.document.metadata": "{\"id\": \"Copy of Refund Policy FINAL_v2.md#2\", \"source\": \"Copy of Refund Policy FINAL_v2.md\", \"title\": \"Refund Policy\", \"passage\": 2, \"passages\": 4, \"score\": 15.6742}"
+  }
+ ],
+ "bench_retrieval_events": [
+  {
+   "v": "bench/0",
+   "run_id": "45448a8ab7ecbf05afd6874acb2468c0",
+   "ts": 1791086140.993417,
+   "node": "retrieve",
+   "event_type": "retrieval",
+   "content_mode": "full",
+   "data": {
+    "hits": [
+     {
+      "id": "doc#0",
+      "text": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it"
+     },
+     {
+      "id": "doc#1",
+      "text": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it"
+     },
+     {
+      "id": "doc#2",
+      "text": "## Time limits\n\nCustomers have 30 days from the delivery date to return an item for a full refund. After 30 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it"
+     },
+     {
+      "id": "doc#3",
+      "text": "Returns process\n\nA return starts when the customer asks for one in the window described in the Refund Policy.\n\nCreate the return in the Returns tab, send the prepaid label, and set the ticket to Waiting on customer.\n\nWhen the warehouse scans the package the ticket reopens automatically; issue the refund then."
+     }
+    ],
+    "query": "How long does a customer have to return an item for a refund?"
+   },
+   "session_id": "level0",
+   "step_id": "5c65dfb69697e4c2",
+   "parent_step_id": "266b47d26c1ede7e",
+   "seq": 4
+  }
+ ],
+ "bench_event_types": [
+  "llm_call",
+  "retrieval",
+  "run_finished",
+  "run_started",
+  "step_finished",
+  "step_started"
+ ]
+}

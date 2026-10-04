@@ -1,0 +1,52 @@
+{
+ "question": "What does the warranty cover after the first year?",
+ "openinference_retriever_doc0_attributes": [
+  {
+   "retrieval.documents.0.document.content": "Kestrel Kitchen Limited Warranty\nThis limited warranty covers Kestrel blenders, mixers, toasters and kettles bought new from Kestrel\nKitchen or an authorized retailer. It gives the original owner specific legal rights, and they may also\nhave other rights that vary from state to state.\nWhat is covered in the first year: any defect in materials or workmanship. We will repair or replace the\nunit at no cost, including shipping both ways.",
+   "retrieval.documents.0.document.metadata": "{\"id\": \"Warranty Terms.pdf#1\", \"source\": \"Warranty Terms.pdf\", \"title\": \"Kestrel Kitchen Limited Warranty\", \"passage\": 1, \"passages\": 3, \"page\": 1, \"score\": 9.1155}"
+  }
+ ],
+ "bench_retrieval_events": [
+  {
+   "v": "bench/0",
+   "run_id": "db1a7663a908d49645f2ddc892f5209d",
+   "ts": 1791086140.99957,
+   "node": "retrieve",
+   "event_type": "retrieval",
+   "content_mode": "full",
+   "data": {
+    "hits": [
+     {
+      "id": "doc#0",
+      "text": "Kestrel Kitchen Limited Warranty\nThis limited warranty covers Kestrel blenders, mixers, toasters and kettles bought new from Kestrel\nKitchen or an authorized retailer. It gives the original owner specific legal rights, and they may also\nhave other rights that vary from state to state.\nWhat is covered in the first year: any defect in materials or workmanship. We will repair or replace the\nunit at no cost, including shipping both ways."
+     },
+     {
+      "id": "doc#1",
+      "text": "Years two through five: the motor base only. If the motor fails under normal household use, we replace\nthe motor base. Jars, lids, blades, gaskets and other wear parts are not covered after the first year. The\ncustomer pays shipping to us; we pay shipping back.\nWhat is never covered: commercial use, damage from dropping or misuse, units bought from\nunauthorized sellers, and cosmetic wear."
+     },
+     {
+      "id": "doc#2",
+      "text": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it"
+     },
+     {
+      "id": "doc#3",
+      "text": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it"
+     }
+    ],
+    "query": "What does the warranty cover after the first year?"
+   },
+   "session_id": "level0",
+   "step_id": "c7fab0636f7ed09f",
+   "parent_step_id": "42384bc576dc96ca",
+   "seq": 4
+  }
+ ],
+ "bench_event_types": [
+  "llm_call",
+  "retrieval",
+  "run_finished",
+  "run_started",
+  "step_finished",
+  "step_started"
+ ]
+}

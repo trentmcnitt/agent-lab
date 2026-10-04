@@ -1,0 +1,5 @@
+Smart kettle wifi pairing
+hold the temp button + power for 6 sec until the light flashes blue
+open the Kestrel app > add device > kettle
+2.4 GHz networks only, 5 GHz will not work
+if it fails 3 times, factory reset: hold power 15 sec

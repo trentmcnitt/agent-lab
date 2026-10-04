@@ -1,0 +1,31 @@
+[project]
+name = "agentlab-messy-docs"
+version = "0.1.0"
+description = "Agent Lab proof: a support assistant over a messy folder of real-world files (no API key)."
+requires-python = ">=3.11"
+dependencies = [
+    "agentlab[langgraph]",
+    "langchain-community>=0.3",
+    "langchain-text-splitters>=0.3",
+    "rank-bm25>=0.2.2",
+    "pypdf>=5",
+    "reportlab>=4",
+    "python-docx>=1.1",
+    "docx2txt>=0.8",
+    "beautifulsoup4>=4.12",
+    "openinference-instrumentation-langchain>=0.1",
+    "opentelemetry-sdk>=1.30",
+    "jsonschema>=4.21",          # the bench's OTLP reader validates maps (tests read spans with it)
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+agentlab = { path = "../../sdk/python", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["."]

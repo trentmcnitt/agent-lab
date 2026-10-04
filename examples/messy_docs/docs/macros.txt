@@ -1,0 +1,8 @@
+--- MACRO: refund approved ---
+Hi {name}, good news: your refund is approved. You'll see it on your card in 5 to 10 business days. Thanks for your patience, {agent}
+
+--- MACRO: need serial number ---
+Hi {name}, to get your warranty claim started I need the serial number from the bottom of the motor base. A photo works great. {agent}
+
+--- MACRO: shipping delay ---
+Hi {name}, our carrier is running a few days behind in your area. Your order is on its way and the tracking link will update as it moves. {agent}
