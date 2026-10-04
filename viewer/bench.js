@@ -1398,8 +1398,8 @@
     if (base) bits.push('<span class="muted">A person doing this by hand takes</span> ' + esc(base));
     else if (never.length) bits.push('<span class="muted">It can never:</span> ' + never.map(esc).join(' · '));
     var line = bits.join(' <span class="sep">·</span> ');
-    // One line that never wraps (a wrap would move the stage between presses); all of it on hover.
-    return '<div class="p-bline" title="' + esc(line.replace(/<[^>]+>/g, '')) + '">' + line + '</div>';
+    // The footer keeps room for two lines (index.html), so its growing never moves the stage.
+    return '<div class="p-bline">' + line + '</div>';
   };
 
   // "What the AI was given": the run's model calls, as plain blocks, with retrieved text marked.

@@ -342,7 +342,8 @@
   /* The footer: time, cost in words, by hand or what it can never do; the presenter's controls. */
   .ps-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap; padding: 10px 28px; border-top: 1px solid var(--border); background: rgba(15,20,32,.92); font-size: var(--fs-small); }
   .ps-facts { min-width: 0; flex: 1 1 400px; } .ps-facts .sep { color: var(--muted); margin: 0 4px; }
-  .p-bline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Always two lines tall, so the stage doesn't move when the footer grows (and nothing in it is cut). */
+  .ps-facts { min-height: calc(2 * 1.35em); display: flex; align-items: center; } .p-bline { line-height: 1.35; }
   .ps-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .ps-key { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 6px 11px; cursor: pointer; font: 600 var(--fs-small)/1 -apple-system, BlinkMacSystemFont, sans-serif; display: inline-flex; align-items: center; gap: 6px; }
   .ps-key kbd { font: 700 1em ui-monospace, monospace; border: 1px solid currentColor; border-radius: 4px; padding: 1px 4px; }

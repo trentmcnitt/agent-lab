@@ -66,7 +66,7 @@
   /* Plays events with the gaps between their ts values, so a replay feels like the run did.
      Gaps longer than maxGap (a human taking a minute to approve) are shortened to it.
      The presenter's cursor (opts.stops, from BenchLogic.cursorStops): Play pauses on its own
-     after each "moment" (autoPause); next() plays to the end of the next step; back() rebuilds
+     after each "moment" (autoPause); next() puts in the next step at once (the bench paces it); back() rebuilds
      the run from the first event up to the previous step's end, without pacing. */
   function ReplaySource(bench, events, opts) {
     opts = opts || {};
@@ -79,7 +79,6 @@
     this.stops = opts.stops || { steps: [], moments: [] };
     this.autoPause = opts.autoPause !== false;
     this.i = 0;
-    this.until = null;
     this.timer = null;
     this.onstate = opts.onstate || function () {};
     // A replay of a run already on the bench (Bench.stepThrough) pushes and resets through the bench's own hooks.
@@ -90,14 +89,13 @@
   ReplaySource.prototype._label = function () {
     return '▶ Playing ' + this.what + (this.speed !== 1 ? ' · ' + this.speed + '×' : '');
   };
-  ReplaySource.prototype.start = function () { this._reset(); this.i = 0; this.until = null; this.onstate('restart'); this.play(); };
+  ReplaySource.prototype.start = function () { this._reset(); this.i = 0; this.onstate('restart'); this.play(); };
   ReplaySource.prototype.play = function () {
     var self = this;
     if (this.i >= this.events.length) return this.start();
     this.playing = true;
     clearTimeout(this.timer);
-    // A single step (next) isn't Play: the transport keeps reading as paused while it plays out.
-    this.onstate(this.until != null ? 'stepping' : 'playing');
+    this.onstate('playing');
     (function step() {
       if (!self.playing) return;
       if (self.i >= self.events.length) {
@@ -107,8 +105,7 @@
       self.push(ev);
       self.bench.setStatus(self._label(), 'rep');
       if (self.i >= self.events.length) return step();
-      if (self.until != null && k >= self.until) { self.until = null; return self._stop('paused'); }
-      if (self.until == null && self.autoPause && self.stops.moments.indexOf(k) >= 0) return self._stop('moment');
+      if (self.autoPause && self.stops.moments.indexOf(k) >= 0) return self._stop('moment');
       var next = self.events[self.i];
       var gap = Math.min(self.maxGap, Math.max(self.minGap, next.ts - ev.ts)) / self.speed;
       if (next.ts === ev.ts) gap = 0;
@@ -120,13 +117,13 @@
     this.bench.setStatus(state === 'moment' ? 'Recording · paused at a moment' : 'Recording · paused', 'warn');
     this.onstate(state);
   };
-  ReplaySource.prototype.pause = function () { this.until = null; this._stop('paused'); };
+  ReplaySource.prototype.pause = function () { this._stop('paused'); };
   /* Forward one step (a node visit), then pause. The step's events go in at once and the bench's
      own pacing draws them (each step held lit a moment), so every press counts: two presses in
      quick succession are two steps, never one step and a press lost to a step still playing out. */
   ReplaySource.prototype.next = function () {
     var L = global.BenchLogic, target = L.nextStop(this.stops.steps, this.i - 1);
-    this.playing = false; clearTimeout(this.timer); this.until = null;
+    this.playing = false; clearTimeout(this.timer);
     if (target == null) return this.finish();
     while (this.i <= target && this.i < this.events.length) this.push(this.events[this.i++]);
     if (this.i >= this.events.length) { this.bench.setStatus('Recording · finished', 'ok'); this.onstate('done'); }
@@ -134,13 +131,13 @@
   };
   // The first step, paused: where a presenter starts (and the Home key).
   ReplaySource.prototype.first = function () {
-    this.playing = false; clearTimeout(this.timer); this.until = null;
+    this.playing = false; clearTimeout(this.timer);
     this.seek(this.stops.steps.length ? this.stops.steps[0] : 0);
   };
   // Back one step: reset and replay events[0..previous stop] at once, with pacing skipped.
   ReplaySource.prototype.back = function () {
     var L = global.BenchLogic;
-    this.playing = false; clearTimeout(this.timer); this.until = null;
+    this.playing = false; clearTimeout(this.timer);
     var cur = this.i - 1, target = L.prevStop(this.stops.steps, cur);
     this.seek(target);
   };
@@ -154,7 +151,7 @@
   };
   ReplaySource.prototype.restart = function () { this.start(); };
   ReplaySource.prototype.finish = function () {
-    this.playing = false; clearTimeout(this.timer); this.until = null;
+    this.playing = false; clearTimeout(this.timer);
     while (this.i < this.events.length) this.push(this.events[this.i++]);
     this.bench.skipPacing();
     this.bench.setStatus('Recording · finished', 'ok'); this.onstate('done');
