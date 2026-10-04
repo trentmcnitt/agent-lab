@@ -507,6 +507,10 @@ def test_the_pane_keeps_the_map_on_top_and_one_marker(page, site):
     bench.locator("#bench.v-map").wait_for()
     # A finished run's lit path keeps a soft glow (untaken lines get none).
     assert bench.locator(".pres .graphwrap.run-done").count() == 1
+    assert bench.locator(".pres .graphwrap").evaluate(
+        "g => [...g.querySelectorAll('.edge.taken .glow')].some(p => p.getAnimations().some(a => a.animationName === 'pbreathe'))")
+    assert not bench.locator(".pres .graphwrap").evaluate(
+        "g => [...g.querySelectorAll('.edge.untaken .glow')].some(p => getComputedStyle(p).display !== 'none')")
     # The ringed step is the way back: no "whole map" button; on hover it says so, a click goes back.
     bench.locator(".pres .gnode[data-node=classify]").click()
     bench.locator("#bench.v-detail").wait_for()
@@ -531,5 +535,9 @@ def test_the_pane_keeps_the_map_on_top_and_one_marker(page, site):
     bench.locator("#bench.v-detail").wait_for()
     p.wait_for_timeout(500)
     assert bench.locator(".pres .gnode.focus[data-node=classify]").evaluate("n => n === document.activeElement")
-    p.keyboard.press("Enter")
+    # Space on the ringed step goes back too, and doesn't also step the presenter forward.
+    status = bench.locator("[data-p=status]").inner_text()
+    p.keyboard.press("Space")
     bench.locator("#bench.v-map").wait_for()
+    p.wait_for_timeout(300)
+    assert bench.locator("[data-p=status]").inner_text() == status
