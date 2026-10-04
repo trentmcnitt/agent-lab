@@ -29,7 +29,7 @@
 </p>
 
 > [!NOTE]
-> **0.1 pre-alpha.** This is days-old software: the format and APIs will change. Issues and ideas are welcome.
+> **0.1 pre-alpha.** The format and APIs will change. Issues and ideas are welcome.
 
 Agent Lab is a bench you set beside an AI app. The app reports what it does as it runs; the bench draws the app's whole flowchart, lights up the path each run takes, and shows every step's prompt, output, time and cost. It's built for showing an AI system to people as much as for debugging it: a flowchart anyone can follow, with every engineering detail one click away.
 
