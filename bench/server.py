@@ -2,9 +2,12 @@
 
 Local only, no auth. Events are validated against the schema, kept in memory for late
 viewers, appended to a JSONL log per day, and fanned out to every stream whose session
-filter matches. The bench never calls back into an app, and holds nothing app-specific:
-each app registers its own map and story (PUT /apps/<id>), kept under data/apps/ so a
-bench restart doesn't forget them.
+filter matches. The bench never calls back into an app, and holds nothing app-specific.
+An app built with the `agentlab` library sends its map with every run (SPEC.md 8.6): the
+bench verifies it, keeps it once per hash under data/maps/ and serves it at /maps/<hash>.
+An app without the library registers a hand-written map and story (PUT /apps/<id>, the
+declared-map tier), kept under data/apps/ so a bench restart doesn't forget them. Stories
+for library apps never travel over telemetry: AGENT_LAB_STORIES names trusted files.
 
 Run: uv run uvicorn bench.server:app --port 8790
 """
@@ -14,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import zlib
 from collections import defaultdict
@@ -28,6 +32,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from adapters import otlp as otlp_adapter
+from bench.stories import read_story, trusted_stories
 
 ROOT = Path(__file__).resolve().parents[1]
 EVENT_SCHEMA = Draft202012Validator(json.loads((ROOT / "schema/bench-event.schema.json").read_text()))
@@ -36,12 +41,15 @@ LOG_DIR = Path(os.environ.get("BENCH_LOG_DIR", ROOT / "data/log"))
 APPS_DIR = Path(os.environ.get("BENCH_APPS_DIR", ROOT / "data/apps"))
 # Recordings an app hands over (e.g. its demo runs) go here; the bench's own examples ship in examples/.
 REC_DIR = Path(os.environ.get("BENCH_RECORDINGS_DIR", ROOT / "data/recordings"))
+# Maps library apps sent with their runs, one file per hash (deduplicated across runs).
+MAPS_DIR = Path(os.environ.get("BENCH_MAPS_DIR", ROOT / "data/maps"))
 MAX_STORY = 512 * 1024
 MAX_EVENTS = int(os.environ.get("BENCH_MAX_EVENTS", "50000"))
 MAX_BODY = 5 * 1024 * 1024
 # Accepted on ingest and stored under the standard name (SPEC.md section 2).
 EVENT_ALIASES = {"check": "check_result"}
 log = logging.getLogger("bench.server")
+HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _topo_error(topo: Any) -> str | None:
@@ -61,6 +69,10 @@ class Store:
         self.subscribers: set[tuple[asyncio.Queue, str | None, str | None]] = set()
         self.run_app: dict[str, str] = {}  # run_id -> app id, when known (OTLP: service.name; native: run_started.data.app)
         self.otlp = otlp_adapter.TraceState()  # OTLP runs arrive over several requests
+        self.maps: dict[str, dict] = {}        # map hash -> a library app's map (also on disk)
+        self.app_map: dict[str, str] = {}      # app id -> the map hash of its latest run
+        self.run_map: dict[str, str] = {}      # run id -> its map hash
+        self.story_files = trusted_stories()
         self.load_apps()
 
     def load_apps(self) -> None:
@@ -96,7 +108,59 @@ class Store:
     def app_of(self, ev: dict) -> str | None:
         if ev.get("event_type") == "run_started" and isinstance(ev.get("data"), dict) and ev["data"].get("app"):
             self.run_app.setdefault(ev["run_id"], str(ev["data"]["app"]))
+        if ev.get("event_type") in ("run_started", "run_updated") and isinstance(ev.get("data"), dict):
+            h = ev["data"].get("map_hash")
+            if isinstance(h, str) and HASH_RE.match(h):
+                self.run_map[ev["run_id"]] = h
+                app = self.run_app.get(ev["run_id"])
+                if app:
+                    if app in self.topologies and app not in self.app_map:
+                        log.info("app %s: its runs carry their own maps (agentlab), which the bench uses "
+                                 "for those runs instead of the map it registered with PUT /apps", app)
+                    self.app_map[app] = h
         return self.run_app.get(ev["run_id"])
+
+    def add_map(self, h: str, manifest: dict) -> None:
+        """A map a run carried, already verified against its hash by the adapter: kept once."""
+        self.maps[h] = manifest
+        try:
+            MAPS_DIR.mkdir(parents=True, exist_ok=True)
+            f = MAPS_DIR / f"{h}.json"
+            if not f.exists():
+                tmp = f.with_suffix(".tmp")
+                tmp.write_text(json.dumps(manifest, ensure_ascii=False))
+                tmp.replace(f)
+        except OSError as exc:  # the map is still served from memory
+            log.warning("couldn't store map %s: %s", h[:12], exc)
+
+    def get_map(self, h: str) -> dict | None:
+        if not HASH_RE.match(h or ""):
+            return None
+        if h in self.maps:
+            return self.maps[h]
+        try:
+            m = json.loads((MAPS_DIR / f"{h}.json").read_text())
+        except (OSError, ValueError):
+            return None
+        # A stored file is checked again: a map is used only when its content matches its name.
+        if not isinstance(m, dict) or otlp_adapter.sha256_hex(m) != h:
+            log.warning("stored map %s doesn't match its hash; not served", h[:12])
+            return None
+        self.maps[h] = m
+        return m
+
+    def story_for(self, app_id: str, want: str | None) -> tuple[str | None, str]:
+        """A library app's story: the trusted file named for it in AGENT_LAB_STORIES, served only
+        when its sha256 is the one the run's map was built with (`want`, else the app's latest
+        map). Returns (source, why) — `why` says what went wrong when source is None."""
+        path = self.story_files.get(app_id)
+        if want is None:
+            m = self.get_map(self.app_map.get(app_id, "")) or {}
+            st = m.get("story")
+            want = st.get("sha256") if isinstance(st, dict) else None
+        if want is None:
+            return None, "no story: this app's map names none"
+        return read_story(path, app_id, want)
 
     @staticmethod
     def matches(ev: dict, app_of: str | None, sid: str | None, app: str | None) -> bool:
@@ -199,6 +263,9 @@ async def ingest_otlp(request: Request) -> Response:
         node_from=lambda app_id: (store.topologies.get(app_id) or {}).get("node_from"))
     # Every event of an OTLP run knows its app now, though its run_started (the root span) comes last.
     store.run_app.update(store.otlp.take_run_apps())
+    # Maps are kept before their runs' events go out, so a viewer that sees a map_hash can fetch it.
+    for h, manifest in store.otlp.take_maps():
+        store.add_map(h, manifest)
     res = _accept(events)
     # OTLP exporters expect an ExportTraceServiceResponse, in their own encoding; partialSuccess reports drops.
     n, msg = len(res["rejected"]), (res["rejected"][0]["error"] if res["rejected"] else "")
@@ -257,21 +324,46 @@ async def register_app(request: Request) -> Response:
         return JSONResponse({"error": "app.id does not match the URL"}, status_code=400)
     if story is not None and (not isinstance(story, str) or len(story) > MAX_STORY):
         return JSONResponse({"error": "story must be a string under 512 KB"}, status_code=400)
+    if app_id in store.app_map:
+        # Still accepted (the declared-map tier, SPEC.md section 3), but runs that carry a map use it.
+        log.info("PUT /apps/%s: this app's runs carry their own maps (agentlab); the registered map is "
+                 "used only for runs that don't", app_id)
     store.register(topo, story)
     return JSONResponse({"ok": True, "app": app_id, "story": story is not None})
 
 
 async def get_story(request: Request) -> Response:
-    s = store.stories.get(request.path_params["app_id"])
-    if s is None:
-        return Response("/* no story registered */", media_type="text/javascript", status_code=404)
-    return Response(s, media_type="text/javascript", headers={"Cache-Control": "no-store"})
+    """An app's story. A registered one (PUT /apps) as registered; a library app's from its
+    trusted file, only when it is the file the run's map names (`?sha256=` picks the run;
+    without it, the app's latest run)."""
+    app_id = request.path_params["app_id"]
+    want = request.query_params.get("sha256") or None
+    if want is None and app_id not in store.app_map:
+        s = store.stories.get(app_id)
+        if s is None:
+            return Response("/* no story registered */", media_type="text/javascript", status_code=404)
+        return Response(s, media_type="text/javascript", headers={"Cache-Control": "no-store"})
+    src, why = store.story_for(app_id, want)
+    if src is None:
+        return Response(f"/* {why} */", media_type="text/javascript", status_code=404,
+                        headers={"X-Agent-Lab-Story": why})
+    return Response(src, media_type="text/javascript", headers={"Cache-Control": "no-store"})
+
+
+async def get_map(request: Request) -> Response:
+    """A map a run carried, by its hash (run_started.data.map_hash)."""
+    m = store.get_map(request.path_params["map_hash"])
+    if m is None:
+        return JSONResponse({"error": "unknown map"}, status_code=404)
+    return JSONResponse(m, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 async def get_topology(request: Request) -> Response:
-    """An app's map. `?missing=null` answers an unregistered app with 200 null instead of 404, so
-    a Level 0 viewer (which then infers the map) doesn't log a failed request."""
-    t = store.topologies.get(request.path_params["app_id"])
+    """An app's map: the one its latest run carried (library apps), else the one it registered.
+    `?missing=null` answers an unknown app with 200 null instead of 404, so a Level 0 viewer
+    (which then infers the map) doesn't log a failed request."""
+    app_id = request.path_params["app_id"]
+    t = store.get_map(store.app_map.get(app_id, "")) or store.topologies.get(app_id)
     if t:
         return JSONResponse(t)
     if request.query_params.get("missing") == "null":
@@ -281,8 +373,17 @@ async def get_topology(request: Request) -> Response:
 
 async def list_topologies(request: Request) -> Response:
     """Registered apps, then apps that have sent runs without registering (`inferred: true`)."""
-    out = [{"id": k, "name": v["app"]["name"], "story": k in store.stories} for k, v in store.topologies.items()]
-    out += [{"id": a, "name": a, "story": False, "inferred": True} for a in store.seen_apps() if a not in store.topologies]
+    out = []
+    for a, h in store.app_map.items():
+        m = store.get_map(h)
+        if m is not None:
+            out.append({"id": a, "name": m["app"]["name"], "story": store.story_for(a, None)[0] is not None,
+                        "map_hash": h})
+    listed = {e["id"] for e in out}
+    out += [{"id": k, "name": v["app"]["name"], "story": k in store.stories} for k, v in store.topologies.items()
+            if k not in listed]
+    listed |= set(store.topologies)
+    out += [{"id": a, "name": a, "story": False, "inferred": True} for a in store.seen_apps() if a not in listed]
     return JSONResponse(out)
 
 
@@ -297,6 +398,8 @@ async def list_runs(request: Request) -> Response:
         r["events"] += 1
         if e["event_type"] == "run_started" and e.get("data", {}).get("app"):
             r["app"] = e["data"]["app"]  # OTLP runs: which app sent them (service.name)
+        if e["event_type"] in ("run_started", "run_updated") and e.get("data", {}).get("map_hash"):
+            r["map_hash"] = e["data"]["map_hash"]  # library runs: the map this run carried
         if e["event_type"] == "run_finished":
             r["status"] = e["data"].get("status")
     return JSONResponse(sorted(runs.values(), key=lambda r: r["first_ts"]))
@@ -349,6 +452,7 @@ app = Starlette(routes=[
     Route("/runs", list_runs),
     Route("/topologies", list_topologies),
     Route("/topology/{app_id}", get_topology, methods=["GET"]),
+    Route("/maps/{map_hash}", get_map, methods=["GET"]),
     Route("/apps/{app_id}", register_app, methods=["PUT"]),
     Route("/apps/{app_id}/story.js", get_story),
     Mount("/viewer", StaticFiles(directory=ROOT / "viewer"), name="viewer"),
