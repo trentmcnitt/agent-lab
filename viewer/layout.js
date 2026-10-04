@@ -30,12 +30,13 @@
   // lane/clear: channel spacing and clearance, scaled with the boxes so long edges stay distinct.
   // ortho: edges run in straight lines with rounded corners (down, across in a gap, down), so a
   // dashed path reads as one calm line rather than a run of S-curves; turns sit in the gaps.
-  // gy leaves every edge between stacked boxes a visible shaft above its arrowhead. gx leaves the
+  // gy leaves every edge between stacked boxes a visible shaft above its arrowhead, and room for a
+  // branch's label plate beside it (S4: 64 px boxes, 48 px gaps). gx leaves the
   // gutter between two columns wider than its clearance on both sides plus a few lanes, so a
   // row-skipping edge runs down the middle of the map, not round its outside (see snap).
   // One corner radius per geometry, for every line in every state.
-  var STAGE_GEOM = { w: 372, h: 84, gx: 72, gy: 32, pad: 18, routedLabels: false, lane: 16, clear: 14, ortho: true, radius: 10, snap: true };
-  var PANE_GEOM = { w: 232, h: 68, gx: 48, gy: 30, pad: 8, routedLabels: false, lane: 12, clear: 8, ortho: true, radius: 8, snap: true };
+  var STAGE_GEOM = { w: 380, h: 64, gx: 96, gy: 48, pad: 18, routedLabels: false, lane: 16, clear: 14, ortho: true, radius: 10, snap: true };
+  var PANE_GEOM = { w: 260, h: 60, gx: 56, gy: 40, pad: 8, routedLabels: false, lane: 12, clear: 8, ortho: true, radius: 8, snap: true };
   var CLEAR_DEFAULT = 6;   // a channel keeps at least this far from any box (geom.clear overrides)
   var LANE_DEFAULT = 9;    // spacing between parallel channels (geom.lane overrides)
   var CHAR_W = 5.9;   // the edge label font (9.5px monospace), per character

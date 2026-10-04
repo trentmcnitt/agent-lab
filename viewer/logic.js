@@ -11,7 +11,7 @@ export function esc(s) {
 }
 export function fmtMs(ms) {
   if (ms == null || isNaN(ms)) return '–';
-  return ms >= 10000 ? (ms / 1000).toFixed(1) + 's' : ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : Math.round(ms) + 'ms';
+  return ms >= 10000 ? (ms / 1000).toFixed(1) + 's' : ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : ms > 0 && ms < 9.95 ? (Math.round(ms * 10) / 10) + 'ms' : Math.round(ms) + 'ms';
 }
 export function fmtUsd(v) { return '$' + Number(v || 0).toFixed(v >= 0.1 ? 3 : 5); }
 export function fmtNum(n) { return Number(n || 0).toLocaleString('en-US'); }
@@ -1572,8 +1572,13 @@ function docWords(t) {
 /* The passage's sentence (or line) that shares the most words with the query; with no overlap, its
    opening. Cut at a word to 200 characters. */
 export function snippet(text, query) {
-  var flat = String(text || '').replace(/[ \t]+/g, ' ').trim();
+  // A Markdown heading line is the passage's title, not what it says: dropped when there's other text.
+  var body = String(text || '').split('\n').filter(function (l) { return !/^\s*#{1,6}\s/.test(l); }).join('\n');
+  var flat = (body.trim() ? body : String(text || '')).replace(/[ \t]+/g, ' ').trim();
   var parts = flat.split(/(?<=[.!?])\s+|\n+/).map(function (p) { return p.trim(); }).filter(Boolean);
+  // A stray list number split off as a "sentence" says nothing: never the snippet when there's prose.
+  var prose = parts.filter(function (p) { return /\p{L}{2,}/u.test(p); });
+  if (prose.length) parts = prose;
   var qw = docWords(query), best = parts[0] || '', bestScore = 0;
   parts.forEach(function (p) {
     var pw = docWords(p), s = 0;
@@ -1789,6 +1794,7 @@ function shortValue(v, n) {
   if (typeof v === 'object') {
     var ks = Object.keys(v);
     if (ks.length === 1 && typeof v[ks[0]] !== 'object') return '“' + short(String(v[ks[0]]), n || 60) + '”';
+    if (n && n < 60) return '(' + ks.map(human).join(', ') + ')';      // a call's arguments: their names
     var lead = v.name != null ? 'name' : v.title != null ? 'title' : null;
     var rest = ks.filter(function (k) { return k !== lead && v[k] != null && typeof v[k] !== 'object'; }).slice(0, lead ? 2 : 3);
     return short((lead ? [String(v[lead])] : []).concat(rest.map(function (k) { return human(k) + ' ' + String(v[k]); })).join(' · ') || ks.join(', '), n || 90);
@@ -1823,7 +1829,7 @@ export function stepMeta(topo, events, id, steps, opts) {
   var mine = [];
   steps.forEach(function (s) { mine = mine.concat(s.events || []); });
   var ms = steps.reduce(function (a, s) { return a + (s.latency != null ? s.latency : s.end != null && s.start != null ? (s.end - s.start) * 1000 : 0); }, 0);
-  var time = opts.running ? fmtMs(opts.runningMs || 0) + '…' : fmtMs(ms) + (steps.length > 1 ? ' ×' + steps.length : '');
+  var time = opts.running ? (opts.runningMs != null ? fmtMs(opts.runningMs) + '…' : 'running…') : fmtMs(ms) + (steps.length > 1 ? ' ×' + steps.length : '');
   var err = mine.filter(function (e) { return e.event_type === 'error'; })[0];
   if (err && !opts.running) return { v: '✕ error', rest: [time] };
   var resolved = mine.filter(function (e) { return e.event_type === 'gate_resolved'; }).pop();

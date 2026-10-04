@@ -31,6 +31,7 @@ def main() -> None:
     shutil.copy(ROOT / "viewer/index.html", out / "index.html")
     for f in ("layout.js", "logic.js", "bench.js", "sources.js"):
         shutil.copy(ROOT / "viewer" / f, out / "viewer" / f)
+    shutil.copytree(ROOT / "viewer/fonts", out / "viewer/fonts")      # Geist, served with the viewer (offline)
     shutil.copytree(ROOT / "shell", out / "shell")
     listing = []
     dirs = ([] if a.no_examples else [("examples", ROOT / "examples")]) + [("recordings", Path(d)) for d in a.recordings]

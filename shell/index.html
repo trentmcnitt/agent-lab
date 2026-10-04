@@ -6,10 +6,12 @@
 <link rel="icon" href="data:," />
 <title>Agent Lab · bench</title>
 <style>
-  :root { --bg: #0f1420; --panel: #171d2c; --border: #2a3350; --text: #e6ebff; --muted: #8a93b8; --accent: #5eead4; --accent-2: #a78bfa; }
+  @font-face { font-family: "Geist"; src: local("Geist"), url("../viewer/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  /* The bench's S4 palette (viewer/index.html). */
+  :root { --bg: #07080B; --panel: #0A0B0F; --border: #232731; --text: #EDEFF3; --muted: #9098A8; --accent: #3EF0C8; --accent-2: #B69CFF; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
-  body { background: var(--bg); color: var(--text); font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; }
+  body { background: var(--bg); color: var(--text); font: 13px "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; }
   .bar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
   .bar .brand { font-weight: 600; letter-spacing: .02em; font-size: 16px; }
   .bar .brand b { color: var(--accent); }
@@ -17,15 +19,15 @@
   .bar .spacer { flex: 1; }
   .bar .brand { color: var(--text); text-decoration: none; }
   .bar a.brand[href]:hover b { text-decoration: underline; }
-  .bar .back { color: var(--text); font-size: 15px; font-weight: 600; text-decoration: none; background: #1e2740; border: 1px solid var(--border); border-radius: 8px; padding: 5px 12px; }
+  .bar .back { color: var(--text); font-size: 15px; font-weight: 600; text-decoration: none; background: #13161D; border: 1px solid var(--border); border-radius: 8px; padding: 5px 12px; }
   .bar .back:hover { color: var(--text); border-color: var(--accent); }
   .bar .what { font-weight: 600; font-size: 17px; }
-  .bar .hint { font-size: 16px; color: var(--accent); background: rgba(94,234,212,.08); border: 1px solid rgba(94,234,212,.3); border-radius: 99px; padding: 3px 11px; }
+  .bar .hint { font-size: 16px; color: var(--accent); background: rgba(62,240,200,.08); border: 1px solid rgba(62,240,200,.3); border-radius: 99px; padding: 3px 11px; }
   .bar .hint::before { content: "▸ "; }
   .bar .brand, .bar .back, .bar .what { white-space: nowrap; }
   .bar .hint { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   @media (max-width: 1600px) { .bar .legend { display: none; } }
-  .bar button { background: #1e2740; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+  .bar button { background: #13161D; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
   .bar button:hover { border-color: var(--accent); }
   .bar button.on { border-color: var(--accent); color: var(--accent); }
   .split { flex: 1; min-height: 0; display: flex; }
@@ -34,7 +36,7 @@
   .pane { position: relative; min-width: 0; height: 100%; }
   .pane iframe { border: 0; width: 100%; height: 100%; display: block; background: #fff; }
   #benchPane iframe { background: var(--bg); }
-  .pane .label { position: absolute; top: 6px; left: 8px; z-index: 2; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding: 2px 6px; border-radius: 10px; background: rgba(15,20,32,.75); color: var(--muted); pointer-events: none; }
+  .pane .label { position: absolute; top: 6px; left: 8px; z-index: 2; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding: 2px 6px; border-radius: 10px; background: rgba(10,11,15,.8); color: var(--muted); pointer-events: none; }
   /* Pill text centered in its border (cap height to baseline), line-height 1 as the fallback. */
   .pane .label, .bar .hint { line-height: 1; }
   @supports (text-box: trim-both cap alphabetic) { .pane .label { text-box: trim-both cap alphabetic; padding-top: 4px; padding-bottom: 4px; } .bar .hint { text-box: trim-both cap alphabetic; padding-top: 5px; padding-bottom: 5px; } }

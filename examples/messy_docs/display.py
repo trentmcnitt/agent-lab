@@ -58,8 +58,13 @@ def _words(t: str) -> set[str]:
 def snippet(text: str, query: str | None) -> str:
     """The sentence (or line) sharing the most words with the query; ties go to the earlier one.
     Trimmed to SNIPPET_MAX characters on a word boundary. No overlap: the passage's opening."""
-    flat = re.sub(r"[ \t]+", " ", text or "").strip()
+    body = "\n".join(l for l in (text or "").split("\n") if not re.match(r"\s*#{1,6}\s", l))
+    flat = re.sub(r"[ \t]+", " ", body if body.strip() else (text or "")).strip()
     parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", flat) if p.strip()]
+    # A Markdown heading line (dropped above) is the passage's title, not what it says; a list number
+    # split off as a "sentence" says nothing: neither is the snippet when the passage has prose.
+    prose = [p for p in parts if re.search(r"[^\W\d_]{2,}", p)]
+    parts = prose or parts
     qw = _words(query or "")
     best, best_score = (parts[0] if parts else ""), 0
     for p in parts:

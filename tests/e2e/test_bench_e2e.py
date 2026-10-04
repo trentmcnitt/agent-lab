@@ -53,10 +53,10 @@ def test_replay_plays_to_the_end(page, site, name, mode):
         out = p.inner_text("[data-p=status]")
         expect = {"hello-answer": "Answered", "req-012-approved": "approved by a person", "req-019": "Handed to a person"}[name]
         assert expect in out
-        # The callout is on the last step, numbered, joined to it by the wedge.
+        # The panel is on the last step, numbered; the step points at it across the divider.
         assert p.locator(".pres .gnode.focus").count() == 1
         assert p.locator("[data-p=bubble] .bb-num").count() == 1
-        assert p.locator("[data-p=wedge] polygon").count() == 1
+        assert p.is_visible("[data-p=mk] .tab") and p.is_visible("[data-p=divider]") and p.is_visible("[data-p=notch]")
         # One more step forward is the recap: the four questions.
         p.keyboard.press("ArrowRight")
         p.wait_for_selector("[data-p=bubble] .rc")
@@ -139,7 +139,7 @@ def test_keys_step_and_a_single_step_reads_as_paused(page, site):
     p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent !== t", arg=first, timeout=15_000)
     p.keyboard.press("ArrowLeft")
     p.wait_for_function("t => document.querySelector('[data-p=bubble] .bb-name').textContent === t", arg=first, timeout=15_000)
-    assert "▶ Continue" in p.inner_text("[data-p=transport]")
+    assert "▶ continue" in p.inner_text("[data-p=transport]").lower()
 
 
 # ---- open a source --------------------------------------------------------------------------
@@ -150,7 +150,7 @@ def test_open_a_source_shows_the_text_the_ai_was_given(page, site):
     p.click(".pres .gnode[data-node=retrieve]")
     tile = p.locator("[data-p=bubble] .bb-tile.st-given").first
     assert tile.count(), "no source item was given to the AI"
-    assert "available" in p.inner_text("[data-p=bubble] .bb-legend")
+    assert "given to the AI" in p.inner_text("[data-p=bubble] .bb-countline")
     tile.click()
     item = p.locator(".b-item")
     item.wait_for()
@@ -385,16 +385,15 @@ def test_try_another_starts_the_new_request_at_its_first_step(page, site):
 
 @pytest.mark.parametrize("size", [(1920, 1080), (960, 720)])
 def test_stage_boxes_fit_their_words_and_edges_show_a_shaft(page, site, size):
-    # Every box holds its name and its footer (actor chip, badge) without clipping either, every
-    # badge fits whole, and an edge between stacked boxes is longer than its arrowhead.
+    # Every box holds its name (at most two lines, never clipped) and its line under it, inside the
+    # box; and an edge between stacked boxes is longer than its arrowhead.
     p = page.page
     p.set_viewport_size({"width": size[0], "height": size[1]})
     p.goto(f"{site}/bench/?replay={RECORDINGS['req-012-approved']}&mode=presentation&at=end")
     p.wait_for_selector("[data-p=transport] button.main[data-act=restart]", timeout=30_000)
     bad = p.evaluate("""() => [...document.querySelectorAll('.ps-map .snode')].filter(n => {
-        const gl = n.querySelector('.gl'), ft = n.querySelector('.s-foot'), gp = n.querySelector('.gp');
-        return gl.scrollHeight > gl.clientHeight + 1 || ft.getBoundingClientRect().bottom > n.getBoundingClientRect().bottom + 0.5
-          || (!gp.hidden && gp.scrollWidth > gp.clientWidth + 1);
+        const gl = n.querySelector('.gl'), m = n.querySelector('.s-meta'), r = n.getBoundingClientRect();
+        return gl.scrollHeight > gl.clientHeight + 1 || (m.textContent && m.getBoundingClientRect().bottom > r.bottom + 0.5);
       }).map(n => n.dataset.node)""")
     assert bad == [], bad
     # The straight edge from the first step to the second: its length on screen beats the arrowhead's.
@@ -414,3 +413,26 @@ def test_stage_boxes_fit_their_words_and_edges_show_a_shaft(page, site, size):
         }).map(e => e.textContent)
       }""")
     assert over == [], over
+
+
+# ---- S4: calls inside one step, documents grouped by file ------------------------------------------
+def test_an_agent_loop_step_lists_its_calls_in_order_in_both_modes(page, site):
+    p = page.page
+    p.set_viewport_size({"width": 1920, "height": 1080})
+    p.goto(f"{site}/bench/?replay=examples/agent-loop.recording.jsonl&mode=presentation&at=end")
+    p.wait_for_selector("[data-p=transport] button.main[data-act=restart]", timeout=30_000)
+    assert "6 calls" in p.inner_text(".pres .gnode[data-node=research] .s-meta")
+    p.click(".pres .gnode[data-node=research]")
+    p.wait_for_selector("[data-p=bubble] .bb-call")
+    calls = p.locator("[data-p=bubble] .bb-call")
+    assert calls.count() == 6
+    assert [calls.nth(i).locator(".who2").inner_text().lower() for i in range(6)] == ["ai", "tool", "ai", "tool", "tool", "ai"]
+    assert p.locator("[data-p=bubble] .same").count() == 2, "the two tools asked for at once are marked"
+    assert "inside this step" in p.inner_text("[data-p=strip]")
+    p.click(".viewtoggle button[data-v=engineering]")     # the selected step carries over
+    rows = p.locator(".eng .wf details.wfr")
+    rows.first.wait_for()
+    assert rows.count() == 6
+    rows.nth(2).locator("summary").click()
+    assert "asked for" in rows.nth(2).inner_text()
+    p.evaluate("localStorage.removeItem('bench.mode')")
