@@ -53,10 +53,13 @@ def test_replay_plays_to_the_end(page, site, name, mode):
         out = p.inner_text("[data-p=status]")
         expect = {"hello-answer": "Answered", "req-012-approved": "approved by a person", "req-019": "Handed to a person"}[name]
         assert expect in out
-        # The panel is on the last step, numbered; the step points at it across the divider.
+        # The detail is on the last step, numbered; one marker on the map (the ring), no pointer or divider.
         assert p.locator(".pres .gnode.focus").count() == 1
         assert p.locator("[data-p=bubble] .bb-num").count() == 1
-        assert p.is_visible("[data-p=mk] .tab") and p.is_visible("[data-p=divider]") and p.is_visible("[data-p=notch]")
+        assert p.locator("[data-p=mk], [data-p=divider], [data-p=notch]").count() == 0
+        # The map is on top of the detail.
+        m, d = p.locator("[data-p=map]").bounding_box(), p.locator("[data-p=bubble]").bounding_box()
+        assert m["y"] + m["height"] <= d["y"] + 1
         # One more step forward is the recap: the four questions.
         p.keyboard.press("ArrowRight")
         p.wait_for_selector("[data-p=bubble] .rc")
@@ -166,22 +169,33 @@ def test_given_overlay_opens_and_closes(page, site):
     assert p.locator("[data-p=bubble] [data-act=given]").count() == 0
     p.click(".pres .gnode[data-node=propose_action]")
     p.click("[data-p=bubble] [data-act=given]")
-    ov = p.locator("[data-p=overlay]")
+    ov = p.locator("[data-p=drawer].open")
     ov.wait_for(state="visible")
+    p.wait_for_timeout(450)   # the drawer's slide
+    # A drawer over the detail only: the map stays in view above it, the step still ringed.
+    dr, mp, side = ov.bounding_box(), p.locator("[data-p=map]").bounding_box(), p.locator("[data-p=side]").bounding_box()
+    assert dr["y"] >= mp["y"] + mp["height"] - 1 and abs(dr["y"] - side["y"]) < 2, (dr, mp, side)
+    assert "propose_action" == p.get_attribute(".pres .gnode.focus", "data-node")
     text = ov.inner_text().lower()   # (role labels are styled uppercase)
     assert "what the ai was given" in text and "what the app sent it" in text and "what it answered" in text
-    assert "{" not in text.split("\n")[0]
-    assert ov.locator("mark").count() > 0, "retrieved handbook text should be highlighted in the prompt"
+    assert "back to step" in text.split("\n")[0]
     # The ticket step's answer form (from params.json_schema) and its JSON answer, as rows.
     assert "the form it had to fill in" in text and "action type" in text
     assert ov.locator(".g-call.focus .g-answer dt", has_text="title").count() == 1
     assert '{"action_type"' not in ov.locator(".g-call.focus").inner_text()   # the raw JSON is folded away
-    p.click("[data-p=overlay] .p-close")
-    ov.wait_for(state="hidden")
+    p.click("[data-p=drawer] [data-act=close]")
+    p.locator("[data-p=drawer].open").wait_for(state="detached")
     p.click("[data-p=bubble] [data-act=given]")
     ov.wait_for(state="visible")
     p.keyboard.press("Escape")
-    ov.wait_for(state="hidden")
+    p.locator("[data-p=drawer].open").wait_for(state="detached")
+    assert p.is_visible("[data-p=bubble]"), "Esc closes the drawer, not the detail"
+    # The step that decided from the handbook: the retrieved text is highlighted in its prompt.
+    p.click(".pres .gnode[data-node=classify]")
+    p.click("[data-p=bubble] [data-act=given]")
+    ov.wait_for(state="visible")
+    assert ov.locator("mark").count() > 0, "retrieved handbook text should be highlighted in the prompt"
+
 
 
 # ---- the shell, side by side, synced by postMessage -------------------------------------------
@@ -244,6 +258,9 @@ def test_level0_pydantic_ai_draws_an_inferred_map(page, live_bench):
     p.wait_for_selector("#bench.mode-presentation")
     assert p.locator(".topbar [data-p=inferred]").is_visible()
     assert "reset my VPN password" in p.inner_text("[data-p=req]")
+    # Live, the run plays on the whole map; M opens the detail (the step the run ended on).
+    p.locator("[data-p=now] .now-name").wait_for(timeout=10_000)
+    p.keyboard.press("m")
     p.wait_for_function("() => (document.querySelector(\"[data-p=bubble] .bb-name\") || {}).textContent", timeout=10_000)
     assert "didn’t come this way" not in p.inner_text("[data-p=bubble]")
     assert "AI cost not known" in p.inner_text("[data-p=bottom]"), "an unpriced model is unknown, never free"
@@ -279,6 +296,7 @@ def test_a_langgraph_app_live_draws_the_map_its_run_carried(page, live_bench):
     p.locator("[data-p=status]", has_text="Finished").wait_for(timeout=15_000)
     # The declared fields: the request, and the reply rather than the whole final state as JSON.
     assert "How do I reset my password?" in p.inner_text("[data-p=req]")
+    p.keyboard.press("m")   # the detail: the step the run ended on
     reply = p.locator("[data-p=bubble] .bb-quote.reply")
     reply.wait_for(timeout=15_000)
     said = r.stdout.strip().splitlines()[-1]
@@ -311,9 +329,11 @@ def test_presenter_keys_map_only_and_recap(page, site):
     w.page.goto(f"{site}/bench/?replay={RECORDINGS['req-012-approved']}&mode=presentation&at=classify")
     p = w.page
     p.wait_for_selector("[data-p=bubble] .bb-card.chosen")
+    # M: the whole map, the line under it about the step (the detail closed); M again: the detail.
     p.keyboard.press("m")
-    p.wait_for_selector("#bench.p-maponly")
+    p.wait_for_selector("#bench.v-map")
     assert not p.is_visible("[data-p=bubble]")
+    assert p.is_visible("[data-p=now] .now-open")
     p.keyboard.press("m")
     p.wait_for_selector("[data-p=bubble] .bb-card.chosen")
     p.keyboard.press("r")
@@ -396,14 +416,20 @@ def test_stage_boxes_fit_their_words_and_edges_show_a_shaft(page, site, size):
         return gl.scrollHeight > gl.clientHeight + 1 || (m.textContent && m.getBoundingClientRect().bottom > r.bottom + 0.5);
       }).map(n => n.dataset.node)""")
     assert bad == [], bad
-    # The straight edge from the first step to the second: its length on screen beats the arrowhead's.
-    shaft = p.evaluate("""() => {
+    # The travelled line is visible between stacked boxes: in the detail view's compact map, and on the
+    # whole map (M), where the line being travelled draws on and marches, a real gap.
+    gap = lambda: p.evaluate("""() => {
         const a = document.querySelector('.ps-map .gnode[data-node=ingest]').getBoundingClientRect();
         const b = document.querySelector('.ps-map .gnode[data-node=retrieve]').getBoundingClientRect();
-        const m = document.querySelector('.ps-map marker#parr-t'), k = a.height / document.querySelector('.ps-map .gnode[data-node=ingest]').offsetHeight;
-        return (b.top - a.bottom) - Number(m.getAttribute('markerWidth')) * k;
-      }""")
-    assert shaft >= 8, f"edge shaft {shaft:.1f}px"
+        return b.top - a.bottom; }""")
+    assert gap() >= 8, f"compact gap {gap():.1f}px"
+    p.keyboard.press("m")
+    p.wait_for_selector("#bench.v-map .graph.t-roomy")
+    p.wait_for_timeout(600)
+    assert gap() >= 18, f"whole-map gap {gap():.1f}px"
+    # The lit path has no arrowheads (it runs into its boxes); a path not taken keeps one.
+    assert p.evaluate("getComputedStyle(document.querySelector('.ps-map .edge.taken path.ln')).markerEnd") == "none"
+    assert "parr-u" in p.evaluate("getComputedStyle(document.querySelector('.ps-map .edge.untaken path.ln')).markerEnd")
     # The footer's words are never under its controls.
     over = p.evaluate("""() => {
         const c = document.querySelector('.ps-ctl').getBoundingClientRect();
@@ -436,3 +462,46 @@ def test_an_agent_loop_step_lists_its_calls_in_order_in_both_modes(page, site):
     rows.nth(2).locator("summary").click()
     assert "asked for" in rows.nth(2).inner_text()
     p.evaluate("localStorage.removeItem('bench.mode')")
+
+
+# ---- pane-first: the bench beside the app at Trent's window size (1440×900) ------------------------
+def test_the_pane_keeps_the_map_on_top_and_one_marker(page, site):
+    if not HELPDESK_APP.exists():
+        pytest.skip("helpdesk static app not built")
+    p = page.page
+    p.set_viewport_size({"width": 1440, "height": 900})
+    p.goto(f"{site}/bench/shell/?sync=1&app=/apps/slack-helpdesk/&home=/&back=/lab/&title=Slack%20Helpdesk%20Agent")
+    app, bench = p.frame_locator("#appFrame"), p.frame_locator("#benchFrame")
+    bench.locator("#bench.mode-presentation.v-map").wait_for()
+    app.get_by_role("button", name="req-012").click()
+    # The run plays on the whole map: steps light, the line into the running step marches, and at the
+    # sign-off the step pulses with a cue pointing at the app.
+    bench.locator(".pres .edge.flowing").first.wait_for(timeout=20_000)
+    bench.locator("[data-p=cue]:not([hidden])", has_text="Your turn").wait_for(timeout=40_000)
+    assert "gatewait" in bench.locator(".pres .gnode[data-node=approval_gate]").get_attribute("class")
+    assert "exactly this" in bench.locator("[data-p=now]").inner_text()
+    app.get_by_role("button", name="Approve").click()
+    bench.locator("[data-p=status]", has_text="approved by a person").wait_for(timeout=40_000)
+    # A step clicked: the map glides to the top, the step ringed, its detail under it, numbered alike.
+    bench.locator(".pres .gnode[data-node=classify]").click()
+    bench.locator("#bench.v-detail [data-p=bubble] .bb-card.chosen").wait_for()
+    p.wait_for_timeout(600)
+    m, d = bench.locator("[data-p=map]").bounding_box(), bench.locator("[data-p=bubble]").bounding_box()
+    assert m["y"] + m["height"] <= d["y"] + 1, (m, d)
+    assert bench.locator(".pres .gnode.focus").count() == 1
+    assert bench.locator(".pres .gnode.focus .s-num").inner_text() == bench.locator("[data-p=bubble] .bb-num").inner_text() == "3"
+    # Every step of the map is inside its region (no scroll needed to see where you are).
+    boxes = bench.locator(".pres .gnode")
+    for i in range(boxes.count()):
+        b = boxes.nth(i).bounding_box()
+        assert b["y"] >= m["y"] - 1 and b["y"] + b["height"] <= m["y"] + m["height"] + 1, (i, b, m)
+    # "What the AI was given": a drawer over the detail only.
+    bench.locator("[data-p=bubble] [data-act=given]").click()
+    bench.locator("[data-p=drawer].open").wait_for()
+    p.wait_for_timeout(450)
+    dr = bench.locator("[data-p=drawer]").bounding_box()
+    assert dr["y"] >= m["y"] + m["height"] - 1
+    assert bench.locator("[data-p=map]").is_visible() and bench.locator(".pres .gnode.focus").count() == 1
+    p.keyboard.press("Escape")
+    p.keyboard.press("Escape")
+    bench.locator("#bench.v-map").wait_for()

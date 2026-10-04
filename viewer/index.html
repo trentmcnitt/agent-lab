@@ -111,11 +111,17 @@
   .eng-top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 7px 16px; border-bottom: 1px solid var(--border); background: #0A0B0F; position: relative; z-index: 3; }
   .eng-top #controls, .eng-top .bh, .eng-top .meterbar { border: 0; background: none; padding: 0; }
   .eng-top .meterbar { flex: 1 1 auto; font-size: 12.5px; }
-  .bgrid { --acc: var(--path); position: relative; flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 50%); gap: 28px; padding: 16px 24px 12px 16px; }
+  .bgrid { --acc: var(--path); position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .bgrid.a-app { --acc: var(--app); } .bgrid.a-ai { --acc: var(--ai); } .bgrid.a-rule { --acc: var(--rule); } .bgrid.a-person { --acc: var(--person); }
   .col { min-width: 0; min-height: 0; }
-  .panelcol { position: relative; z-index: 2; overflow: auto; border: 1px solid var(--border-2); border-radius: 14px; background: linear-gradient(180deg, #0F1117, #0B0D12); box-shadow: 0 20px 60px rgba(0,0,0,.45); scrollbar-width: thin; scrollbar-color: #2A2F3B transparent; }
-  .panelcol::before { content: ""; position: sticky; display: block; top: 0; height: 3px; margin-bottom: -3px; z-index: 2; background: var(--acc); box-shadow: 0 0 18px var(--acc); }
+  .panelcol { position: relative; z-index: 2; flex: 1 1 auto; min-height: 0; overflow: auto; background: linear-gradient(180deg, #0D0F14, #0A0C10); scrollbar-width: thin; scrollbar-color: #2A2F3B transparent; }
+  .panelcol::before { content: ""; position: sticky; display: block; top: 0; height: 2px; margin-bottom: -2px; z-index: 2; background: var(--acc); box-shadow: 0 0 14px var(--acc); }
+  .panelcol > .panel, .panelcol > .eng-wait { max-width: 1240px; margin-left: auto; margin-right: auto; }
+  .eng-wait { display: none; padding: 26px 24px; font: 400 16px/1.5 var(--sans); color: var(--text-2); }
+  .eng-wait b { color: var(--text); font-weight: 600; }
+  .panelcol.norun .panel { display: none; }
+  .panelcol.norun .eng-wait { display: block; }
+  .panelcol.norun::before { display: none; }
   .stitle { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 4px 0 6px; }
 
   /* The step's card */
@@ -261,112 +267,186 @@
   .tile.sel { outline: 2px solid var(--accent-2); outline-offset: 1px; }
   .legend .tile { cursor: default; display: inline-block; min-width: 0; width: 13px; height: 11px; padding: 0; vertical-align: -1px; margin: 0 3px 0 8px; font-size: 0; }
 
-  /* ---- Presentation (S4 v2) -----------------------------------------------------------------------
-     The map on the left, a docked panel on the right explaining one step. Between them a thin line in
-     the step's colour, with a notch and an arrow at the step's row; the step's box points at it
-     (a fading tab with an arrow tip, and a constant-height wire to the notch). Type for a projector
-     at 1920×1080: body 17–20 px, labels 13–16 px, nothing under 13; legible by contrast, not size.
-     The not-taken set (--off-*) is raised to S1's contrast. Below 1100 px (the bench beside an app,
-     a small window) the map and panel stack and the page scrolls; the divider and wire go, the
-     panel's top rule stays. */
+  /* ---- Presentation, pane-first -------------------------------------------------------------------
+     Designed for the bench beside an app (a ~700 px pane at a 1440×900 window); a full screen is the
+     same layout, wider. The map is always on top. The whole map (.v-map) fills the stage while a run
+     plays, a line under it about the step it's on; a step clicked (.v-detail), the same map glides to
+     a compact size pinned on top (its height set by bench.js) and the step's detail scrolls under it.
+     "What the AI was given" is a drawer over the detail only. One marker: the step the detail is about
+     is ringed in its actor's colour, its badge filled, the same badge heading the detail. */
   .pres { position: relative; background: var(--bg);
           background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); background-size: 24px 24px; background-position: 12px 12px; }
   .a-app { --ac: var(--app); } .a-ai { --ac: var(--ai); } .a-rule { --ac: var(--rule); } .a-person { --ac: var(--person); }
-  .ps-stage { --acc: var(--path); position: relative; flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 49%); gap: 28px; padding: 20px 24px 16px 16px; }
+  .ps-stage { --acc: var(--path); position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .ps-stage.a-app { --acc: var(--app); } .ps-stage.a-ai { --acc: var(--ai); } .ps-stage.a-rule { --acc: var(--rule); } .ps-stage.a-person { --acc: var(--person); }
-  .ps-map { position: relative; z-index: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-  .ps-flowhead { flex: none; display: flex; align-items: baseline; gap: 14px; padding: 0 0 10px 24px; font: 500 13px/1.2 var(--mono); color: var(--text-3); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
-  .ps-flowhead b { color: var(--text-2); font-weight: 500; }
-  .ps-legend { display: flex; gap: 16px; margin-left: auto; text-transform: none; letter-spacing: 0; }
-  .ps-legend span { display: flex; align-items: center; gap: 6px; }
-  .ps-legend .lit { width: 18px; height: 2px; background: var(--path); box-shadow: 0 0 6px var(--path); }
-  .ps-legend .dash { width: 18px; height: 0; border-top: 2px dashed var(--off-line); }
-  .ps-map .graphwrap { position: relative; flex: 1 1 auto; min-height: 0; overflow: visible; }
+  .ps-map { position: relative; z-index: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 10px 16px 0; }
+  .pres .ps-map { flex: 1 1 auto; }
+  .v-detail .pres .ps-map, .bgrid > .ps-map { flex: 0 0 auto; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, transparent, rgba(7,8,11,.6)); }
+  .ps-flowhead { flex: none; display: flex; align-items: center; gap: 10px 14px; height: 32px; padding: 0 2px 6px; font: 500 12.5px/1.2 var(--mono); color: var(--text-3); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+  .fh-l { display: flex; align-items: baseline; gap: 10px; min-width: 0; overflow: hidden; }
+  .fh-l b { color: var(--text-2); font-weight: 500; }
+  .fh-l > span::before { content: "·"; margin-right: 10px; color: var(--border-2); }
+  .v-detail .fh-k, .eng .fh-k { display: none; }
+  .v-detail .fh-l > span:first-of-type::before, .eng .fh-l > span:first-of-type::before { display: none; }
+  .bb-headline + .bb-strip, .bb-sub + .bb-strip { margin-top: 12px; }
+  .fh-hint { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text-2); }
+  .ps-legend { display: flex; gap: 12px; margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+  .ps-legend span { display: flex; align-items: center; gap: 5px; color: var(--text-3); }
+  .ps-legend i { width: 8px; height: 8px; border-radius: 2px; background: var(--ac); }
+  .ps-mapbtn { all: unset; cursor: pointer; flex: none; font: 400 13px/1 var(--mono); text-transform: none; letter-spacing: 0; color: var(--text-2); padding: 5px 9px; border: 1px solid var(--border-2); border-radius: 7px; background: var(--surface); }
+  .ps-mapbtn:hover { color: var(--text); border-color: var(--path); }
+  .ps-map .graphwrap { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   .ps-map .graphwrap.scrolly { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2A2F3B transparent; }
-  /* Below 1600 px the panel gives the map a little more room. */
-  @media (max-width: 1600px) { .ps-stage { grid-template-columns: minmax(0, 1fr) minmax(0, 46%); } .bb-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); } .bb-card .why { font-size: 14px; } .bb-name { font-size: 26px; } }
-  .ps-side { position: relative; z-index: 2; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
-  .ps-bubble { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: none; border: 1px solid var(--border-2); border-radius: 14px;
-               background: linear-gradient(180deg, #0F1117, #0B0D12); box-shadow: 0 20px 60px rgba(0,0,0,.45); }
-  .ps-bubble::before { content: ""; position: sticky; display: block; top: 0; left: 0; right: 0; height: 3px; margin-bottom: -3px; z-index: 2; background: var(--acc); box-shadow: 0 0 18px var(--acc); }
-  .ps-bubble::-webkit-scrollbar { display: none; }
-  /* When the panel holds more than it shows: a fade at its foot and a "more below" cue (bench.js). */
-  .ps-more { position: absolute; left: 1px; right: 1px; bottom: 1px; height: 64px; border-radius: 0 0 14px 14px; pointer-events: none; z-index: 3; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px;
-             background: linear-gradient(180deg, rgba(11,13,18,0), #0B0D12 78%); font: 400 13px/1 var(--mono); color: var(--text-2); }
+  .ps-side { position: relative; z-index: 2; flex: 0 0 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; container-type: inline-size; }
+  .v-detail .ps-side { flex: 1 1 auto; }
+  /* The line under the whole map */
+  .ps-now { flex: none; border-top: 1px solid var(--border); background: linear-gradient(180deg, #0C0D12, #090A0E); }
+  .v-detail .ps-now { display: none; }
+  .now { --acc: var(--ac, var(--path)); display: flex; align-items: center; gap: 12px; height: 62px; padding: 6px 16px; overflow: hidden; }
+  .now .bb-num { width: 34px; height: 34px; font-size: 16px; border-radius: 8px; }
+  .now-t { flex: 1; min-width: 0; }
+  .now-name { font: 600 16px/1.25 var(--sans); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .now-st { font: 400 12.5px/1 var(--mono); color: var(--text-3); margin-left: 6px; }
+  .now.s-now .now-st { color: var(--path); } .now.s-waiting .now-st { color: var(--person); }
+  .now-h { margin-top: 3px; font: 400 15px/1.35 var(--sans); color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .now-h em { font-style: normal; color: var(--acc); } .now-h .nx { color: var(--path); }
+  .now.done .now-name { color: var(--path); }
+  .now.idle .now-h { font-size: 15px; }
+  .now-open { all: unset; box-sizing: border-box; cursor: pointer; flex: none; font: 500 14px/1 var(--sans); color: var(--text); padding: 9px 12px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--surface-2); white-space: nowrap; }
+  .now-open:hover { border-color: var(--acc); }
+  .now .p-btn { flex: none; }
+  /* The detail */
+  .ps-bubble { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #2A2F3B transparent; background: linear-gradient(180deg, #0D0F14, #0A0C10); }
+  .v-map .ps-bubble { display: none; }
+  .ps-bubble::before { content: ""; position: sticky; display: block; top: 0; left: 0; right: 0; height: 2px; margin-bottom: -2px; z-index: 2; background: var(--acc); box-shadow: 0 0 14px var(--acc); }
+  .ps-bubble > .bb { max-width: 1240px; margin: 0 auto; }
+  /* When the detail holds more than it shows: a fade at its foot and a "more below" cue (bench.js). */
+  .ps-more { position: absolute; left: 0; right: 0; bottom: 0; height: 56px; pointer-events: none; z-index: 3; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px;
+             background: linear-gradient(180deg, rgba(10,12,16,0), #0A0C10 78%); font: 400 13px/1 var(--mono); color: var(--text-2); }
   .ps-more[hidden] { display: none; }
   .ps-more span { border: 1px solid var(--border-2); border-radius: 999px; padding: 5px 11px; background: var(--surface); }
-  .p-maponly .ps-side, .p-maponly .ps-divider, .p-maponly .ps-notch, .p-maponly .ps-mk { display: none; }
-  .p-maponly .ps-stage { grid-template-columns: minmax(0, 1fr); }
-  /* The divider, its notch and the selected box's pointer: placed by bench.js from the real boxes. */
-  .ps-divider, .ps-notch, .ps-mk { position: absolute; pointer-events: none; z-index: 3; }
-  .ps-divider { width: 3px; margin-left: -.5px; border-radius: 2px; background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 25%, transparent), var(--acc) 4%, var(--acc) 96%, color-mix(in srgb, var(--acc) 25%, transparent));
-                box-shadow: 0 0 12px color-mix(in srgb, var(--acc) 35%, transparent); }
-  .ps-notch { width: 6px; margin-left: -2px; border-radius: 3px; background: var(--acc); box-shadow: 0 0 16px var(--acc), 0 0 4px var(--acc); }
-  .ps-notch::after { content: ""; position: absolute; left: 8px; top: 50%; transform: translateY(-50%); border-left: 9px solid var(--acc); border-top: 8px solid transparent; border-bottom: 8px solid transparent; filter: drop-shadow(0 0 4px var(--acc)); }
-  .ps-mk .tab { position: absolute; top: 0; bottom: 0; left: 0; width: 58px; clip-path: polygon(0 0, 76% 0, 100% 50%, 76% 100%, 0 100%);
-                background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--acc) 26%, transparent) 45%, color-mix(in srgb, var(--acc) 85%, transparent) 78%, var(--acc)); }
-  .ps-mk .wire { position: absolute; height: 2px; top: 50%; margin-top: -1px; background: var(--acc); box-shadow: 0 0 8px var(--acc); }
-  .ps-divider[hidden], .ps-notch[hidden], .ps-mk[hidden], .ps-mk .wire[hidden] { display: none; }
+  /* "Your turn": beside the step waiting for a person, toward the app. */
+  .ps-cue { position: absolute; z-index: 4; display: flex; align-items: center; gap: 8px; font: 500 14px/1.25 var(--sans); color: var(--person); background: rgba(20,17,9,.95);
+            border: 1px solid rgba(255,200,87,.5); border-radius: 8px; padding: 7px 11px; white-space: nowrap; pointer-events: none; box-shadow: 0 0 24px rgba(255,200,87,.16); animation: cuein .35s ease-out; }
+  .ps-cue[hidden] { display: none; }
+  .ps-cue b { font-weight: 600; }
+  .ps-cue .ar { display: inline-block; animation: nudge 1.3s ease-in-out infinite; }
+  @keyframes cuein { from { opacity: 0; transform: translateX(8px); } }
+  @keyframes nudge { 50% { transform: translateX(-4px); } }
+  /* The drawer: "What the AI was given", over the detail only. */
+  .ps-drawer { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; background: #0C0E13; border-top: 2px solid var(--ai);
+               box-shadow: 0 -18px 40px rgba(0,0,0,.55), 0 -1px 24px color-mix(in srgb, var(--ai) 25%, transparent);
+               transform: translateY(102%); visibility: hidden; transition: transform .32s cubic-bezier(.2,.75,.2,1), visibility 0s linear .32s; }
+  .ps-drawer.open { transform: none; visibility: visible; transition: transform .32s cubic-bezier(.2,.75,.2,1), visibility 0s; }
+  .dr-hd { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  .dr-back { all: unset; box-sizing: border-box; cursor: pointer; flex: none; display: inline-flex; align-items: center; gap: 8px; font: 500 15px/1 var(--sans); color: var(--text); padding: 8px 12px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--surface-2); white-space: nowrap; }
+  .dr-back:hover { border-color: var(--ac); }
+  .dr-back .b { width: 22px; height: 22px; border-radius: 5px; display: grid; place-items: center; font: 600 12px/1 var(--mono); background: var(--ac); color: #0B0C10; }
+  .dr-t { flex: 1; min-width: 0; font: 600 17px/1.2 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dr-t small { display: block; font: 400 13px/1.3 var(--mono); color: var(--text-3); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; }
+  .dr-hd .g-big { margin-left: 0; flex: none; }
+  .dr-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2A2F3B transparent; }
+  .dr-body.g-panel { max-width: none; margin: 0; padding: 4px 16px 24px; }
+  .dr-body .g-note { font-size: 14.5px; }
+  .dr-body .g-call { margin-top: 10px; }
 
   /* The map's boxes: a badge (the step's number in run order, a letter once the run is over and it
-     wasn't taken), the plain name, one line under it (time, then what's worth a glance), and who
-     does the step. Taken steps solid; untaken dashed in the raised --off set; the selected step
-     lit in its actor's colour. bench.js BOX_TYPE matches these sizes. */
-  .snode { position: absolute; display: flex; align-items: center; gap: 12px; padding: 0 14px 0 12px; border-radius: 10px; overflow: visible; cursor: pointer;
+     wasn't taken), the plain name, a line under it (time, then what's worth a glance) and who does the
+     step; compact boxes keep the name only (the badge in its actor's colour, a legend over the map).
+     bench.js BOX_TYPE matches these sizes. */
+  .snode { position: absolute; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 10px; border-radius: 10px; overflow: visible; cursor: pointer;
            background: linear-gradient(180deg, var(--surface-2), var(--surface)); border: 1px solid var(--border-2); color: var(--text);
-           box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.35); transition: box-shadow .2s, border-color .2s, background-color .2s; }
-  .snode .s-num { flex: none; width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; font: 600 14px/1 var(--mono); color: var(--ac);
-                  background: color-mix(in srgb, var(--ac) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ac) 40%, transparent); }
+           box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.35); transition: box-shadow .35s, border-color .3s, background-color .3s, color .3s, opacity .4s; }
+  .snode:hover { border-color: color-mix(in srgb, var(--ac) 60%, var(--border-2)); }
+  .snode .s-num { flex: none; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font: 600 13px/1 var(--mono); color: var(--ac);
+                  background: color-mix(in srgb, var(--ac) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ac) 40%, transparent); transition: background-color .3s, color .3s, box-shadow .3s; }
   .snode .s-body { flex: 1; min-width: 0; }
-  .snode .gl { font: 500 18px/22px var(--sans); letter-spacing: -.01em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .snode .s-meta { font: 400 13px/18px var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .snode .gl { font: 500 16px/20px var(--sans); letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t-two .snode .gl { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .snode .s-meta { font: 400 12.5px/16px var(--mono); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   .snode .s-meta .v { color: var(--text-2); }
   .snode .s-meta:empty { display: none; }
-  .snode .actor { flex: none; font: 500 13px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ac); opacity: .9; border: none; padding: 0; background: none; }
+  .snode .actor { flex: none; font: 500 12.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ac); opacity: .9; border: none; padding: 0; background: none; }
+  .t-wide .snode { gap: 12px; padding: 0 14px 0 12px; }
+  .t-wide .snode .gl { font-size: 18px; line-height: 22px; }
+  .t-wide .snode .s-meta { font-size: 13.5px; line-height: 18px; }
+  .t-wide .snode .s-num { width: 28px; height: 28px; font-size: 14px; }
+  .t-wide .snode .actor { font-size: 13.5px; }
+  .t-compact .snode { gap: 9px; padding: 0 10px 0 8px; border-radius: 8px; box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 4px 14px rgba(0,0,0,.3); }
+  .t-compact .snode .s-meta, .t-compact .snode .actor { display: none; }
+  .t-compact .snode .s-num { width: 24px; height: 24px; font-size: 12.5px; border-radius: 6px; }
+  .t-compact.t-wide .snode { gap: 10px; padding: 0 12px 0 10px; }
+  .t-compact.t-wide .snode .gl { font-size: 17px; line-height: 21px; }
+  .t-compact.t-wide .snode .s-num { width: 26px; height: 26px; font-size: 13px; }
   .pips { display: inline-flex; gap: 3px; vertical-align: -1px; margin-left: 6px; }
   .pips i { width: 7px; height: 10px; border-radius: 2px; background: var(--app); }
   .pips i.ai { background: var(--ai); }
-  .snode.done, .snode.active, .snode.starting { border-color: color-mix(in srgb, var(--path) 26%, var(--border-2)); }
+  /* States: not reached yet (a dim dot for a badge), lit (done), running (a teal glow with a sweep),
+     waiting for a person (a pulse in their colour), not taken once the run is over (dashed). */
+  .snode.done, .snode.active, .snode.starting { border-color: color-mix(in srgb, var(--path) 30%, var(--border-2)); }
   .snode.active .s-meta .v, .snode.starting .s-meta .v { color: var(--path); }
   .snode.idle { color: var(--text-2); }
   .snode.idle .s-num { color: var(--text-3); background: transparent; border-color: var(--border-2); }
-  /* A step not reached yet has no number: a dim dot, not an empty box (which reads as a checkbox). */
   .snode .s-num:empty { background: transparent; border-color: transparent; box-shadow: none; }
   .snode .s-num:empty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); opacity: .7; }
+  .snode.active, .snode.starting { border-color: var(--path); box-shadow: 0 0 0 1px rgba(62,240,200,.35), 0 0 28px rgba(62,240,200,.28), 0 8px 24px rgba(0,0,0,.35); }
+  .snode.active::after, .snode.starting::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+                                                 background: linear-gradient(100deg, transparent 30%, rgba(62,240,200,.11) 50%, transparent 70%); background-size: 250% 100%; animation: sweep 1.3s linear infinite; }
+  @keyframes sweep { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+  .snode.gatewait { border-color: var(--person); animation: gatepulse 1.5s ease-in-out infinite; }
+  .snode.gatewait .s-meta .v { color: var(--person); }
+  @keyframes gatepulse { 0%, 100% { box-shadow: 0 0 0 1px rgba(255,200,87,.55), 0 0 30px rgba(255,200,87,.38), 0 8px 24px rgba(0,0,0,.35); } 50% { box-shadow: 0 0 0 1px rgba(255,200,87,.25), 0 0 8px rgba(255,200,87,.12), 0 8px 24px rgba(0,0,0,.35); } }
   .snode.untaken, .snode.skipped { background: var(--off-bg); border: 1.5px dashed var(--off-b); box-shadow: none; }
   .snode.untaken .gl, .snode.skipped .gl { color: var(--off-t); font-weight: 500; }
   .snode.untaken .s-meta, .snode.skipped .s-meta { color: var(--off-m); }
   .snode.untaken .s-num, .snode.skipped .s-num { color: var(--off-t); background: transparent; border-color: var(--off-b); border-style: dashed; }
-  .snode.untaken .actor { opacity: .75; }
+  .snode.untaken .actor { opacity: .7; }
   .snode.error { border-color: var(--bad); }
-  .snode.gatewait { border-color: var(--person); box-shadow: 0 0 0 3px color-mix(in srgb, var(--person) 18%, transparent), 0 8px 24px rgba(0,0,0,.35); }
-  .snode.focus { border: 1.5px solid var(--ac); background: linear-gradient(180deg, color-mix(in srgb, var(--ac) 10%, var(--surface-2)), var(--surface));
-                 box-shadow: 0 0 0 4px color-mix(in srgb, var(--ac) 16%, transparent), 0 0 36px color-mix(in srgb, var(--ac) 22%, transparent), 0 8px 24px rgba(0,0,0,.4); }
-  .snode.focus .s-num { background: var(--ac); color: #0B0C10; border: 1px solid var(--ac); box-shadow: 0 0 14px color-mix(in srgb, var(--ac) 60%, transparent); }
+  /* The one marker: the step the detail is about, ringed in its actor's colour, its badge filled. */
+  .snode.focus { border: 1.5px solid var(--ac); background: linear-gradient(180deg, color-mix(in srgb, var(--ac) 11%, var(--surface-2)), var(--surface));
+                 box-shadow: 0 0 0 3px color-mix(in srgb, var(--ac) 18%, transparent), 0 0 30px color-mix(in srgb, var(--ac) 24%, transparent), 0 8px 24px rgba(0,0,0,.4); }
+  .snode.focus .s-num { background: var(--ac); color: #0B0C10; border: 1px solid var(--ac); box-shadow: 0 0 12px color-mix(in srgb, var(--ac) 60%, transparent); }
   .snode.focus .gl { color: var(--text); font-weight: 600; }
   .snode.untaken.focus { border: 1.5px dashed var(--ac); }
   .snode.selected { outline: none; }
-  .ps-pane .snode { gap: 10px; padding: 0 12px 0 10px; }
-  .ps-pane .snode .gl { font-size: 16px; line-height: 20px; }
-  .ps-pane .snode .s-num { width: 26px; height: 26px; font-size: 13px; }
 
-  /* Edges: this run's path solid and glowing in the path colour, with a slow flow over it; every
-     other path dashed in --off-line. Labels sit on plates: a lit one beside its line, the rest on it. */
+  /* Lines: this run's path solid and glowing in the path colour, running into its boxes (no arrowhead,
+     no seam); the line into the step being shown running marches (draws on first, bench.js); every
+     other path dashed in --off-line, with an arrowhead. Labels sit on plates: a lit one in the path
+     colour, the rest dashed. */
   .ps-map .graph svg.edges { overflow: visible; }
-  .ps-map .edge path.ln { fill: none; stroke: var(--off-line); stroke-width: 1.8; stroke-dasharray: 6 5; marker-end: url(#parr-u); }
+  .ps-map .edge path.ln { fill: none; stroke: var(--off-line); stroke-width: 1.6; stroke-dasharray: 5 5; marker-end: url(#parr-u); transition: opacity .4s; }
   .ps-map .edge .glow, .ps-map .edge .flow { display: none; }
-  .ps-map .edge.taken path.ln { stroke: var(--path); stroke-width: 2.2; stroke-dasharray: none; marker-end: url(#parr-t); }
-  .ps-map .edge.taken .glow { display: inline; fill: none; stroke: var(--path); stroke-width: 5; opacity: .45; filter: url(#pglow); }
-  .ps-map .edge.taken .flow { display: inline; fill: none; stroke: #E9FFF9; stroke-width: 2.2; opacity: .7; stroke-dasharray: 3 9; animation: pflow 1.1s linear infinite; }
-  @keyframes pflow { to { stroke-dashoffset: -12; } }
-  @media (prefers-reduced-motion: reduce) { .ps-map .edge.taken .flow { animation: none; } }
-  .ps-map marker.parr-t { color: var(--path); } .ps-map marker.parr-u { color: var(--off-line); }
+  .ps-map .edge.untaken path.ln { opacity: .8; }
+  .ps-map .edge.taken path.ln { stroke: var(--path); stroke-width: 2.4; stroke-dasharray: none; marker-end: none; }
+  .ps-map .edge.taken .glow { display: inline; fill: none; stroke: var(--path); stroke-width: 6; opacity: .38; filter: url(#pglow); }
+  /* The line being travelled reads as travel: the lit line under it dimmed, bright dashes marching on it. */
+  .ps-map .edge.flowing path.ln { stroke-opacity: .4; }
+  .ps-map .edge.flowing .glow { opacity: .18; }
+  .ps-map .edge.flowing .flow { display: inline; fill: none; stroke: #E6FFF9; stroke-width: 2.8; stroke-linecap: round; stroke-dasharray: 6 8; opacity: 1; animation: pflow .5s linear infinite; filter: drop-shadow(0 0 3px rgba(62,240,200,.9)); }
+  .ps-map .edge.flowing.to-person .flow { stroke: #FFE3A6; }
+  @keyframes pflow { to { stroke-dashoffset: -14; } }
+  .ps-map .edge path.ln { transition: opacity .4s, stroke-opacity .35s; }
+  .t-compact .edge.taken path.ln { stroke-width: 2.2; }
+  .ps-map marker.parr-u { color: var(--off-line); }
   .ps-map .edge .hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: help; }
   .elabel { position: absolute; z-index: 1; transform: translate(-50%, -50%); font: 400 13px/1 var(--mono); padding: 5px 8px; border-radius: 6px; white-space: nowrap; pointer-events: none;
-            background: var(--bg); color: var(--off-lab); border: 1px dashed #4A5163; }
-  .elabel.lit { color: var(--path); border: 1px solid rgba(62,240,200,.35); background: #08130F; box-shadow: 0 0 14px rgba(62,240,200,.12); }
+            background: var(--bg); color: var(--off-lab); border: 1px dashed #4A5163; transition: color .3s, border-color .3s, box-shadow .3s; }
+  .t-roomy .elabel { font-size: 12.5px; padding: 4px 7px; }
+  .t-roomy.t-wide .elabel { font-size: 13px; padding: 4px 8px; }
+  .t-compact .elabel { font-size: 12px; padding: 3px 6px; }
+  .elabel.lit { color: var(--path); border: 1px solid rgba(62,240,200,.45); background: #08130F; box-shadow: 0 0 14px rgba(62,240,200,.14); }
   .elabel.side { transform: translate(0, -50%); }
   .elabel[hidden] { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .ps-map .edge.flowing .flow { animation: none; stroke-dasharray: none; opacity: .45; }
+    .ps-map .edge.flowing path.ln { stroke-opacity: 1; }
+    .snode.active::after, .snode.starting::after { animation: none; display: none; }
+    .snode.gatewait { animation: none; box-shadow: 0 0 0 1px rgba(255,200,87,.55), 0 0 22px rgba(255,200,87,.3); }
+    .snode, .elabel, .ps-map .edge path.ln { transition: none; }
+    .ps-drawer, .ps-drawer.open { transition: none; }
+    .ps-cue, .ps-cue .ar { animation: none; }
+  }
 
   /* ---- the panel ---- */
   .bb { padding: 22px 32px 26px; font: 400 18px/1.5 var(--sans); color: var(--text); }
@@ -507,6 +587,45 @@
   .bb-storybody .kv, .bb-storybody .row, .bb-storybody .gate, .bb-storybody .tag, .bb-storybody pre.io { font-size: 15px; }
   .bb-storybody .kv .v { font-size: 15px; }
   .bb-empty .bb-headline { margin-top: 0; }
+  /* Following the run again, and walking its path: the foot of the detail. */
+  .p-follow { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; margin-top: 10px; font: 400 13.5px/1 var(--mono); color: var(--path); padding: 7px 10px; border: 1px solid rgba(62,240,200,.38); border-radius: 7px; white-space: nowrap; }
+  .p-follow:hover { background: rgba(62,240,200,.08); }
+  .bb-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .bb-go { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; max-width: 48%; padding: 8px 11px; border: 1px solid var(--border-2); border-radius: 8px; font: 500 14.5px/1.2 var(--sans); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bb-go:hover { color: var(--text); border-color: var(--ac); }
+  .bb-go .b { flex: none; font: 600 12.5px/1 var(--mono); color: var(--ac); padding: 4px 6px; border-radius: 5px; background: color-mix(in srgb, var(--ac) 14%, transparent); }
+  .p-given { color: var(--ai); border-color: color-mix(in srgb, var(--ai) 45%, transparent); background: color-mix(in srgb, var(--ai) 8%, transparent); }
+  .p-given:hover { color: var(--text); border-color: var(--ai); }
+  /* The detail at pane width (the bench beside an app): the same card, its type a size down. */
+  @container (max-width: 900px) {
+    .bb { padding: 16px 18px 22px; font-size: 16px; }
+    .bb-head { gap: 12px; }
+    .bb-num { width: 36px; height: 36px; font-size: 17px; border-radius: 9px; }
+    .bb-name { font-size: 23px; }
+    .bb-who { font-size: 12.5px; padding: 5px 7px; }
+    .bb-tag { font-size: 13px; padding: 6px 9px; }
+    .bb-strip { margin-top: 12px; gap: 8px 10px; }
+    .bb-metas { font-size: 13px; } .bb-metas span { padding: 6px 10px; }
+    .p-btn { font-size: 13.5px; padding: 7px 11px; }
+    .bb-headline { font-size: 19px; margin-top: 14px; }
+    .bb-sub, .bb-about { font-size: 15.5px; }
+    .bb-sec { margin-top: 16px; }
+    .bb-sec h4, .bb-lab { font-size: 12px; margin-bottom: 8px; }
+    .bb-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; }
+    .bb-card { padding: 10px 12px; } .bb-card .k { font-size: 13.5px; } .bb-card .to { font-size: 15.5px; } .bb-card .why { font-size: 13.5px; }
+    .bb-chosen { font-size: 11.5px; padding: 3px 6px; }
+    .bb-quote { font-size: 16.5px; padding: 12px 16px; }
+    .bb-meter { font-size: 13px; } .bb-meter b { font-size: 14.5px; }
+    .bb-fields dt { font-size: 13px; padding: 9px 14px; } .bb-fields dd { font-size: 15.5px; padding: 9px 14px; }
+    .bb-proposal .th { font-size: 13px; padding: 10px 14px; }
+    .bb-pdesc, .bb-answer { font-size: 15.5px; }
+    .bb-inapp, .bb-given, .bb-check { font-size: 15.5px; }
+    .bb-row { gap: 10px; padding: 10px 12px; } .bb-row .loc { font-size: 15.5px; } .bb-row .snip { font-size: 14.5px; }
+    .bb-stat .num { font-size: 24px; } .bb-stat .what { font-size: 13.5px; }
+    .bb-box .v { font-size: 15.5px; }
+    .bb-call .w { font-size: 15.5px; } .bb-call .r { font-size: 14px; }
+    .rc-a { font-size: 17px; }
+  }
   /* Calls inside a step: Presentation's numbered sequence */
   .bb-axis, .bb-call { display: grid; grid-template-columns: 44px minmax(0, 1fr) 210px 64px; gap: 14px; }
   .bb-axis { padding: 0 16px 6px; font: 400 13px/1 var(--mono); color: var(--text-3); }
@@ -556,7 +675,8 @@
   .ps-facts { display: flex; align-items: center; gap: 0 22px; min-width: 0; flex: 0 0 auto; }
   .ps-facts .fi { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .ps-facts .fi + .fi { border-left: 1px solid var(--border); padding-left: 22px; }
-  .ps-facts .fk { color: var(--text-3); } .ps-facts .fv { color: var(--text); font-weight: 500; }
+  .ps-facts .fk { color: var(--text-3); }
+  .ps-facts .sh { display: none; } .ps-facts .fv { color: var(--text); font-weight: 500; }
   .ps-facts .fv.unk { color: var(--text-2); font-weight: 400; font-style: italic; }
   .bb-fp .mono { font-size: 15px; color: var(--text-2); } .bb-fp .muted { font-size: 15px; color: var(--text-3); }
   .ps-facts .fi.base { max-width: 22em; }
@@ -586,8 +706,7 @@
   .actor-ai { color: var(--ai); } .actor-rule { color: var(--rule); } .actor-person { color: var(--person); } .actor-app { color: var(--app); }
   .edgetip { position: absolute; z-index: 6; max-width: 340px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 8px; padding: 8px 11px; font-size: 15px; line-height: 1.4; color: var(--text-2); box-shadow: 0 8px 24px rgba(0,0,0,.5); pointer-events: none; }
   .edgetip b { color: var(--text); display: block; margin-bottom: 2px; font-weight: 600; }
-  /* "What the AI was given": a full-screen sheet. */
-  .p-overlay { position: fixed; inset: 0; z-index: 30; background: var(--bg); overflow: auto; }
+  /* "What the AI was given": the drawer's body (.ps-drawer). */
   .g-panel { max-width: min(1600px, 96vw); margin: 0 auto; padding: 0 24px 28px; }
   .g-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 16px 0 10px; background: var(--bg); border-bottom: 1px solid var(--border); }
   .g-head b { font: 600 26px var(--sans); } .g-head .muted { font-size: 16px; color: var(--text-3); }
@@ -632,23 +751,12 @@
     .ps-strip { order: 5; flex-basis: 100%; padding-left: 0; border-left: 0; }
   }
   @media (max-width: 1100px) {
-    #bench.mode-presentation { height: auto; min-height: 100vh; }
-    #bench.mode-presentation > .pres { flex: none; }
-    .ps-stage { display: flex; flex-direction: column; gap: 18px; padding: 16px; flex: none; }
-    .ps-map { flex: none; overflow: visible; }
-    .ps-flowhead { padding-left: 0; padding-right: 8px; }
-    .ps-map .graphwrap { flex: none; }
-    /* Stacked (beside an app, ~954 px): the panel first, so a step's story is on screen without a
-       scroll or a click as the run moves; the map follows under it. */
-    .ps-side { order: -1; }
-    .ps-bubble { flex: none; overflow: visible; }
-    .ps-bubble::before { position: absolute; }
-    .ps-divider, .ps-notch, .ps-mk .wire { display: none !important; }
-    .bb { padding: 22px 20px; }
-    .bb-cards { grid-template-columns: 1fr; }
-    .ps-foot { position: sticky; bottom: 0; z-index: 5; flex-wrap: wrap; padding: 10px 16px; gap: 8px 16px; }
-    .ps-strip { order: 5; flex-basis: 100%; padding-left: 0; border-left: 0; }
-    .ps-facts { flex-wrap: wrap; row-gap: 4px; }
+    /* The footer in one row: the numbers, then the controls (where the time went is in the recap). */
+    .ps-foot { flex-wrap: wrap; min-height: 0; padding: 6px 16px; gap: 6px 16px; font-size: 13.5px; }
+    .ps-strip { display: none; }
+    .ps-facts { flex: 1 1 auto; gap: 0 14px; } .ps-facts .fi + .fi { padding-left: 14px; }
+    .ps-ctl { margin-left: auto; }
+    .p-transport button, .ps-key { padding: 6px 9px; font-size: 13px; }
     .bb-call { grid-template-columns: 40px minmax(0, 1fr) 64px; row-gap: 6px; }
     .bb-call .no { grid-row: 1 / span 2; }
     .bb-call .d { grid-row: 1; grid-column: 3; }
@@ -656,8 +764,28 @@
     .bb-axis { display: none; }
     .p-pick > span { display: none; }
     .p-pick select { max-width: 14em; }
+    /* Beside an app: who asked and the status and switch on one row, the request (two lines) under it. */
+    .beside .topbar { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: 30px auto; align-items: center; row-gap: 4px; column-gap: 10px; padding: 9px 16px 10px; }
+    .beside .tb-ask { display: contents; }
+    .beside .ps-who { grid-column: 1; grid-row: 1; }
+    .beside .ps-req { grid-column: 1 / -1; grid-row: 2; }
+    .beside .tb-status { grid-column: 2; grid-row: 1; justify-self: end; }
+    .beside .topbar .viewtoggle { grid-column: 3; grid-row: 1; }
+    .beside .topbar .p-inferred { grid-column: 1; grid-row: 1; justify-self: start; }
+    .beside .tb-pick { display: none; }
+    .beside.mode-engineering .ps-who, .beside.mode-engineering .ps-req { display: none; }
+    .beside .ps-pill { padding: 5px 10px; font-size: 13px; }
+    .beside .viewtoggle button { padding: 6px 10px; font-size: 13px; }
+    .ps-req.r-beside { font-size: 15.5px; line-height: 1.32; min-height: 2.64em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   }
-  @media (max-width: 640px) {
+  @media (min-width: 541px) and (max-width: 1100px) { .beside .ps-foot { flex-wrap: nowrap; } .beside .ps-facts { overflow: hidden; } }
+  @media (max-width: 1100px) {
+    .ps-facts { min-width: 0; }
+    .beside .ps-facts .fi { flex: none; }
+    .ps-facts .lg { display: none; } .ps-facts .sh { display: inline; }
+  }
+  @media (max-width: 760px) { .ps-facts .calls { display: none; } .ps-key .kl, .ps-key[data-act=maponly], .ps-key.ps-help { display: none; } .ps-facts .fi.base { display: none; } }
+  @media (max-width: 540px) {
     .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
     .topbar .viewtoggle { margin-left: auto; }
     .tb-status { order: 10; flex-basis: 100%; justify-self: auto; width: auto; justify-content: flex-start; }
@@ -680,21 +808,10 @@
   #picker { padding: 24px; max-width: 640px; }
   #picker a { color: var(--accent); }
 
-  /* Narrow (a phone, or the bench beside an app in the shell): one scrolling page, not
-     three scroll boxes, so the graph and panels keep their natural height. */
   @media (max-width: 820px) {
-    #bench.mode-engineering { height: auto; min-height: 100vh; }
-    .bgrid { display: flex; flex-direction: column; gap: 18px; padding: 16px; flex: none; }
-    .eng .graphcol { flex: none; overflow: visible; }
-    .eng .graphcol .graphwrap { flex: none; }
-    .eng .ps-flowhead { padding-left: 0; }
-    .panelcol { overflow: visible; flex: none; }
-    .panelcol::before { position: absolute; left: 0; right: 0; border-radius: 14px 14px 0 0; }
     .stepcard .pbody { padding: 18px 16px; }
     .wf .hd, .wf summary, .wf .sum { grid-template-columns: minmax(0, 46%) minmax(0, 1fr) 96px; }
     .wf .mt .par, .wf .bar i { display: none; }
-    .logcol { position: sticky; bottom: 0; }
-    #bench > .eng { flex: none; }
     .lrow { grid-template-columns: 24px 52px 90px 1fr; } .lrow .ld { display: none; }
   }
 </style>

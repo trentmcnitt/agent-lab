@@ -37,6 +37,14 @@
   // One corner radius per geometry, for every line in every state.
   var STAGE_GEOM = { w: 380, h: 64, gx: 96, gy: 48, pad: 18, routedLabels: false, lane: 16, clear: 14, ortho: true, radius: 10, snap: true };
   var PANE_GEOM = { w: 260, h: 60, gx: 56, gy: 40, pad: 8, routedLabels: false, lane: 12, clear: 8, ortho: true, radius: 8, snap: true };
+  /* Pane-first (the bench beside an app, ~700 px wide): the whole map on its own (roomy: a line under
+     each name, gaps the lit line visibly travels), and the same map pinned above a step's detail
+     (compact: names only, short gaps). centerExit: every line leaves its box at the bottom centre
+     and enters the next at the top centre, so the run's lit path is one spine running straight
+     through the boxes; branches out of one step share its stem and fork in the gap below it.
+     bench.js sets w (and h, from the type) for the room it has. */
+  var ROOMY_GEOM = { w: 280, h: 52, gx: 44, gy: 30, pad: 10, routedLabels: false, lane: 12, clear: 10, ortho: true, radius: 9, snap: true, centerExit: true };
+  var COMPACT_GEOM = { w: 260, h: 34, gx: 36, gy: 16, pad: 6, routedLabels: false, lane: 10, clear: 7, ortho: true, radius: 6, snap: true, centerExit: true };
   var CLEAR_DEFAULT = 6;   // a channel keeps at least this far from any box (geom.clear overrides)
   var LANE_DEFAULT = 9;    // spacing between parallel channels (geom.lane overrides)
   var CHAR_W = 5.9;   // the edge label font (9.5px monospace), per character
@@ -208,7 +216,7 @@
       if (lt === ls + 1 && G.ortho) {
         // snap: a branch to a step off to one side leaves the bottom on that side (above its target,
         // as far as the box allows), so two branches out of one step don't share one stem.
-        if (G.snap) { var m = Math.max(2 * (G.radius || 8), G.w * 0.15); x1 = Math.min(Math.max(x2, a.x + m), a.x + G.w - m); }
+        if (G.snap && !G.centerExit) { var m = Math.max(2 * (G.radius || 8), G.w * 0.15); x1 = Math.min(Math.max(x2, a.x + m), a.x + G.w - m); }
         // Down from the source, across the middle of the gap, down into the target. Every line in a
         // gap turns at the same height, so the lines leaving one step share one trunk (and the lit
         // path is drawn over its own line, never beside it on a lane of its own).
@@ -317,6 +325,8 @@
   layout.PRES_GEOM = PRES_GEOM;
   layout.STAGE_GEOM = STAGE_GEOM;
   layout.PANE_GEOM = PANE_GEOM;
+  layout.ROOMY_GEOM = ROOMY_GEOM;
+  layout.COMPACT_GEOM = COMPACT_GEOM;
   layout.at = at;
   layout.edgeText = edgeText;
   global.BenchLayout = layout;

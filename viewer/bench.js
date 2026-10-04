@@ -79,8 +79,14 @@
     this.picker = null;
     this.pair = null;
     this.overlay = null;
+    /* Presentation's view: 'map' (the whole map, a line under it about the step it's on) or 'detail'
+       (the map compact on top, a step's detail under it). Beside an app the run plays on the whole
+       map; a recording a presenter steps through opens on the detail. Engineering is always 'detail'. */
+    this.view = this.source === 'replay' ? 'detail' : 'map';
+    this._edgeLit = {};                          // edges drawn lit so far (a newly lit one draws on)
     this._raf = null;
     this._build();
+    this.root.classList.toggle('beside', this.source === 'parent');
   }
 
   var ACTOR_CHIP = { ai: 'AI', rule: 'rule', person: 'person', app: 'app' };
@@ -118,11 +124,11 @@
       '</header>' +
       '<div class="meterbar mono" data-f="meters"></div>' +
       '</div>' +
+      // The same pane-first structure as Presentation: the map pinned on top, the step's card and the
+      // run's panels scrolling under it.
       '<div class="bgrid" data-f="stage">' +
-        '<section class="col graphcol ps-map"><div class="ps-flowhead" data-f="flowhead"></div><div class="graphwrap" data-f="graph"></div><div class="edgetip" data-f="tip" hidden></div></section>' +
+        '<section class="col graphcol ps-map" data-f="map"><div class="ps-flowhead" data-f="flowhead"></div><div class="graphwrap" data-f="graph"></div><div class="ps-cue" data-f="cue" hidden></div><div class="edgetip" data-f="tip" hidden></div></section>' +
         '<section class="col panelcol" data-f="panels"></section>' +
-        '<div class="ps-divider" data-f="divider" hidden></div><div class="ps-notch" data-f="notch" hidden></div>' +
-        '<div class="ps-mk" data-f="mk" hidden><div class="wire"></div><div class="tab"></div></div>' +
       '</div>' +
       '<section class="logcol" data-f="logcol">' +
         '<button class="logtoggle" data-f="logtoggle" title="Every event received, in order"><b>Event log</b> <span data-f="logcount"></span><span class="lt-arrow" data-f="logarrow">▴ show</span></button>' +
@@ -130,20 +136,22 @@
       '</section>' +
       '</div>' +
       '<div class="pres">' +
-        // Presentation (S4): the map on the left, a docked panel on the right explaining one step,
-        // a line between them in that step's colour pointing at it, and a quiet footer.
+        // Presentation, pane-first: the map on top, always. The whole map while a run plays (a line
+        // under it says what the step it's on did); a step clicked, the same map glides to a compact
+        // size pinned on top and that step's detail opens under it. "What the AI was given" is a
+        // drawer over the detail only: the map stays in view.
         '<div class="ps-stage" data-p="stage">' +
-          '<section class="ps-map"><div class="ps-flowhead" data-p="flowhead"></div><div class="graphwrap" data-p="graph"></div><div class="edgetip" data-p="tip" hidden></div></section>' +
-          '<section class="ps-side" data-p="side"><div class="ps-bubble" data-p="bubble" aria-live="polite"></div><div class="ps-more" data-p="more" hidden><span>▾ more below</span></div></section>' +
-          '<div class="ps-divider" data-p="divider" hidden></div><div class="ps-notch" data-p="notch" hidden></div>' +
-          '<div class="ps-mk" data-p="mk" hidden><div class="wire"></div><div class="tab"></div></div>' +
+          '<section class="ps-map" data-p="map"><div class="ps-flowhead" data-p="flowhead"></div><div class="graphwrap" data-p="graph"></div>' +
+            '<div class="ps-cue" data-p="cue" hidden></div><div class="edgetip" data-p="tip" hidden></div></section>' +
+          '<section class="ps-side" data-p="side"><div class="ps-now" data-p="now" aria-live="polite"></div>' +
+            '<div class="ps-bubble" data-p="bubble" aria-live="polite"></div><div class="ps-more" data-p="more" hidden><span>▾ more below</span></div>' +
+            '<div class="ps-drawer" data-p="drawer" aria-hidden="true"></div></section>' +
         '</div>' +
         '<footer class="ps-foot"><div class="ps-facts" data-p="bottom"></div><div class="ps-strip" data-p="strip"></div>' +
           '<div class="ps-ctl"><div class="p-transport" data-p="transport"></div>' +
-            '<button class="ps-key" data-act="maponly" title="The map alone, for the whole-system view (M)"><kbd>M</kbd><span class="kl">map</span></button>' +
+            '<button class="ps-key" data-act="maponly" title="The whole map, or the map with a step\'s detail under it (M)"><kbd>M</kbd><span class="kl">map</span></button>' +
             '<button class="ps-key" data-act="recap" title="The run in four answers (R)"><kbd>R</kbd><span class="kl">recap</span></button>' +
             '<button class="ps-key ps-help" data-act="keys" title="The presenter\'s keys (?): → or PageDown next step, ← back" aria-label="Keys"><kbd>?</kbd><span class="kl">keys</span></button></div></footer>' +
-        '<div class="p-overlay" data-p="overlay" hidden></div>' +
       '</div>';
     this.f = {}; this.p = {};
     var self = this;
@@ -183,7 +191,6 @@
       }
       if (ev.target.closest('[data-act=clearsel]')) { self.selectedNode = null; self.render(); }
     });
-    this.f.panels.addEventListener('scroll', function () { self._placeMarker(); });
     document.addEventListener('keydown', function (e) { self._presKey(e); });
     var res = this._resolveMode();
     this.setViewMode(res.mode, false);
@@ -301,6 +308,7 @@
       var run = self.runs[id];
       run.stepOrder.forEach(function (sid) { var s = run.steps[sid]; s.arr = -1e12; if (s.arrEnd != null) s.arrEnd = -1e12; });
     });
+    this._instant = true;                            // what's lit now was lit already: no draw-on
     this.render();
   };
 
@@ -416,7 +424,14 @@
     if (!run) {
       run = this.runs[ev.run_id] = L.newRun(ev.run_id);
       this.runOrder.push(ev.run_id);
-      if (!this.pinned) { this.current = ev.run_id; this.ioPick = null; }
+      if (!this.pinned) {
+        this.current = ev.run_id; this.ioPick = null; this._edgeLit = {};
+        // A new request beside the app (or live) plays on the whole map, from its first step.
+        if (this.source !== 'replay' && !this._localPush) {
+          this.selectedNode = null; this.overlay = null; this.recapOpen = false; this.presItem = null;
+          if (this.view !== 'map' && this.mode === 'presentation') this.setView('map');
+        }
+      }
     }
     // Out of order (OTLP exports the root span last; a late run_started): re-sort and rebuild.
     if (L.needsResort(run, ev)) this.runs[ev.run_id] = L.rebuildRun(run, ev, wallNow());
@@ -445,11 +460,23 @@
     var self = this;
     if (this._fitBound) return;
     this._fitBound = true;
+    // The stage changing size (the bar over it growing when a request arrives, the footer wrapping)
+    // changes the map's room: draw it again for the room it has now.
+    if (global.ResizeObserver) {
+      var seen = {};
+      var ro = new global.ResizeObserver(function (entries) {
+        var changed = entries.some(function (en) { var k = en.target.getAttribute('data-p') || en.target.getAttribute('data-f'), h = Math.round(en.contentRect.height), w = Math.round(en.contentRect.width); var was = seen[k]; seen[k] = w + 'x' + h; return was && was !== seen[k]; });
+        if (!changed) return;
+        clearTimeout(self._roT);
+        self._roT = setTimeout(function () { if (self.topo) { self._instant = true; self._drawStage(); self.render(); } }, 150);
+      });
+      ro.observe(this.p.stage); ro.observe(this.f.stage);
+    }
+    // The boxes are sized from the room the map has: a resize redraws the map (no draw-on, no glide).
     global.addEventListener('resize', function () {
-      // The geometry is picked from the map's room: crossing a breakpoint redraws the map.
-      if (self.topo && self._stageGeom !== self._pickStageGeom()) { self._drawStage(); self.render(); return; }
+      clearTimeout(self._rsT);
       if (self._fit) self._fit();
-      self._placeMarker();
+      self._rsT = setTimeout(function () { if (self.topo) { self._instant = true; self._drawStage(); self.render(); } }, 120);
     });
   };
 
@@ -483,6 +510,9 @@
       if (rb) rb.onclick = function () { P.raw = !P.raw; rb.classList.toggle('on', P.raw); self.render(); };
     });
     this.f.waterfall = this.panelEls._timeline.body;
+    // Before any run: one line saying so, not a column of empty folded panels.
+    box.appendChild(el('div', 'eng-wait', '<b>Waiting for a run.</b> ' + (this.source === 'parent' ? 'Pick a request in the app: every' : 'When the app runs, every') +
+      ' model call, tool call and event it reports shows here, under the step it belongs to.'));
   };
 
   Bench.prototype.render = function () {
@@ -514,9 +544,10 @@
       : /^Waiting/.test(oc0.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' } : { cls: 'running', text: 'Running' };
     setHTML(this.p.status, '<span class="ps-pill st-' + st0.cls + '" title="' + esc(st0.full || st0.text) + '"><i></i><b>' + esc(st0.text) + '</b></span>');
     var nSteps0 = this.topo.nodes.length;
+    this.f.panels.classList.toggle('norun', !run);
     if (!run) {
       this.f.meters.textContent = 'waiting for events…';
-      setHTML(this.f.flowhead, '<b>How it works</b><span>' + nSteps0 + ' steps</span>');
+      setHTML(this.f.flowhead, this._flowheadHTML(null, null));
       return;
     }
     var L = lg();
@@ -544,8 +575,7 @@
 
     var S = this._renderStage(run);
     this._lastShown = S;
-    setHTML(this.f.flowhead, '<b>How it works</b><span>' + nSteps0 + ' steps · this run took ' + S.seq.length + '</span>' +
-      '<span class="ps-legend"><span><i class="lit"></i>this run</span><span><i class="dash"></i>not taken</span></span>');
+    setHTML(this.f.flowhead, this._flowheadHTML(run, S));
     this._renderWaterfall(run);
     this._renderPanels(run, S);
     this._renderLog(run);
@@ -924,93 +954,140 @@
   };
 
   // ---- Presentation: the stage ------------------------------------------------------------
-  /* The map is the stage (layout.js at a presentation geometry), the run's path lit and numbered in
-     run order, each box keeping one line under its name (logic.stepMeta). A docked panel beside it
-     says what happened at one step (logic.callout, logic.documentsStep, logic.callSequence): a
-     headline sentence from the map's own words, then that step's evidence; a line in the step's
-     colour between the map and the panel points at it. Keys: → Space PageDown next, ← PageUp back,
-     M the map alone, R the recap (also the step after the last). All words come from the map and
-     the events; nothing here knows any app. */
+  /* Pane-first: the map is always on top. While a run plays (the 'map' view) it fills the bench: the
+     run's path lights step by step (each step held lit at least MIN_LIT_MS), the line being travelled
+     draws on and marches, the lit path is one unbroken spine, and a step waiting for a person pulses
+     with a cue pointing at the app. A line under the map says what the step it's on did. Click a step
+     (the 'detail' view) and the same map glides to a compact size pinned on top, that step ringed in
+     its actor's colour; its detail opens under it (logic.callout, logic.documentsStep,
+     logic.callSequence). Keys: → Space PageDown next, ← PageUp back, M the whole map, R the recap.
+     All words come from the map and the events; nothing here knows any app. */
   var ACTOR_WORDS_P = { ai: 'The AI', rule: 'A rule', person: 'A person', app: 'The app' };
-  var STAGE_BREAK = 600;   // map column width (px) below which the pane geometry is used
-  var STACK_BREAK = 1100;  // window width at or below which the map and panel stack (index.html)
-  var MIN_NAME_PX = 14;    // the smallest a step's name is drawn beside the panel (a scrolling map below that)
-  var ENG_STACK_BREAK = 820;
+  var WIDE_MAP = 900;          // a map region at least this wide (a full screen) draws the larger type
+  var MIN_NAME_PX = 13;        // the smallest a step's name is drawn; a map too tall for that scrolls, following its step
+  var DETAIL_MAP_SHARE = 0.55;  // the detail view's map takes at most this share of the stage
+  var GLIDE_MS = 440, DRAW_MS = 420;
+  var EASE = 'cubic-bezier(.2,.7,.2,1)';
+  function reducedMotion() { try { return !!(global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; } }
 
-  /* The box's type (index.html's .snode rules, in px): the name (one or two lines), the line under
-     it, the badge before it and who does the step after it. The box's height is built from these,
-     so the words always have the room they're drawn with. */
+  /* The box types (index.html's .graph.t-* .snode rules, in px): the name's font and line, the line
+     under it (0: none), the badge, the padding and gaps, whether the actor's word is in the box (its
+     slot measured per box), and the map's gaps. roomy: the whole map; compact: pinned above a detail.
+     The W types are for a map region a full screen wide. */
   var BOX_TYPE = {
-    stage: { font: 18, line: 22, meta: 18, badge: 28, padX: 12 + 14 + 2, gap: 12, who: 52, padY: 12 },
-    pane: { font: 16, line: 20, meta: 18, badge: 26, padX: 10 + 12 + 2, gap: 10, who: 48, padY: 10 }
+    roomy: { font: 16, line: 20, meta: 16, badge: 26, padL: 10, padR: 12, gap: 10, padY: 7, who: 12.5, gx: 44, gy: 28, pad: 10, minW: 220, maxW: 340 },
+    roomyW: { font: 18, line: 22, meta: 18, badge: 28, padL: 12, padR: 14, gap: 12, padY: 10, who: 13.5, gx: 72, gy: 40, pad: 14, minW: 300, maxW: 400 },
+    compact: { font: 16, line: 20, meta: 0, badge: 24, padL: 8, padR: 10, gap: 9, padY: 5, who: 0, gx: 36, gy: 12, pad: 5, minW: 200, maxW: 320 },
+    compactW: { font: 17, line: 21, meta: 0, badge: 26, padL: 10, padR: 12, gap: 10, padY: 6, who: 0, gx: 56, gy: 16, pad: 6, minW: 260, maxW: 380 }
   };
   var _measure = null;
   function measureCtx() { try { _measure = _measure || document.createElement('canvas').getContext('2d'); } catch (e) { _measure = null; } return _measure; }
-  function boxGeom(topo, G, which) {
-    var T = BOX_TYPE[which] || BOX_TYPE.stage, ctx = measureCtx();
-    var lines = 1;
-    if (ctx) {
-      ctx.font = '500 ' + T.font + 'px Geist, Inter, system-ui, sans-serif';
-      var room = G.w - T.padX - T.badge - T.gap - T.who - 6;   // a margin: the page's text runs a little wider than the canvas's
-      topo.nodes.forEach(function (n) {
-        var ws = String(lg().plainLabel(n)).split(/\s+/), k = 1, cur = '';
-        ws.forEach(function (w) {
-          var t = cur ? cur + ' ' + w : w;
-          if (cur && ctx.measureText(t).width > room) { k++; cur = w; } else cur = t;
-        });
-        lines = Math.max(lines, k);
-      });
-    }
-    var out = {}; Object.keys(G).forEach(function (k) { out[k] = G[k]; });
-    out.lines = lines;
-    out.h = Math.max(G.h, Math.ceil(2 * T.padY + Math.min(lines, 2) * T.line + 2 + T.meta));
+  // The room a box's name needs on one line (px), per node: name + badge + padding (+ its actor's word).
+  function nameNeeds(topo, T) {
+    var ctx = measureCtx(), out = {};
+    topo.nodes.forEach(function (n) {
+      var name = String(lg().plainLabel(n)), who = T.who ? String(ACTOR_CHIP[lg().actorOf(n)] || '').toUpperCase() : '';
+      var nw = name.length * T.font * 0.56, ww = who.length * T.who * 0.68;
+      if (ctx) {
+        ctx.font = '500 ' + T.font + 'px Geist, Inter, system-ui, sans-serif'; nw = ctx.measureText(name).width;
+        if (who) { ctx.font = '500 ' + T.who + 'px "Geist Mono", ui-monospace, monospace'; ww = ctx.measureText(who).width + who.length * T.who * 0.06; }
+      }
+      out[n.id] = { name: nw, rest: T.padL + T.padR + 2 + T.badge + T.gap + (who ? ww + 10 : 0) + 6 };
+    });
     return out;
+  }
+  // Lines a name takes in a box `w` wide (two at most; a compact box keeps one and ellipsizes).
+  function nameLines(topo, T, w, needs) {
+    var ctx = measureCtx(), lines = 1;
+    if (ctx) ctx.font = '500 ' + T.font + 'px Geist, Inter, system-ui, sans-serif';
+    topo.nodes.forEach(function (n) {
+      var room = w - needs[n.id].rest;
+      if (needs[n.id].name <= room) return;
+      if (!T.meta) { lines = Math.max(lines, 1); return; }
+      var ws = String(lg().plainLabel(n)).split(/\s+/), k = 1, cur = '';
+      ws.forEach(function (x) {
+        var t = cur ? cur + ' ' + x : x;
+        if (cur && (ctx ? ctx.measureText(t).width : t.length * T.font * 0.56) > room) { k++; cur = x; } else cur = t;
+      });
+      lines = Math.max(lines, k);
+    });
+    return Math.min(lines, 2);
+  }
+  /* The geometry for a view in a room aw × ah: box width from the room (two candidates: the width the
+     columns fill, and the width the longest name needs on one line), box height from the type. The one
+     whose names are drawn largest wins; on a tie, fewer lines. */
+  function pickGeom(topo, view, aw, ah) {
+    var T = BOX_TYPE[(view === 'map' ? 'roomy' : 'compact') + (aw >= WIDE_MAP ? 'W' : '')];
+    var base = view === 'map' ? global.BenchLayout.ROOMY_GEOM : global.BenchLayout.COMPACT_GEOM;
+    var probe = layout(topo, Object.assign({}, base, { w: 200, h: 40, gx: T.gx, gy: T.gy, pad: T.pad })), rows = {}, cols = 1;
+    topo.nodes.forEach(function (n) { var p = probe.pos[n.id]; if (p) { rows[p.y] = (rows[p.y] || 0) + 1; cols = Math.max(cols, rows[p.y]); } });
+    var needs = nameNeeds(topo, T), need1 = 0;
+    Object.keys(needs).forEach(function (id) { need1 = Math.max(need1, needs[id].name + needs[id].rest); });
+    function clampW(w) { return Math.round(Math.max(T.minW, Math.min(T.maxW, w))); }
+    var fill = clampW((aw - 2 * T.pad - (cols - 1) * T.gx) / cols), best = null;
+    [fill, clampW(Math.ceil(need1) + 2)].filter(function (w, i, a) { return a.indexOf(w) === i; }).forEach(function (w) {
+      var lines = nameLines(topo, T, w, needs);
+      var h = Math.ceil(2 * T.padY + lines * T.line + (T.meta ? 2 + T.meta : 0));
+      var G = Object.assign({}, base, { w: w, h: h, gx: T.gx, gy: T.gy, pad: T.pad, lines: lines });
+      var lay = layout(topo, G), k = Math.min(1, aw / lay.W, ah > 40 ? ah / lay.H : 1);
+      var px = T.font * k - (lines > 1 ? 0.6 : 0);
+      if (!best || px > best.px + 0.05) best = { G: G, lay: lay, k: k, px: px, T: T };
+    });
+    return best;
   }
 
   /* The elements one mode draws its stage into: Presentation's (.pres) or Engineering's (.eng). */
   Bench.prototype._E = function () {
     var f = this.f, p = this.p;
     return this.mode === 'engineering'
-      ? { eng: true, graph: f.graph, tip: f.tip, stage: f.stage, bubble: f.panels, divider: f.divider, notch: f.notch, mk: f.mk }
-      : { eng: false, graph: p.graph, tip: p.tip, stage: p.stage, bubble: p.bubble, divider: p.divider, notch: p.notch, mk: p.mk };
+      ? { eng: true, graph: f.graph, tip: f.tip, stage: f.stage, map: f.map, cue: f.cue, head: f.flowhead, bubble: f.panels }
+      : { eng: false, graph: p.graph, tip: p.tip, stage: p.stage, map: p.map, cue: p.cue, head: p.flowhead, bubble: p.bubble };
   };
-  Bench.prototype._pickStageGeom = function () {
-    var g = this._E().graph;
-    var W = (g && g.clientWidth) || global.innerWidth || 1200;
-    return W >= STAGE_BREAK ? 'stage' : 'pane';
+  Bench.prototype._viewNow = function () { return this.mode === 'engineering' ? 'detail' : this.view; };
+  /* Presentation's view: 'map' or 'detail'. The whole map clears what a detail had open. */
+  Bench.prototype.setView = function (v) {
+    v = v === 'detail' ? 'detail' : 'map';
+    if (v === 'map') { this.selectedNode = null; this.overlay = null; this.recapOpen = false; this.keysOpen = false; this.presItem = null; }
+    if (this.view === v) { this.render(); return; }
+    this.view = v;
+    if (this.topo && this.mode === 'presentation') this._drawStage(true);
+    this.render();
   };
-  // Stacked: the map above the panel, the page scrolling (index.html: Presentation at 1100 px, Engineering at 820).
-  Bench.prototype._stacked = function () { return (global.innerWidth || 1200) <= (this.mode === 'engineering' ? ENG_STACK_BREAK : STACK_BREAK); };
 
-  Bench.prototype._drawStage = function () {
+  /* Draws the map for the view on screen, sized to its room. glide: the boxes move from where they
+     were to where they are now (the map growing or shrinking between the two views), the lines and
+     their labels fading in once the boxes have arrived. */
+  Bench.prototype._drawStage = function (glide) {
     var self = this, topo = this.topo, L = lg(), E = this._E();
-    var mapOnly = !E.eng && !!this.mapOnly;
-    this.root.classList.toggle('p-maponly', mapOnly);
-    var which = this._stageGeom = this._pickStageGeom();
-    this.root.classList.toggle('ps-pane', which === 'pane');
-    var G = which === 'stage' ? global.BenchLayout.STAGE_GEOM : global.BenchLayout.PANE_GEOM;
-    var g = E.graph, aw = Math.max(1, g.clientWidth - 8), ahh = Math.max(1, g.clientHeight - 8), stacked = this._stacked();
-    // Two box shapes: wide (names on one line, a shorter map) and narrow (names may take two lines,
-    // a taller map). The one drawn larger in the room the map has wins.
-    var best = null;
-    [G, Object.assign({}, G, { w: Math.round(G.w * 0.8) })].forEach(function (cand) {
-      var gc = boxGeom(topo, cand, which), lc = layout(topo, gc);
-      var kc = Math.min(aw / lc.W, !stacked && ahh > 80 ? ahh / lc.H : Infinity);
-      var ok = gc.lines <= 2;
-      // The narrow shape only when the wide one would be drawn small and the narrow clearly larger:
-      // wide boxes keep names on one line and the line under them whole.
-      if (!best || (ok && !best.ok) || (ok === best.ok && best.k < 0.85 && kc > best.k * 1.08)) best = { k: kc, g: gc, lay: lc, ok: ok };
-    });
-    G = this._geom = best.g;
-    var Lay = this.layout = best.lay;
-    // Arrowheads in px, one per edge state so each head takes its line's colour.
-    var ah = which === 'stage' ? 9 : 8;
+    var view = this._viewNow();
+    this.root.classList.toggle('v-map', view === 'map');
+    this.root.classList.toggle('v-detail', view === 'detail');
+    this.root.classList.toggle('p-maponly', !E.eng && view === 'map');
+    var g = E.graph, sec = E.map, before = null;
+    if (E.tip) E.tip.hidden = true;
+    this._drawnAt = Date.now();
+    if (glide && !reducedMotion() && g.querySelector('.gnode')) {
+      before = { nodes: {}, h: sec.getBoundingClientRect().height };
+      g.querySelectorAll('.gnode').forEach(function (n) { before.nodes[n.getAttribute('data-node')] = n.getBoundingClientRect(); });
+    }
+    // The room. The whole map takes what the stage has above the line under it; pinned above a
+    // detail it takes what it needs, at most DETAIL_MAP_SHARE of the stage.
+    sec.style.height = '';
+    var headH = E.head ? E.head.offsetHeight : 0;
+    var aw = Math.max(200, g.clientWidth - 8), ah;
+    if (view === 'map') ah = Math.max(120, sec.clientHeight - headH - 10);
+    else ah = Math.max(140, Math.round(E.stage.clientHeight * DETAIL_MAP_SHARE) - headH - 10);
+    var P = pickGeom(topo, view, aw, ah);
+    var G = this._geom = P.G, Lay = this.layout = P.lay, T = this._type = P.T;
+    if (view === 'detail') sec.style.height = Math.ceil(Math.min(ah, Lay.H * Math.max(P.k, MIN_NAME_PX / T.font)) + headH + 8) + 'px';
+    // Arrowheads only on the lines not taken; a lit line runs into its box (no seam, no head).
+    var ah2 = T.font >= 17 ? 9 : 8;
     function head(id) {
-      return '<marker id="' + id + '" class="' + id + '" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="' + ah + '" markerHeight="' + ah + '" orient="auto-start-reverse">' +
+      return '<marker id="' + id + '" class="' + id + '" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="' + ah2 + '" markerHeight="' + ah2 + '" orient="auto-start-reverse">' +
         '<path d="M0 1 L9 5 L0 9 z" fill="currentColor"/></marker>';
     }
     var svg = '<svg class="edges" width="' + Lay.W + '" height="' + Lay.H + '" viewBox="0 0 ' + Lay.W + ' ' + Lay.H + '">' +
-      '<defs>' + head('parr-t') + head('parr-u') + '<filter id="pglow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.2"/></filter></defs>';
+      '<defs>' + head('parr-u') + '<filter id="pglow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.2"/></filter></defs>';
     topo.edges.forEach(function (e, i) {
       var r = Lay.edges[i];
       if (!r) return;
@@ -1020,64 +1097,80 @@
     svg += '</svg>';
     var boxes = topo.nodes.map(function (n) {
       var p = Lay.pos[n.id], actor = L.actorOf(n);
-      // No tooltip: the panel says what a step does (a description on hover was a wall of text).
-      return '<div class="gnode snode a-' + esc(actor) + ' kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" style="left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px">' +
+      return '<div class="gnode snode a-' + esc(actor) + ' kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" title="' + esc(L.plainLabel(n)) + '" style="left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px">' +
         '<span class="s-num"></span><div class="s-body"><div class="gl"><span class="gt">' + esc(L.plainLabel(n)) + '</span></div><div class="s-meta"></div></div>' +
         '<span class="actor actor-' + esc(actor) + '">' + esc(ACTOR_CHIP[actor] || actor) + '</span></div>';
     }).join('');
-    var labels = this._edgeLabels(Lay, G);
-    g.innerHTML = '<div class="graph" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + labels + boxes + '</div>';
+    var tkey = (view === 'map' ? 'roomy' : 'compact') + (T === BOX_TYPE.roomyW || T === BOX_TYPE.compactW ? ' t-wide' : '') + (G.lines > 1 ? ' t-two' : '');
+    var labels = this._edgeLabels(Lay, G, T);
+    g.innerHTML = '<div class="graph t-' + tkey + '" style="width:' + Lay.W + 'px;height:' + Lay.H + 'px">' + svg + labels + boxes + '</div>';
     var gr = g.querySelector('.graph');
-    if (!g._scrollBound) { g._scrollBound = true; g.addEventListener('scroll', function () { self._placeMarker(); }); }
     /* Lines that meet on their way into one step share their last runs: their dashes are measured from
        that end, so where they overlap the dashes coincide (out of phase, they'd fill in to a solid line). */
     var into = {};
     Lay.edges.forEach(function (r) { if (r) into[r.to] = (into[r.to] || 0) + 1; });
     g.querySelectorAll('svg.edges .edge').forEach(function (eg) {
       var r = Lay.edges[+eg.getAttribute('data-edge')], ln = eg.querySelector('path.ln');
-      if (!r || !ln || into[r.to] < 2 || !ln.getTotalLength) return;
-      var P = 11, len = 0;
+      if (!r || !ln || !ln.getTotalLength) return;
+      var len = 0;
       try { len = ln.getTotalLength(); } catch (e) { return; }
-      ln.style.strokeDashoffset = ((P - (len % P)) % P).toFixed(2);
+      eg._len = len;
+      if (into[r.to] >= 2) ln.style.strokeDashoffset = ((11 - (len % 11)) % 11).toFixed(2);
     });
-    // Fit the whole map in its room, by width and height (stacked: by width only, up to its size).
+    // Fit the map in its room, by width and height, never above its size. A floor for a projector:
+    // a name is never drawn under MIN_NAME_PX; a map too tall for that scrolls in its region instead,
+    // keeping the step it's on in view.
+    // The room is measured once here, before any glide: while the region's height animates, a fit
+    // would read the wrong height. A resize (of the window, or of the stage) draws the map again.
+    var roomH = g.clientHeight - 4;
     function fit() {
-      var availW = g.clientWidth - 8 || Lay.W, availH = g.clientHeight - 8;
-      var k = Math.min(mapOnly ? 1.5 : 1, availW / Lay.W), kw = k;
-      if (!self._stacked() && availH > 80) k = Math.min(k, availH / Lay.H);
-      // A floor for a projector: step names never drawn under 14 px. A map too tall for that scrolls
-      // in its column instead (the step the panel is on is kept in view); M still shows it whole.
-      var floor = MIN_NAME_PX / (BOX_TYPE[which] || BOX_TYPE.stage).font;
-      var scroll = !mapOnly && !self._stacked() && k < floor && kw > k;
+      var availW = g.clientWidth - 8 || Lay.W, availH = roomH;
+      var kw = Math.min(1, availW / Lay.W), k = Math.min(kw, availH > 40 ? availH / Lay.H : 1);
+      var floor = (T.meta ? MIN_NAME_PX - 0.5 : MIN_NAME_PX) / T.font, scroll = k < floor && kw > k;
       if (scroll) k = Math.min(kw, floor);
       g.classList.toggle('scrolly', scroll);
       k = Math.max(k, 0.3);
       self._fitK = k;
       gr.style.transform = k !== 1 ? 'scale(' + k + ')' : '';
       gr.style.transformOrigin = 'top left';
-      // Centred across, top-aligned: a short map starts under its heading, not mid-column.
-      var padX = Math.max(0, (availW - Lay.W * k) / 2), padY = 0;
-      gr.style.marginLeft = padX + 'px';
-      gr.style.marginTop = padY + 'px';
+      gr.style.marginLeft = Math.max(0, (availW - Lay.W * k) / 2) + 'px';
       gr.style.marginBottom = k !== 1 ? (-(1 - k) * Lay.H) + 'px' : '';
     }
     this._fit = fit;
     fit();
     this._bindResize();
+    // Glide: each box from its old place and size to its new one (FLIP), the map's region with it.
+    if (before) {
+      var k = this._fitK || 1;
+      g.querySelectorAll('.gnode').forEach(function (n) {
+        var a = before.nodes[n.getAttribute('data-node')], b = n.getBoundingClientRect();
+        if (!a || !b.width || !b.height) return;
+        var dx = (a.left - b.left) / k, dy = (a.top - b.top) / k, sx = a.width / b.width, sy = a.height / b.height;
+        n.animate([{ transform: 'translate(' + dx + 'px,' + dy + 'px) scale(' + sx + ',' + sy + ')', transformOrigin: '0 0' },
+                   { transform: 'none', transformOrigin: '0 0' }], { duration: GLIDE_MS, easing: EASE });
+      });
+      var fade = [{ opacity: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1 }];
+      g.querySelectorAll('svg.edges, .elabel').forEach(function (x) { x.animate(fade, { duration: GLIDE_MS + 120, easing: 'ease-out' }); });
+      var hNow = sec.getBoundingClientRect().height;
+      if (Math.abs(hNow - before.h) > 2) sec.animate([{ height: before.h + 'px' }, { height: hNow + 'px' }], { duration: GLIDE_MS, easing: EASE });
+    }
+    this._instant = true;   // the lines lit on the new map were lit already
     g.querySelectorAll('.gnode').forEach(function (n) {
       n.onclick = function () {
-        var id = n.getAttribute('data-node'); self.selectedNode = self.selectedNode === id ? null : id; self.recapOpen = false; self.presItem = null; self.render();
-        // Stacked, the panel is above the map: bring it into view to say what was clicked.
-        if (self._stacked() && self.selectedNode) { var side = self._E().bubble; if (side && side.scrollIntoView) side.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+        var id = n.getAttribute('data-node');
+        if (self.mode === 'engineering') { self.selectedNode = self.selectedNode === id ? null : id; self.render(); return; }
+        self.selectedNode = id; self.recapOpen = false; self.presItem = null; self.overlay = null; self.keysOpen = false;
+        if (self.view !== 'detail') self.setView('detail'); else self.render();
       };
     });
     // A path's own words on hover or tap: on a dashed path, why it wasn't taken.
-    var tip = E.tip, sec = g.parentNode;
+    var tip = E.tip;
     g.querySelectorAll('.edge').forEach(function (eg) {
       var i0 = +eg.getAttribute('data-edge'), r = Lay.edges[i0];
       var eds = ((r && r.edges) || [i0]).map(function (k) { return topo.edges[k]; }).filter(function (x) { return x.description; });
       if (!eds.length) return;
       function show(ev) {
+        if (Date.now() - (self._drawnAt || 0) < 900 && ev.type !== 'click') return;   // the map just moved under a still pointer
         var cls = eg.getAttribute('class');
         var state = /untaken/.test(cls) ? 'Not taken this time' : /\btaken\b/.test(cls) ? 'Taken' : 'Path';
         tip.innerHTML = eds.map(function (ed, j) {
@@ -1100,18 +1193,20 @@
      box or another label: a run in a gap between rows first (where the line turns across), else a
      vertical run; on several candidate points along each. A label with no clear place is left off
      (the panel names every branch, and a hover on the line gives its words). */
-  Bench.prototype._edgeLabels = function (Lay, G) {
-    var topo = this.topo, ctx = measureCtx(), M = 6, out = '', placed = [];
+  Bench.prototype._edgeLabels = function (Lay, G, T) {
+    // index.html: .t-roomy .elabel and .t-compact .elabel (a plate that fits in the gap between rows)
+    var fs = !T ? 13 : T.meta ? (T.font >= 17 ? 13 : 12.5) : 12, PH = !T ? 25 : fs + (T.meta ? 9 : 7);
+    var topo = this.topo, ctx = measureCtx(), M = T ? 3 : 6, out = '', placed = [];
     var boxes = topo.nodes.map(function (n) { var p = Lay.pos[n.id]; return p ? [p.x - M, p.y - M, p.x + G.w + M, p.y + G.h + M] : null; }).filter(Boolean);
     function hits(r) {
       return boxes.concat(placed).some(function (b) { return r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1]; });
     }
-    if (ctx) ctx.font = '400 13px "Geist Mono", ui-monospace, monospace';
+    if (ctx) ctx.font = '400 ' + fs + 'px "Geist Mono", ui-monospace, monospace';
     Lay.edges.forEach(function (r, i) {
       if (!r) return;
       var text = global.BenchLayout.edgeText(topo, r, true);
       if (!text) return;
-      var w = (ctx ? ctx.measureText(text).width : text.length * 7.8) + 18, h = 25;
+      var w = (ctx ? ctx.measureText(text).width : text.length * fs * 0.6) + (T ? 14 : 18), h = PH;
       // The straight runs of the line, longest first; a horizontal run first.
       var runs = [];
       r.pieces.forEach(function (p) {
@@ -1166,6 +1261,11 @@
     if (this.layout) order.sort(function (a, b) { var pa = self.layout.pos[a], pb = self.layout.pos[b]; return pa && pb ? (pa.y - pb.y) || (pa.x - pb.x) : 0; });
     var letters = finished ? L.stepLetters(topo, nums, order) : {};
     var focus = this.recapOpen && !E.eng ? null : (this.selectedNode || S.focusNode);
+    /* One marker: the step the text under the map is about is ringed in its actor's colour, its badge
+       filled. On the whole map a step running is marked by its own glow, and a finished run's line is
+       about the run, not a step: no ring then. */
+    var whole = this._viewNow() === 'map', still = /^(paused|moment|stepping)$/.test(this._tstateShown || this.tstate || '');
+    var ring = whole && !this.selectedNode && (finished || !still) ? null : focus;
     g.querySelectorAll('.gnode').forEach(function (n) {
       var id = n.getAttribute('data-node'), steps = ran[id] || [], last = steps[steps.length - 1];
       var node = L.nodeOf(topo, id) || {};
@@ -1179,7 +1279,7 @@
       else if (S.starting[id]) cls += ' starting';
       else if (shownOpen) cls += ' active';
       else cls += ' done';
-      if (focus === id) cls += ' focus';
+      if (ring === id && !(whole && !self.selectedNode && (shownOpen || S.starting[id]))) cls += ' focus';
       if (self.selectedNode === id) cls += ' selected';
       if (n.className !== cls) n.className = cls;
       var chip = n.querySelector('.actor'), cw = ACTOR_CHIP[actor] || actor;
@@ -1194,13 +1294,22 @@
         (m.pips ? '<span class="pips">' + m.pips.map(function (k) { return '<i class="' + k + '"></i>'; }).join('') + '</span>' : '');
       setHTML(n.querySelector('.s-meta'), html);
     });
+    // Lines: this run's path lit; the one into the step being shown running marches (to a person's
+    // step in their colour); a line newly lit draws on from its source.
+    var lit = {}, fresh = [];
     g.querySelectorAll('.edge').forEach(function (e) {
       var i0 = +e.getAttribute('data-edge'), ed = topo.edges[i0], r = self.layout && self.layout.edges[i0];
       var k = ed.from + '>' + ed.to;
       var described = ((r && r.edges) || [i0]).some(function (j) { return topo.edges[j] && topo.edges[j].description; });
-      var c = 'edge' + (taken[k] ? ' taken' + (S.openNode === ed.to ? ' flowing' : '') : finished ? ' untaken' : '') + (described ? ' described' : '');
+      var toPerson = L.actorOf(L.nodeOf(topo, ed.to) || {}, S.events) === 'person';
+      var flowing = taken[k] && (S.openNode === ed.to || S.starting[ed.to]) && !finished;
+      var c = 'edge' + (taken[k] ? ' taken' + (flowing ? ' flowing' + (toPerson ? ' to-person' : '') : '') : finished ? ' untaken' : '') + (described ? ' described' : '');
       if (e.getAttribute('class') !== c) e.setAttribute('class', c);
+      if (taken[k]) { lit[i0] = true; if (!self._edgeLit[i0]) fresh.push(e); }
     });
+    var instant = this._instant || fresh.length > 2;
+    this._instant = false;
+    this._edgeLit = lit;
     g.querySelectorAll('.elabel').forEach(function (lb) {
       var i0 = +lb.getAttribute('data-edge'), ed = topo.edges[i0];
       lb.classList.toggle('lit', !!taken[ed.from + '>' + ed.to]);
@@ -1215,6 +1324,16 @@
       });
       if (want.some(function (e, i) { return e !== es[i]; })) want.forEach(function (e) { svgE.appendChild(e); });
     }
+    if (!instant && !reducedMotion()) fresh.forEach(function (e) {
+      var len = e._len || 0;
+      if (!len) return;
+      e.querySelectorAll('path.ln, path.glow').forEach(function (pth) {
+        pth.style.strokeDasharray = len + ' ' + len;
+        var a = pth.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: DRAW_MS, easing: 'cubic-bezier(.4,0,.2,1)' });
+        a.onfinish = a.oncancel = function () { pth.style.strokeDasharray = ''; };
+      });
+    });
+    this._placeCue(run, S, finished);
     var busy = S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; });
     clearTimeout(this._tick);
     if (busy) this._tick = setTimeout(function () { self.render(); }, 100);
@@ -1247,26 +1366,30 @@
     var t = e.target.closest('[data-act]');
     if (!t || !this.root.contains(t)) return;
     var act = t.getAttribute('data-act'), arg = t.getAttribute('data-arg');
-    if (act === 'given') { this.overlay = { focus: arg || null }; }
-    else if (act === 'close') { if (e.target === t || t.classList.contains('p-close')) this.overlay = null; else return; }
+    if (act === 'given') { this.overlay = { focus: arg || null }; this.bigText = this.bigText || false; }
+    else if (act === 'close') { this.overlay = null; }
     else if (act === 'item') { this.presItem = this.presItem === arg ? null : arg; }
-    else if (act === 'clearsel') { this.selectedNode = null; }
+    else if (act === 'clearsel') { this.selectedNode = null; this.overlay = null; }
+    else if (act === 'sel') { this.selectedNode = arg; this.overlay = null; this.presItem = null; this.recapOpen = false; }
+    else if (act === 'open') { this.selectedNode = arg || null; this.recapOpen = false; this.setView('detail'); return; }
+    else if (act === 'mapview') { this.setView('map'); return; }
     else if (act === 'more') { this.moreOpen = !this.moreOpen; }
     else if (act === 'bigtext') { this.bigText = !this.bigText; }
     else if (act === 'maponly') { this.toggleMapOnly(); return; }
-    else if (act === 'recap') { this.recapOpen = !this.recapOpen; this.selectedNode = null; }
-    else if (act === 'keys') { this.keysOpen = !this.keysOpen; }
-    else if (act === 'stepthrough') { this.selectedNode = null; this.recapOpen = false; this.stepThrough(); return; }
-    else if (this.transport && this.transport[act]) { this.selectedNode = null; this.recapOpen = false; this.presItem = null; this.transport[act](); return; }
+    else if (act === 'recap') { this.openRecap(!this.recapOpen); return; }
+    else if (act === 'keys') { this.keysOpen = !this.keysOpen; if (this.keysOpen && this.view !== 'detail') { this.setView('detail'); return; } }
+    else if (act === 'stepthrough') { this.selectedNode = null; this.recapOpen = false; this.overlay = null; this.stepThrough(); return; }
+    else if (this.transport && this.transport[act]) { this.selectedNode = null; this.recapOpen = false; this.presItem = null; this.overlay = null; this.transport[act](); return; }
     else return;
     this.render();
   };
 
-  Bench.prototype.toggleMapOnly = function () {
-    this.mapOnly = !this.mapOnly;
-    if (this.topo) { this._drawStage(); this.render(); }
+  // M: the whole map, or the map compact with the detail under it.
+  Bench.prototype.toggleMapOnly = function () { this.setView(this.view === 'map' ? 'detail' : 'map'); };
+  Bench.prototype.openRecap = function (on) {
+    this.recapOpen = on !== false; this.selectedNode = null; this.overlay = null;
+    if (this.recapOpen && this.view !== 'detail' && this.mode === 'presentation') this.setView('detail'); else this.render();
   };
-  Bench.prototype.openRecap = function (on) { this.recapOpen = on !== false; this.selectedNode = null; this.render(); };
 
   /* A presenter's keys, and a clicker's (it sends PageUp/PageDown): → Space PageDown go forward one
      step (and from the last step to the recap), ← PageUp go back (out of the recap first), Home the
@@ -1281,6 +1404,7 @@
       if (this.keysOpen) this.keysOpen = false;
       else if (this.overlay) this.overlay = null;
       else if (this.recapOpen) this.recapOpen = false;
+      else if (this.mode === 'presentation' && this.view === 'detail') { this.setView('map'); return; }
       else if (this.selectedNode) this.selectedNode = null;
       else return;
       this.render();
@@ -1314,7 +1438,15 @@
     e.preventDefault();
     this.presItem = null;
     if (back && this.recapOpen) { this.openRecap(false); return; }
-    if (this.selectedNode) { this.selectedNode = null; this.render(); return; }
+    // A step clicked: ← → walk the run's path from it (past the last step, the recap).
+    if (this.selectedNode) {
+      var shown = this._lastShown, seq = shown ? shown.seq : [], i = seq.indexOf(this.selectedNode);
+      if (i < 0) { this.selectedNode = null; this.render(); return; }
+      var j = i + (fwd ? 1 : -1);
+      if (j >= 0 && j < seq.length) { this.selectedNode = seq[j]; this.render(); return; }
+      if (fwd && shown.finished) this.openRecap(true);
+      return;
+    }
     var atEnd = this.tstate === 'done' || (!this.transport && this._lastShown && this._lastShown.finished);
     if (fwd && atEnd) { if (!this.recapOpen) this.openRecap(true); return; }
     if (!this.transport) return;
@@ -1342,8 +1474,12 @@
     var beside = this.source === 'parent';
     var rlen = req.text ? req.text.length : 0;
     p.req.className = 'ps-req' + (rlen > 320 ? ' r-xlong' : rlen > 170 ? ' r-long' : '');
-    setHTML(p.req, beside ? '' : req.text ? '“' + esc(req.text.replace(/\s+/g, ' ')) + '”' : '<span class="muted">' + (run ? '' : 'Waiting for a request…') + '</span>');
-    var who = beside ? '' : String(req.who || '').split(' · ').filter(Boolean);
+    // Beside the app: the request too (two lines at most; the app shows it whole), so the room knows
+    // which request the map is about without looking across.
+    if (beside) p.req.className += ' r-beside';
+    p.req.title = beside && req.text ? req.text : '';
+    setHTML(p.req, req.text ? '“' + esc(req.text.replace(/\s+/g, ' ')) + '”' : '<span class="muted">' + (run ? '' : beside ? 'Pick a request in the app.' : 'Waiting for a request…') + '</span>');
+    var who = String(req.who || '').split(' · ').filter(Boolean);
     setHTML(p.who, who.length ? '<b>' + esc(who[0]) + '</b>' + who.slice(1).map(function (x) { return ' · ' + esc(x); }).join('') : '');
     var oc = run ? L.outcome(topo, events) : { text: '', done: false };
     var st = !run ? { cls: 'idle', text: 'Waiting for a request' }
@@ -1353,17 +1489,17 @@
       : { cls: 'running', text: oc.text === 'Something went wrong' ? oc.text : 'Running' };
     setHTML(p.status, '<span class="ps-pill st-' + st.cls + '" title="' + esc(st.full || st.text) + '"><i></i><b>' + esc(st.text) + '</b></span>');
     // The map's heading: how many steps the app has, how many this run took.
-    var nSteps = topo.nodes.length, took = S ? S.seq.length : 0;
-    setHTML(p.flowhead, '<b>How it works</b><span>' + nSteps + ' steps' + (run ? ' · this run took ' + took : '') + '</span>' +
-      '<span class="ps-legend"><span><i class="lit"></i>this run</span><span><i class="dash"></i>not taken</span></span>');
+    setHTML(p.flowhead, this._flowheadHTML(run, S));
     setHTML(p.transport, this._transportHTML(finished, run, S));
     var focusSeq = this._focusSeq(run, S);
     setHTML(p.bottom, run ? this._bottomHTML(run, events, finished, S, focusSeq) : '');
     setHTML(p.strip, run ? this._stripHTML(run, S, focusSeq) : '');
     this.root.querySelectorAll('.ps-key').forEach(function (b) {
       var a = b.getAttribute('data-act');
-      b.classList.toggle('on', a === 'maponly' ? !!self.mapOnly : a === 'recap' ? !!self.recapOpen : !!self.keysOpen);
+      b.classList.toggle('on', a === 'maponly' ? self.view === 'map' : a === 'recap' ? !!self.recapOpen : !!self.keysOpen);
     });
+    // The whole map's line: what the step it's on did (or how the run ended), one click from its detail.
+    setHTML(p.now, this.view === 'map' ? this._nowHTML(run, events, finished, S, tstate) : '');
 
     // The panel (or the recap): the selected step, else the step the run is on.
     var html, focusActor = null;
@@ -1374,66 +1510,52 @@
     if (this.keysOpen) html = '<div class="bb ps-keys"><div class="bb-head"><span class="bb-name">Keys</span><button class="p-x" data-act="keys" title="Close (Esc)">✕</button></div>' +
       '<section class="bb-sec"><dl class="bb-fields">' + KEYS_HELP.map(function (x) { return '<dt><kbd>' + esc(x[0]) + '</kbd></dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl></section></div>';
     var prevFocus = p.bubble._focus;
+    if (this.view !== 'detail') html = '';
     setHTML(p.bubble, html);
-    // A new step's panel opens at its top.
-    var fkey = (this.recapOpen ? 'recap' : '') + (S && S.focus);
-    if (prevFocus !== fkey) { p.bubble.scrollTop = 0; p.bubble._focus = fkey; }
+    // A new step's panel opens at its top, rising in (the old one gone at once).
+    var fkey = this.view + (this.keysOpen ? 'keys' : '') + (this.recapOpen ? 'recap' : '') + (S && S.focus);
+    if (prevFocus !== fkey) {
+      p.bubble.scrollTop = 0; p.bubble._focus = fkey;
+      var card = p.bubble.firstChild;
+      if (prevFocus != null && card && card.animate && !reducedMotion()) card.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: EASE });
+    }
     p.bubble.classList.toggle('is-recap', !!(run && this.recapOpen));
     p.stage.className = 'ps-stage' + (focusActor && !this.keysOpen ? ' a-' + focusActor : '');
-    if (this.overlay && run) {
-      p.overlay.hidden = false; setHTML(p.overlay, this._overlayHTML(run, events));
-      if (this.overlay.focus && !this.overlay.scrolled) {
-        var sec = p.overlay.querySelector('.g-call.focus');
-        if (sec) { p.overlay.scrollTop = Math.max(0, sec.offsetTop - 60); this.overlay.scrolled = true; }
-      }
-    } else p.overlay.hidden = true;
+    // "What the AI was given": a drawer over the detail only; the map stays in view.
+    var dr = p.drawer, open = !!(this.overlay && run && this.view === 'detail');
+    if (open) {
+      var was = dr.classList.contains('open');
+      setHTML(dr, this._drawerHTML(run, events, S));
+      if (!was) { dr.classList.add('open'); dr.setAttribute('aria-hidden', 'false'); var db = dr.querySelector('.dr-body'); if (db) db.scrollTop = 0; }
+    } else if (dr.classList.contains('open')) { dr.classList.remove('open'); dr.setAttribute('aria-hidden', 'true'); }
     if (this._fit) this._fit();
-    this._placeMarker();
+    this._placeCue(run, S, finished);
     this._moreCue();
   };
   // The panel's "more below" cue: shown while its content runs past its foot (its scrollbar is hidden).
   Bench.prototype._moreCue = function () {
     var b = this.p.bubble, m = this.p.more;
     if (!b || !m) return;
-    var hide = this._stacked() || b.scrollHeight - b.clientHeight - b.scrollTop < 6;
+    var hide = this.view !== 'detail' || !!this.overlay || b.scrollHeight - b.clientHeight - b.scrollTop < 6;
     if (m.hidden !== hide) m.hidden = hide;
   };
 
-  /* The divider between the map and the panel, its notch at the explained step's row, and the step's
-     pointer: a tab on the box's right edge whose left side fades into the box and whose right edge is
-     an arrow tip, with a constant-height wire from the tip to the notch. The wire is left off when
-     another box sits between the step and the divider (it never crosses a box). Measured from the
-     boxes as drawn (after the map's fit), in the stage's coordinates; redone on every render and resize. */
-  Bench.prototype._placeMarker = function () {
-    var E = this._E(), stage = E.stage, div = E.divider, notch = E.notch, mk = E.mk;
-    if (!stage || !div) return;
-    var stacked = this._stacked();
-    var off = !E.eng && (this.recapOpen || this.mapOnly || this.keysOpen);
-    var focusEl = off ? null : E.graph.querySelector('.gnode.focus');
-    var bubR = E.bubble.getBoundingClientRect(), sr = stage.getBoundingClientRect();
-    div.hidden = stacked || (!E.eng && this.mapOnly) || !bubR.height;
-    var X = bubR.left - sr.left - 14;
-    if (!div.hidden) { div.style.left = X + 'px'; div.style.top = (bubR.top - sr.top) + 'px'; div.style.height = bubR.height + 'px'; }
-    // Stacked, the panel is under the map: a pointer to its right would point at nothing.
-    if (!focusEl || stacked) { notch.hidden = mk.hidden = true; return; }
-    var nr = focusEl.getBoundingClientRect(), k = this._fitK || 1;
-    var top = nr.top - sr.top, H = nr.height, R = nr.right - sr.left;
-    // A box scrolled out of the map's view gets no pointer.
-    var gr = E.graph.getBoundingClientRect();
-    if (nr.bottom < gr.top + 4 || nr.top > gr.bottom - 4) { notch.hidden = mk.hidden = true; return; }
-    notch.hidden = div.hidden;
-    if (!notch.hidden) { notch.style.left = X + 'px'; notch.style.top = (top + H * 0.19) + 'px'; notch.style.height = (H * 0.62) + 'px'; }
-    var tabW = 58, inset = 46 * k;
-    mk.hidden = false;
-    mk.style.left = (R - inset) + 'px'; mk.style.top = (top + 1.5) + 'px'; mk.style.height = Math.max(8, H - 3) + 'px';
-    mk.style.width = Math.max(tabW, X - (R - inset)) + 'px';
-    var wire = mk.querySelector('.wire');
-    var blocked = [].slice.call(E.graph.querySelectorAll('.gnode:not(.focus)')).some(function (o) {
-      var r = o.getBoundingClientRect();
-      return r.left > nr.right && r.top < nr.bottom && r.bottom > nr.top;
-    });
-    wire.hidden = div.hidden || blocked || X - (R - inset) <= tabW;
-    if (!wire.hidden) { wire.style.left = (tabW - 2) + 'px'; wire.style.width = Math.max(0, X - (R - inset) - tabW + 2) + 'px'; }
+  // The old divider-and-pointer marker is gone (one marker: the ring on the box). Kept for callers.
+  Bench.prototype._placeMarker = function () {};
+
+  /* "Your turn": while the run waits for a person, a cue beside the waiting step on the whole map,
+     on the side the app is (its left), else under the step. The detail view's card says it instead. */
+  Bench.prototype._placeCue = function (run, S, finished) {
+    var E = this._E(), cue = E.cue;
+    if (!cue) return;
+    var gw = !E.eng && this._viewNow() === 'map' && !finished && E.graph.querySelector('.gnode.gatewait');
+    if (!gw) { if (!cue.hidden) cue.hidden = true; return; }
+    setHTML(cue, (this.source === 'parent' ? '<span class="ar" aria-hidden="true">◀</span>' : '') + '<b>Your turn:</b> approve or deny it in the app');
+    cue.hidden = false;
+    var mr = E.map.getBoundingClientRect(), nr = gw.getBoundingClientRect(), cw = cue.offsetWidth, ch = cue.offsetHeight;
+    var left = nr.left - mr.left - cw - 14, top = nr.top - mr.top + nr.height / 2 - ch / 2;
+    if (left < 6) { left = Math.max(6, Math.min(nr.left - mr.left, mr.width - cw - 6)); top = nr.bottom - mr.top + 8; }
+    cue.style.left = Math.round(left) + 'px'; cue.style.top = Math.round(top) + 'px';
   };
 
   /* Replay: ◀ prev, play, next ▶, ↻ (keys: ← → or PageUp/PageDown, Space = next). Beside the app or
@@ -1615,6 +1737,41 @@
     return axis + '<div class="bb-seq">' + rows + '</div>' + (cap ? '<div class="bb-cap">' + cap + '</div>' : '');
   };
 
+  /* The map's heading: how many steps the app has and how many this run took; on the whole map, the
+     hint; on the compact one (its boxes carry no actor word), whose each colour is, and the way back
+     to the whole map. */
+  Bench.prototype._flowheadHTML = function (run, S) {
+    var L = lg(), topo = this.topo, eng = this.mode === 'engineering', took = S ? S.seq.length : 0;
+    var left = '<span class="fh-l"><b class="fh-k">How it works</b><span>' + topo.nodes.length + ' steps</span>' + (run ? '<span>this run <b>' + took + '</b></span>' : '') + '</span>';
+    if (this._viewNow() === 'map') return left + (run ? '<span class="fh-hint">Click a step to open it</span>' : '');
+    var have = {};
+    topo.nodes.forEach(function (n) { have[L.actorOf(n)] = true; });
+    var legend = ['ai', 'app', 'rule', 'person'].filter(function (a) { return have[a]; }).map(function (a) { return '<span class="a-' + a + '"><i></i>' + esc(ACTOR_CHIP[a]) + '</span>'; }).join('');
+    return left + '<span class="ps-legend">' + legend + '</span>' + (eng ? '' : '<button class="ps-mapbtn" data-act="mapview" title="The whole map (M or Esc)">⤢ whole map</button>');
+  };
+
+  /* The line under the whole map: the step the run is on (its badge, name and headline), or how the run
+     ended; a click opens the detail. */
+  Bench.prototype._nowHTML = function (run, events, finished, S, tstate) {
+    var L = lg(), topo = this.topo, beside = this.source === 'parent';
+    if (!run) return '<div class="now idle"><div class="now-t"><div class="now-h">' + (beside ? 'Pick a request in the app. The run plays here: each step lights up as it happens, and any step opens to show what it did.' : 'Waiting for a run.') + '</div></div></div>';
+    var cont = tstate === 'moment' && this.transport ? '<button class="p-btn primary" data-act="play">Continue ▸</button>' : '';
+    if (finished) {
+      var oc = L.outcome(topo, events), first = S.seq[0];
+      return '<div class="now done"><div class="now-t"><div class="now-name">' + esc(oc.text) + '</div><div class="now-h">' + S.seq.length + ' of ' + topo.nodes.length +
+        ' steps ran. Click any step to see what it did.</div></div>' + (first ? '<button class="now-open" data-act="open" data-arg="' + esc(first) + '">Step 1 ▸</button>' : '') + '</div>';
+    }
+    var id = S.focusNode;
+    if (!id) return '<div class="now"><div class="now-t"><div class="now-h">Starting…</div></div></div>';
+    var c = L.callout(topo, events, id, { finished: finished, last: S.lastNode, numbers: S.numbers, reply: L.replyOf(run.output, topo) });
+    var waiting = run.gate && run.gate.node === id && run.gate.state === 'waiting';
+    var st = waiting ? 'waiting for a person' : S.openNode === id || S.starting[id] ? 'running' : 'done';
+    if (waiting) c.status = 'waiting'; else if (st === 'running') c.status = 'now';
+    return '<div class="now a-' + esc(c.actor) + ' s-' + esc(c.status) + '"><span class="bb-num">' + esc(badgeOf(S, id) || '·') + '</span><div class="now-t"><div class="now-name">' + esc(c.title) +
+      (st ? ' <span class="now-st">' + esc(st) + '</span>' : '') + '</div><div class="now-h">' + para(c.headline) + '</div></div>' + cont +
+      '<button class="now-open" data-act="open" data-arg="' + esc(id) + '" title="Open this step (the map stays on top)">Open ▸</button></div>';
+  };
+
   Bench.prototype._bubbleHTML = function (run, events, id, finished, S) {
     var L = lg(), topo = this.topo, self = this;
     var reply = L.replyOf(run.output, topo);
@@ -1628,8 +1785,10 @@
     var head = '<div class="bb-head"><span class="bb-num' + (S.numbers[id] ? '' : ' off') + '">' + esc(bn || '·') + '</span>' +
       '<span class="bb-name">' + esc(c.title) + '</span>' +
       '<span class="bb-who">' + esc(ACTOR_CHIP[c.actor] || c.actor) + '</span>' +
-      '<span class="bb-tag t-' + esc(c.status) + '"><i></i>' + esc(tagText) + '</span>' +
-      (this.selectedNode ? '<button class="p-x" data-act="clearsel" title="Follow the run again (Esc)">✕</button>' : '') + '</div>';
+      '<span class="bb-tag t-' + esc(c.status) + '"><i></i>' + esc(tagText) + '</span></div>';
+    // A step clicked while the run goes on: one press back to following it.
+    var live = this.selectedNode && !finished && S.focusNode && S.focusNode !== id;
+    if (live) head += '<button class="p-follow" data-act="clearsel" title="The detail follows the run again">↻ follow the run · step ' + esc(badgeOf(S, S.focusNode)) + '</button>';
     // The step's numbers in one strip.
     var calls = stepEvs.filter(function (e) { return e.event_type === 'llm_call'; });
     var seq = S.focus === id ? this._focusSeq(run, S) : null;
@@ -1654,7 +1813,7 @@
     var acts = '';
     if (this._tstateShown === 'moment' && this.transport && !this.selectedNode) acts += '<button class="p-btn primary" data-act="play">Continue ▸</button>';
     if (calls.some(function (e) { var d = e.data || {}; return d.system != null || (d.messages || []).length || d.output != null; }))
-      acts += '<button class="p-btn" data-act="given" data-arg="' + esc(id) + '">What the AI was given ▸</button>';
+      acts += '<button class="p-btn p-given" data-act="given" data-arg="' + esc(id) + '">What the AI was given <span aria-hidden="true">↑</span></button>';
     if (this.pair && c.proposal && c.proposal.state !== 'waiting') acts += '<a class="p-btn" href="' + esc(this.pair.href) + '">' + esc(this.pair.text) + '</a>';
 
     var headline = c.headline;
@@ -1675,7 +1834,7 @@
     if (sub && c.choices.some(function (x) { return x.chosen && x.description && x.description.trim() === String(sub).trim(); })) {
       sub = node.description && node.description.length <= 180 ? node.description : null;
     }
-    var body = '<p class="bb-headline">' + para(headline) + '</p>' + (sub ? '<p class="bb-sub">' + esc(sub) + '</p>' : '');
+    var body = '<p class="bb-headline">' + para(headline) + '</p>' + (sub ? '<p class="bb-sub">' + esc(sub) + '</p>' : '') + '\u0000ROW\u0000';
     var evidence = 0;
     if (seq) {
       evidence++;
@@ -1757,8 +1916,17 @@
     if (c.about && (c.kind === 'gate' || !evidence) && !(!ran && finished)) body += sec(esc(c.about.label), '<p class="bb-about">' + esc(c.about.text) + '</p>', 'bb-aboutsec');
     body += this._storyHTML(run, events, id);
     // The numbers and the buttons on one row: a row of the panel's height saved for its evidence.
+    // The headline first (what happened, without a scroll beside an app), then the numbers and the buttons on one row.
     var row = strip || acts ? '<div class="bb-strip">' + strip + (acts ? '<div class="p-acts">' + acts + '</div>' : '') + '</div>' : '';
-    return '<div class="bb a-' + esc(c.actor) + ' s-' + esc(c.status) + '">' + head + row + '<div class="bb-body">' + body + '</div></div>';
+    body = body.replace('\u0000ROW\u0000', row);
+    // Previous and next along this run's path.
+    var at = S.seq.indexOf(id), pv = at > 0 ? S.seq[at - 1] : null, nx2 = at >= 0 ? S.seq[at + 1] : null;
+    function navBtn(n2, dir) {
+      var a = L.actorOf(L.nodeOf(topo, n2) || {}, events), t = L.plainLabel(L.nodeOf(topo, n2), n2);
+      return '<button class="bb-go a-' + esc(a) + '" data-act="sel" data-arg="' + esc(n2) + '">' + (dir < 0 ? '← ' : '') + '<span class="b">' + esc(badgeOf(S, n2)) + '</span>' + esc(t) + (dir > 0 ? ' →' : '') + '</button>';
+    }
+    var nav = pv || nx2 ? '<div class="bb-nav">' + (pv ? navBtn(pv, -1) : '<span></span>') + (nx2 ? navBtn(nx2, 1) : '') + '</div>' : '';
+    return '<div class="bb a-' + esc(c.actor) + ' s-' + esc(c.status) + '">' + head + '<div class="bb-body">' + body + '</div>' + nav + '</div>';
   };
 
   // What a decision rests on, as rows (the passage's own sentence when the search found it).
@@ -1891,7 +2059,9 @@
      is on a step that ran an agent loop, that step's own numbers instead. */
   Bench.prototype._bottomHTML = function (run, events, finished, S, seq) {
     var L = lg(), topo = this.topo;
-    function item(k, v, cls, title) { return '<span class="fi' + (cls ? ' ' + cls : '') + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + (k ? '<span class="fk">' + esc(k) + '</span> ' : '') + '<span class="fv">' + esc(v) + '</span>' + '</span>'; }
+    // A label may come in two lengths [long, short]: the short one at pane width (index.html .lg/.sh).
+    function lab(k) { return Array.isArray(k) ? '<span class="lg">' + esc(k[0]) + '</span><span class="sh">' + esc(k[1]) + '</span>' : esc(k); }
+    function item(k, v, cls, title) { return '<span class="fi' + (cls ? ' ' + cls : '') + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + (k ? '<span class="fk">' + lab(k) + '</span> ' : '') + '<span class="fv">' + esc(v) + '</span>' + '</span>'; }
     function plain(html) { return '<span class="fi">' + html + '</span>'; }
     if (seq) {
       var n = S.numbers[S.focus];
@@ -1906,16 +2076,16 @@
     var split = events.length ? L.timeSplit(events, nowTs) : null;
     var out = '';
     if (split) {
-      if (split.gated) out += item('AI work', L.secsWords(split.work)) + item('Waiting for a person', L.secsWords(split.waiting));
+      if (split.gated) out += item('AI work', L.secsWords(split.work)) + item(['Waiting for a person', 'waiting'], L.secsWords(split.waiting));
       else out += item(finished ? 'total' : 'so far', L.secsWords(split.total));
     }
     var info = L.costInfo(events);
     if (info.calls) {
       var tin = 0, tout = 0;
       events.forEach(function (e) { if (e.event_type === 'llm_call') { tin += (e.data || {}).input_tokens || 0; tout += (e.data || {}).output_tokens || 0; } });
-      var tail = ' · ' + info.calls + ' call' + (info.calls === 1 ? '' : 's') + (tin || tout ? ' · ' + L.fmtNum(tin) + '→' + L.fmtNum(tout) + ' tok' : '');
-      if (!info.priced) out += plain('<span class="fk">AI cost</span> <span class="fv unk" title="The model calls carry no price, and the bench has none for this model: unknown, not free">not known</span>' + esc(tail));
-      else out += plain('<span class="fk">AI cost</span> <span class="fv">' + (info.known ? '' : 'at least ') + esc(L.fmtUsd(info.usd)) + '</span>' + esc(tail));
+      var tail = '<span class="calls">' + esc(' · ' + info.calls + ' call' + (info.calls === 1 ? '' : 's')) + '</span>' + (tin || tout ? '<span class="lg">' + esc(' · ' + L.fmtNum(tin) + '→' + L.fmtNum(tout) + ' tok') + '</span>' : '');
+      if (!info.priced) out += plain('<span class="fk">AI cost</span> <span class="fv unk" title="The model calls carry no price, and the bench has none for this model: unknown, not free">not known</span>' + tail);
+      else out += plain('<span class="fk">AI cost</span> <span class="fv">' + (info.known ? '' : 'at least ') + esc(L.fmtUsd(info.usd)) + '</span>' + tail);
     }
     // The app's by-hand estimate is in the recap (it's a sentence, not a number for this bar).
     return out;
@@ -1938,9 +2108,19 @@
     }).join('') + '</div>';
   };
 
-  // "What the AI was given": the run's model calls, as plain blocks, with retrieved text marked.
+  /* "What the AI was given", a drawer over the detail (the map stays in view): the step's model calls
+     (all of the run's when it names none), as plain blocks, its answer first, retrieved text marked. */
+  Bench.prototype._drawerHTML = function (run, events, S) {
+    var L = lg(), focus = this.overlay && this.overlay.focus, node = focus && L.nodeOf(this.topo, focus);
+    var n = focus && S ? badgeOf(S, focus) : '', actor = node ? L.actorOf(node, events) : 'ai';
+    return '<div class="dr-hd a-' + esc(actor) + '"><button class="dr-back" data-act="close" title="Back to the step (Esc)">← back' + (n ? ' to step <span class="b">' + esc(n) + '</span>' : '') + '</button>' +
+      '<div class="dr-t">What the AI was given<small>' + (node ? 'step ' + esc(n || '·') + ' · ' + esc(L.plainLabel(node, focus)) + ' · ' : '') + 'word for word, as the app recorded it</small></div>' +
+      '<button class="g-big" data-act="bigtext" title="Larger or smaller text">' + (this.bigText ? 'A\u2212 smaller' : 'A+ larger') + '</button></div>' +
+      '<div class="dr-body g-panel' + (this.bigText ? ' big' : '') + '">' + this._overlayHTML(run, events) + '</div>';
+  };
   Bench.prototype._overlayHTML = function (run, events) {
-    var L = lg(), calls = L.givenBlocks(this.topo, events), focus = this.overlay && this.overlay.focus;
+    var L = lg(), focus = this.overlay && this.overlay.focus, calls = L.givenBlocks(this.topo, events);
+    if (focus && calls.some(function (c) { return c.node === focus; })) calls = calls.filter(function (c) { return c.node === focus; });
     var note = L.privacyLine(this.topo, events);
     var anyHit = false;
     var anyRelied = false;
@@ -1971,15 +2151,12 @@
         }
         return '<div class="g-block g-' + esc(b.role || 'x') + '"><div class="g-role">' + esc(b.label) + '</div><pre class="g-text">' + segs + '</pre></div>';
       }).join('');
-      return '<section class="g-call' + (focus && focus === c.node ? ' focus' : '') + '" data-node="' + esc(c.node) + '"><h4>Step: ' + esc(c.title) + '</h4>' + (blocks || '<div class="muted">The app didn\u2019t send this call\u2019s text.</div>') + '</section>';
+      return '<section class="g-call' + (focus && focus === c.node ? ' focus' : '') + '" data-node="' + esc(c.node) + '">' + (calls.length > 1 ? '<h4>Step: ' + esc(c.title) + '</h4>' : '') + (blocks || '<div class="muted">The app didn\u2019t send this call\u2019s text.</div>') + '</section>';
     }).join('');
-    return '<div class="g-panel' + (this.bigText ? ' big' : '') + '"><div class="g-head"><b>What the AI was given</b><span class="muted">every time the AI was asked something in this run, word for word as the app recorded it</span>' +
-      '<button class="g-big" data-act="bigtext" title="Larger or smaller text">' + (this.bigText ? 'A\u2212 Smaller text' : 'A+ Larger text') + '</button>' +
-      '<button class="p-close" data-act="close" title="Close (Esc)">\u2715 Close</button></div>' +
-      (anyHit ? '<div class="g-note"><mark class="g-key">highlighted</mark> text was found by the search and pasted into the AI\u2019s prompt, word for word; the label above each says where it came from.' +
+    return (anyHit ? '<div class="g-note"><mark class="g-key">highlighted</mark> text was found by the search and pasted into the AI\u2019s prompt, word for word; the label above each says where it came from.' +
         (anyRelied ? ' <mark class="g-key relied">★ relied on</mark> marks what its answer rests on.' : '') + '</div>' : '') +
       (note ? '<div class="g-note">' + esc(note) + '</div>' : '') +
-      '<div class="g-body">' + (body || '<div class="muted">The AI hasn\u2019t been asked anything yet.</div>') + '</div></div>';
+      '<div class="g-body">' + (body || '<div class="muted">The AI hasn\u2019t been asked anything yet.</div>') + '</div>';
   };
 
   global.Bench = Bench;

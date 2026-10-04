@@ -25,7 +25,8 @@ function readMap(file) {
   const text = fs.readFileSync(file, 'utf8');
   return file.endsWith('.recording.jsonl') ? JSON.parse(text.split('\n')[0]).topology : JSON.parse(text);
 }
-const GEOMS = { engineering: layout.GEOM, presentation: layout.PRES_GEOM, stage: layout.STAGE_GEOM, pane: layout.PANE_GEOM };
+const GEOMS = { engineering: layout.GEOM, presentation: layout.PRES_GEOM, stage: layout.STAGE_GEOM, pane: layout.PANE_GEOM,
+                roomy: layout.ROOMY_GEOM, compact: layout.COMPACT_GEOM };
 
 // Every sampled point of every edge piece, against every box but the edge's own ends.
 function crossings(topo, L) {
@@ -149,7 +150,7 @@ test('two branches between the same two steps are one line with joined words', (
 
 test('Presentation geometries: the helpdesk\'s row-skipping edges run inside the map, and every line in a gap turns at one height', { skip: !fs.existsSync(MAPS.helpdesk) }, () => {
   const topo = readMap(MAPS.helpdesk);
-  for (const G of [layout.STAGE_GEOM, layout.PANE_GEOM]) {
+  for (const G of [layout.STAGE_GEOM, layout.PANE_GEOM, layout.ROOMY_GEOM, layout.COMPACT_GEOM]) {
     const L = layout(topo, G);
     const xs = Object.values(L.pos).map((p) => p.x), lo = Math.min(...xs), hi = Math.max(...xs) + G.w;
     const turns = {};   // gap index -> the heights of every horizontal leg in it
@@ -163,5 +164,19 @@ test('Presentation geometries: the helpdesk\'s row-skipping edges run inside the
       }
     }));
     for (const [gap, ys] of Object.entries(turns)) assert.equal(ys.size, 1, `gap ${gap} has lines turning at ${[...ys].join(', ')}`);
+  }
+});
+
+test('Pane geometries (centerExit): every line leaves its box at the bottom centre and enters the next at the top centre, so a run\'s lit path is one straight spine', { skip: !fs.existsSync(MAPS.helpdesk) }, () => {
+  const topo = readMap(MAPS.helpdesk);
+  for (const G of [layout.ROOMY_GEOM, layout.COMPACT_GEOM]) {
+    const L = layout(topo, G);
+    L.edges.forEach((r) => {
+      if (!r) return;
+      const a = L.pos[r.from], b = L.pos[r.to], s = r.pieces[0][0], e = r.pieces[r.pieces.length - 1][3];
+      if (b.y <= a.y) return;   // a line back up the map has its own route
+      assert.ok(Math.abs(s[0] - (a.x + G.w / 2)) < 0.01 && Math.abs(s[1] - (a.y + G.h)) < 0.01, `${r.from}->${r.to} leaves at ${s}`);
+      assert.ok(Math.abs(e[0] - (b.x + G.w / 2)) < 0.01 && Math.abs(e[1] - b.y) < 0.01, `${r.from}->${r.to} enters at ${e}`);
+    });
   }
 });
