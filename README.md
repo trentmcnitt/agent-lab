@@ -43,7 +43,7 @@ It sits on top of the tracing you already have. It doesn't replace your observab
 - **✅ Checks and sign-offs.** Every check that guards the app, whether it passed this run, and whether a person approved.
 - **⟨⟩ The exact prompt.** Model I/O shows what the model was told, word for word, and exactly what it returned, per call. In Presentation, "What the AI was given" shows the same thing as readable blocks.
 - **⏱️ Time and cost.** Per-step latency, with AI time split from time spent waiting for a person; tokens and cost per call. A call with no price shows its cost as unknown, never as $0.
-- **🧩 Stories.** An app can register its own panels that explain its runs, the way comments explain code. Custom panels never hide data: every one has a raw toggle.
+- **🧩 Stories.** An app can ship its own panels that explain its runs, the way comments explain code. Custom panels never hide data: every one has a raw toggle.
 - **🪟 Side by side.** A shell puts the real app on the left and the bench on the right, live or from a recording. On a phone it becomes two tabs.
 - **🔌 Plugs into OpenTelemetry.** Point an OTLP exporter at the bench and it draws a map from your spans, with no code. The `agentlab` library adds the real map, plain words and checked facts, on the same wire.
 - **📼 Replay anywhere.** Recordings carry their own map and story, so a static site can replay them with no server.
@@ -85,7 +85,7 @@ The limits, stated plainly:
 - Verification checks that every word names something real, and flags words whose code changed. It never claims the words are right.
 - A `@lab.step` on a function that is no longer added to the graph isn't reported. Its words never reach the map, so nothing wrong is shown.
 
-### 1. Zero setup: point your OpenTelemetry at it
+### 1. Zero setup (Level 0): point your OpenTelemetry at it
 
 If your app already emits OpenTelemetry with the GenAI conventions, set these and run it:
 
@@ -98,7 +98,7 @@ OTEL_BSP_SCHEDULE_DELAY=200                           # optional: send every 200
 OTEL_EXPORTER_OTLP_COMPRESSION=gzip                   # optional: works
 ```
 
-Then open `http://127.0.0.1:8790/?app=my-app` (the front page lists every app it has seen). The bench infers a map from your spans, labelled "map inferred from the trace", and shows the path, Model I/O, tool calls and retrievals. An inferred map shows only the steps a run took; the branches it didn't take need the library or a flow file.
+Then open `http://127.0.0.1:8790/?app=my-app` (the front page lists every app it has seen). The bench infers a map from your spans, labelled "map inferred from the trace", and shows the path, Model I/O, tool calls and retrievals. An inferred map shows only the steps a run took; the branches it didn't take need the library, a flow file or a declared map.
 
 A LangGraph app traced by OpenInference or OpenLLMetry has its spans grouped by graph node. Both instrumentors' node keys were read from their real output on 10-03-26 (SPEC section 8.6).
 
@@ -152,7 +152,7 @@ Start the bench (`uv run uvicorn bench.server:app --port 8790`), run the app, an
 
 Steps show by their code names, and `verify` lists what has no words yet as information, not errors. These are the lines a test engineer used to hook up a fresh LangGraph app from this README on 10-03-26, against a bench on another port (set with `AGENT_LAB_URL`), with no other setup. Spans were sent when the process exited, with no shutdown call.
 
-`lab.init()` with no arguments sends to `http://127.0.0.1:8790`, and it is a silent no-op while nothing listens there, so the same code runs in production with no bench. Set `AGENT_LAB_URL=http://host:port` only when the bench runs on another machine; `AGENT_LAB_URL=off` turns it off.
+`lab.init()` with no arguments sends to `http://127.0.0.1:8790`, and it is a silent no-op while nothing listens there, so the same code runs in production with no bench. Set `AGENT_LAB_URL=http://host:port` only when the bench runs on another machine or port; `AGENT_LAB_URL=off` turns it off.
 
 **Make it read well, where it pays off.** Add facts and words next to the code they describe:
 
