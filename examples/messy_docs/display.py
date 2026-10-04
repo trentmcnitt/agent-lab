@@ -60,11 +60,17 @@ def snippet(text: str, query: str | None) -> str:
     Trimmed to SNIPPET_MAX characters on a word boundary. No overlap: the passage's opening."""
     body = "\n".join(l for l in (text or "").split("\n") if not re.match(r"\s*#{1,6}\s", l))
     flat = re.sub(r"[ \t]+", " ", re.sub(r"\*\*|__", "", body if body.strip() else (text or ""))).strip()   # no bold markers
-    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", flat) if p.strip()]
+    # A hard-wrapped line (a PDF's) runs on into the next when that one starts in lower case.
+    flat = re.sub(r"([^.!?:\n])\n(?=[a-z])", r"\1 ", flat)
+    # A list item's bullet is not part of what it says.
+    parts = [re.sub(r"^[-*\u2022+]\s+", "", p.strip()) for p in re.split(r"(?<=[.!?])\s+|\n+", flat) if p.strip()]
     # A Markdown heading line (dropped above) is the passage's title, not what it says; a list number
     # split off as a "sentence" says nothing: neither is the snippet when the passage has prose.
     prose = [p for p in parts if re.search(r"[^\W\d_]{2,}", p)]
-    parts = prose or parts
+    # Nor a label that leads into a list ("Onboarding (new hire):"), nor a fragment that starts
+    # mid-sentence (a passage cut out of a longer text): a whole sentence wins when there is one.
+    whole = [p for p in prose if not p.endswith(":") and not p[:1].islower()]
+    parts = whole or prose or parts
     qw = _words(query or "")
     best, best_score = (parts[0] if parts else ""), 0
     for p in parts:

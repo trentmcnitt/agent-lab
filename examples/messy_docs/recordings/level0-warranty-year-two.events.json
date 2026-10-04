@@ -9,35 +9,41 @@
  "bench_retrieval_events": [
   {
    "v": "bench/0",
-   "run_id": "db1a7663a908d49645f2ddc892f5209d",
-   "ts": 1791086140.99957,
+   "run_id": "517159f1bcbc9458ea415a0a5b38092c",
+   "ts": 1791132354.9335418,
    "node": "retrieve",
    "event_type": "retrieval",
    "content_mode": "full",
    "data": {
     "hits": [
      {
-      "id": "doc#0",
-      "text": "Kestrel Kitchen Limited Warranty\nThis limited warranty covers Kestrel blenders, mixers, toasters and kettles bought new from Kestrel\nKitchen or an authorized retailer. It gives the original owner specific legal rights, and they may also\nhave other rights that vary from state to state.\nWhat is covered in the first year: any defect in materials or workmanship. We will repair or replace the\nunit at no cost, including shipping both ways."
+      "id": "Warranty Terms.pdf#0",
+      "text": "Kestrel Kitchen Limited Warranty\nThis limited warranty covers Kestrel blenders, mixers, toasters and kettles bought new from Kestrel\nKitchen or an authorized retailer. It gives the original owner specific legal rights, and they may also\nhave other rights that vary from state to state.\nWhat is covered in the first year: any defect in materials or workmanship. We will repair or replace the\nunit at no cost, including shipping both ways.",
+      "document": "Warranty Terms.pdf",
+      "page": 1
      },
      {
-      "id": "doc#1",
-      "text": "Years two through five: the motor base only. If the motor fails under normal household use, we replace\nthe motor base. Jars, lids, blades, gaskets and other wear parts are not covered after the first year. The\ncustomer pays shipping to us; we pay shipping back.\nWhat is never covered: commercial use, damage from dropping or misuse, units bought from\nunauthorized sellers, and cosmetic wear."
+      "id": "Warranty Terms.pdf#1",
+      "text": "Years two through five: the motor base only. If the motor fails under normal household use, we replace\nthe motor base. Jars, lids, blades, gaskets and other wear parts are not covered after the first year. The\ncustomer pays shipping to us; we pay shipping back.\nWhat is never covered: commercial use, damage from dropping or misuse, units bought from\nunauthorized sellers, and cosmetic wear.",
+      "document": "Warranty Terms.pdf",
+      "page": 2
      },
      {
-      "id": "doc#2",
-      "text": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it"
+      "id": "Copy of Refund Policy FINAL_v2.md#2",
+      "text": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it",
+      "document": "Copy of Refund Policy FINAL_v2.md"
      },
      {
-      "id": "doc#3",
-      "text": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it"
+      "id": "Refund Policy FINAL_v2.md#3",
+      "text": "## Time limits\n\nCustomers have 45 days from the delivery date to return an item for a full refund. After 45 days and up to 90 days we offer store credit only. Past 90 days a return is not possible, but the warranty may still apply (see the warranty terms).\n\nOpened small appliances are fine to return as long as all parts are included. Blades, filters and gaskets that have been used are not returnable on their own.\n\n## How to process it",
+      "document": "Refund Policy FINAL_v2.md"
      }
     ],
     "query": "What does the warranty cover after the first year?"
    },
    "session_id": "level0",
-   "step_id": "c7fab0636f7ed09f",
-   "parent_step_id": "42384bc576dc96ca",
+   "step_id": "5d7353b43a81dbc2",
+   "parent_step_id": "e6dea0e68a993e52",
    "seq": 4
   }
  ],

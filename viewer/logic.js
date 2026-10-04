@@ -1575,10 +1575,16 @@ export function snippet(text, query) {
   // A Markdown heading line is the passage's title, not what it says: dropped when there's other text.
   var body = String(text || '').split('\n').filter(function (l) { return !/^\s*#{1,6}\s/.test(l); }).join('\n');
   var flat = (body.trim() ? body : String(text || '')).replace(/\*\*|__/g, '').replace(/[ \t]+/g, ' ').trim();   // and no Markdown bold markers
-  var parts = flat.split(/(?<=[.!?])\s+|\n+/).map(function (p) { return p.trim(); }).filter(Boolean);
+  // A hard-wrapped line (a PDF's) runs on into the next when that one starts in lower case.
+  flat = flat.replace(/([^.!?:\n])\n(?=[a-z])/g, '$1 ');
+  // A list item's bullet is not part of what it says.
+  var parts = flat.split(/(?<=[.!?])\s+|\n+/).map(function (p) { return p.trim().replace(/^[-*\u2022+]\s+/, ''); }).filter(Boolean);
   // A stray list number split off as a "sentence" says nothing: never the snippet when there's prose.
   var prose = parts.filter(function (p) { return /\p{L}{2,}/u.test(p); });
-  if (prose.length) parts = prose;
+  // Nor a label leading into a list ("Onboarding (new hire):"), nor a fragment that starts mid-sentence
+  // (a passage cut out of a longer text): a whole sentence wins when there is one.
+  var whole = prose.filter(function (p) { return !/:$/.test(p) && !/^\p{Ll}/u.test(p); });
+  if (whole.length) parts = whole; else if (prose.length) parts = prose;
   var qw = docWords(query), best = parts[0] || '', bestScore = 0;
   parts.forEach(function (p) {
     var pw = docWords(p), s = 0;

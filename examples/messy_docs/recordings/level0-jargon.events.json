@@ -9,35 +9,42 @@
  "bench_retrieval_events": [
   {
    "v": "bench/0",
-   "run_id": "51c7f5c0992d90ef5b98c9efca7478ad",
-   "ts": 1791086141.005284,
+   "run_id": "e6ed47df8dc2ecd834b1c015adf0f1c5",
+   "ts": 1791132354.941462,
    "node": "retrieve",
    "event_type": "retrieval",
    "content_mode": "full",
    "data": {
     "hits": [
      {
-      "id": "doc#0",
-      "text": "Privacy and security\nThis section covers verifying identity and what never to say on a call.\nIf a policy and this handbook disagree, the policy document wins and you should tell a lead. Remember\nthat most customers contact us only when something has gone wrong. A calm, specific answer is better\nthan a fast vague one. Avoid jargon such as SKU or RMA when talking to customers.\nWe never argue with a customer about what they experienced; we work out what we can do. If a policy"
+      "id": "Employee Handbook - Customer Care (2022).pdf#0",
+      "text": "Privacy and security\nThis section covers verifying identity and what never to say on a call.\nIf a policy and this handbook disagree, the policy document wins and you should tell a lead. Remember\nthat most customers contact us only when something has gone wrong. A calm, specific answer is better\nthan a fast vague one. Avoid jargon such as SKU or RMA when talking to customers.\nWe never argue with a customer about what they experienced; we work out what we can do. If a policy",
+      "document": "Employee Handbook - Customer Care (2022).pdf",
+      "page": 15
      },
      {
-      "id": "doc#1",
-      "text": "We sound like a helpful neighbor who happens to know a lot about kitchen appliances. Warm, direct, never cute.\n\nSay \"I can do that for you\" instead of \"Unfortunately our policy states\". Say sorry once, then fix it. Don't use exclamation marks more than once per message.\n\nSign off with your first name only."
+      "id": "onboarding/Tone & Voice guide.md#1",
+      "text": "We sound like a helpful neighbor who happens to know a lot about kitchen appliances. Warm, direct, never cute.\n\nSay \"I can do that for you\" instead of \"Unfortunately our policy states\". Say sorry once, then fix it. Don't use exclamation marks more than once per message.\n\nSign off with your first name only.",
+      "document": "onboarding/Tone & Voice guide.md"
      },
      {
-      "id": "doc#2",
-      "text": "channel rather than guessing. Avoid jargon such as SKU or RMA when talking to customers. New\nagents should read this section before their first live shift.\nEvery exception you make should have a reason in the ticket notes. Remember that most customers\ncontact us only when something has gone wrong. Avoid jargon such as SKU or RMA when talking to\ncustomers. Supervisors review a sample of tickets from every agent each month."
+      "id": "Employee Handbook - Customer Care (2022).pdf#2",
+      "text": "channel rather than guessing. Avoid jargon such as SKU or RMA when talking to customers. New\nagents should read this section before their first live shift.\nEvery exception you make should have a reason in the ticket notes. Remember that most customers\ncontact us only when something has gone wrong. Avoid jargon such as SKU or RMA when talking to\ncustomers. Supervisors review a sample of tickets from every agent each month.",
+      "document": "Employee Handbook - Customer Care (2022).pdf",
+      "page": 10
      },
      {
-      "id": "doc#3",
-      "text": "jargon such as SKU or RMA when talking to customers. Every exception you make should have a\nreason in the ticket notes. Write down what you promised the customer in the ticket so the next agent\ncan follow through.\nA calm, specific answer is better than a fast vague one. Avoid jargon such as SKU or RMA when talking\nto customers. New agents should read this section before their first live shift. Remember that most\ncustomers contact us only when something has gone wrong."
+      "id": "Employee Handbook - Customer Care (2022).pdf#3",
+      "text": "jargon such as SKU or RMA when talking to customers. Every exception you make should have a\nreason in the ticket notes. Write down what you promised the customer in the ticket so the next agent\ncan follow through.\nA calm, specific answer is better than a fast vague one. Avoid jargon such as SKU or RMA when talking\nto customers. New agents should read this section before their first live shift. Remember that most\ncustomers contact us only when something has gone wrong.",
+      "document": "Employee Handbook - Customer Care (2022).pdf",
+      "page": 7
      }
     ],
     "query": "Should agents say SKU or RMA to customers?"
    },
    "session_id": "level0",
-   "step_id": "7ff965428dc66ac3",
-   "parent_step_id": "926ba5eb71870ebc",
+   "step_id": "f98cadd722aa7f8b",
+   "parent_step_id": "875255456ea8d757",
    "seq": 4
   }
  ],

@@ -232,7 +232,7 @@
      "id": "support-drive",
      "title": "Support shared drive",
      "kind": "documents",
-     "description": "A shared folder of 26 files. For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
+     "description": "A shared folder of 26 files (25 with text the search can read). For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
     },
     "layout": "documents",
     "counts": {
@@ -361,19 +361,19 @@
     "note": "No agentlab library: OpenInference's LangChain instrumentor only. No map, so no source, no document grouping, no counts; ids are positional.",
     "hits": [
      {
-      "id": "doc#0",
+      "id": "Copy of Refund Policy FINAL_v2.md#0",
       "snippet": "Customers have 45 days from the delivery date to return an item for a full refund."
      },
      {
-      "id": "doc#1",
+      "id": "Refund Policy FINAL_v2.md#1",
       "snippet": "Customers have 45 days from the delivery date to return an item for a full refund."
      },
      {
-      "id": "doc#2",
+      "id": "refund policy (old).md#2",
       "snippet": "Customers have 30 days from the delivery date to return an item for a full refund."
      },
      {
-      "id": "doc#3",
+      "id": "Returns process.docx#3",
       "snippet": "A return starts when the customer asks for one in the window described in the Refund Policy."
      }
     ]
@@ -388,7 +388,7 @@
      "id": "support-drive",
      "title": "Support shared drive",
      "kind": "documents",
-     "description": "A shared folder of 26 files. For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
+     "description": "A shared folder of 26 files (25 with text the search can read). For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
     },
     "layout": "documents",
     "counts": {
@@ -517,19 +517,19 @@
     "note": "No agentlab library: OpenInference's LangChain instrumentor only. No map, so no source, no document grouping, no counts; ids are positional.",
     "hits": [
      {
-      "id": "doc#0",
+      "id": "troubleshooting/error codes.html#0",
       "snippet": "Blender error codes"
      },
      {
-      "id": "doc#1",
+      "id": "kb-article-1187.html#1",
       "snippet": "Kettle shows E2 or won't heat"
      },
      {
-      "id": "doc#2",
+      "id": "Copy of Refund Policy FINAL_v2.md#2",
       "snippet": "Leads can approve a refund outside the window for a defective unit, a shipping error on our side, or a customer who was quoted the wrong policy by an agent."
      },
      {
-      "id": "doc#3",
+      "id": "Refund Policy FINAL_v2.md#3",
       "snippet": "Leads can approve a refund outside the window for a defective unit, a shipping error on our side, or a customer who was quoted the wrong policy by an agent."
      }
     ]
@@ -544,7 +544,7 @@
      "id": "support-drive",
      "title": "Support shared drive",
      "kind": "documents",
-     "description": "A shared folder of 26 files. For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
+     "description": "A shared folder of 26 files (25 with text the search can read). For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
     },
     "layout": "documents",
     "counts": {
@@ -661,19 +661,19 @@
     "note": "No agentlab library: OpenInference's LangChain instrumentor only. No map, so no source, no document grouping, no counts; ids are positional.",
     "hits": [
      {
-      "id": "doc#0",
+      "id": "Warranty Terms.pdf#0",
       "snippet": "What is covered in the first year: any defect in materials or workmanship."
      },
      {
-      "id": "doc#1",
+      "id": "Warranty Terms.pdf#1",
       "snippet": "Jars, lids, blades, gaskets and other wear parts are not covered after the first year."
      },
      {
-      "id": "doc#2",
+      "id": "Copy of Refund Policy FINAL_v2.md#2",
       "snippet": "After 45 days and up to 90 days we offer store credit only."
      },
      {
-      "id": "doc#3",
+      "id": "Refund Policy FINAL_v2.md#3",
       "snippet": "After 45 days and up to 90 days we offer store credit only."
      }
     ]
@@ -688,7 +688,7 @@
      "id": "support-drive",
      "title": "Support shared drive",
      "kind": "documents",
-     "description": "A shared folder of 26 files. For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
+     "description": "A shared folder of 26 files (25 with text the search can read). For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
     },
     "layout": "documents",
     "counts": {
@@ -719,7 +719,7 @@
         "n": 1,
         "of": 2,
         "score": 29.7582,
-        "snippet": "Effective immediately we can offer a loaner blender while a customer's unit is in for warranty repair, if",
+        "snippet": "Effective immediately we can offer a loaner blender while a customer's unit is in for warranty repair, if the repair is expected to take more than 10 business days.",
         "same_text_as": []
        }
       ],
@@ -809,19 +809,19 @@
     "note": "No agentlab library: OpenInference's LangChain instrumentor only. No map, so no source, no document grouping, no counts; ids are positional.",
     "hits": [
      {
-      "id": "doc#0",
-      "snippet": "Effective immediately we can offer a loaner blender while a customer's unit is in for warranty repair, if"
+      "id": "scan_0042.pdf#0",
+      "snippet": "Effective immediately we can offer a loaner blender while a customer's unit is in for warranty repair, if the repair is expected to take more than 10 business days."
      },
      {
-      "id": "doc#1",
+      "id": "troubleshooting/error codes.html#1",
       "snippet": "Blender error codes"
      },
      {
-      "id": "doc#2",
+      "id": "faq.md#2",
       "snippet": "Yes, top rack only."
      },
      {
-      "id": "doc#3",
+      "id": "troubleshooting/Device won't turn on.md#3",
       "snippet": "Check that the jar or bowl is locked onto the base."
      }
     ]
@@ -836,7 +836,7 @@
      "id": "support-drive",
      "title": "Support shared drive",
      "kind": "documents",
-     "description": "A shared folder of 26 files. For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
+     "description": "A shared folder of 26 files (25 with text the search can read). For each question a keyword search hands the AI the 4 best-matching passages; it never sees the rest."
     },
     "layout": "documents",
     "counts": {
@@ -893,7 +893,7 @@
         "n": 40,
         "of": 152,
         "score": 4.946,
-        "snippet": "jargon such as SKU or RMA when talking to customers.",
+        "snippet": "Avoid jargon such as SKU or RMA when talking to customers.",
         "same_text_as": []
        }
       ],
@@ -933,20 +933,20 @@
     "note": "No agentlab library: OpenInference's LangChain instrumentor only. No map, so no source, no document grouping, no counts; ids are positional.",
     "hits": [
      {
-      "id": "doc#0",
+      "id": "Employee Handbook - Customer Care (2022).pdf#0",
       "snippet": "Avoid jargon such as SKU or RMA when talking to customers."
      },
      {
-      "id": "doc#1",
+      "id": "onboarding/Tone & Voice guide.md#1",
       "snippet": "Say \"I can do that for you\" instead of \"Unfortunately our policy states\"."
      },
      {
-      "id": "doc#2",
+      "id": "Employee Handbook - Customer Care (2022).pdf#2",
       "snippet": "Avoid jargon such as SKU or RMA when talking to customers."
      },
      {
-      "id": "doc#3",
-      "snippet": "jargon such as SKU or RMA when talking to customers."
+      "id": "Employee Handbook - Customer Care (2022).pdf#3",
+      "snippet": "Avoid jargon such as SKU or RMA when talking to customers."
      }
     ]
    }

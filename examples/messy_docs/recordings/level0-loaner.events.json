@@ -9,35 +9,40 @@
  "bench_retrieval_events": [
   {
    "v": "bench/0",
-   "run_id": "03b360e9494d4c489dff7660da8970f4",
-   "ts": 1791086141.00243,
+   "run_id": "13d84341fc0a81f894de7580baa4d6ad",
+   "ts": 1791132354.93803,
    "node": "retrieve",
    "event_type": "retrieval",
    "content_mode": "full",
    "data": {
     "hits": [
      {
-      "id": "doc#0",
-      "text": "LOANER UNIT PROGRAM\nEffective immediately we can offer a loaner blender while a customer's unit is in for warranty repair, if\nthe repair is expected to take more than 10 business days. Loaners are the Model B200 only. Ask a\nlead to release one from the loaner pool.\nThe customer returns the loaner in the same box their repaired unit arrives in. If the loaner is not\nreturned within 14 days of their repaired unit being delivered, charge the card on file $89."
+      "id": "scan_0042.pdf#0",
+      "text": "LOANER UNIT PROGRAM\nEffective immediately we can offer a loaner blender while a customer's unit is in for warranty repair, if\nthe repair is expected to take more than 10 business days. Loaners are the Model B200 only. Ask a\nlead to release one from the loaner pool.\nThe customer returns the loaner in the same box their repaired unit arrives in. If the loaner is not\nreturned within 14 days of their repaired unit being delivered, charge the card on file $89.",
+      "document": "scan_0042.pdf",
+      "page": 1
      },
      {
-      "id": "doc#1",
-      "text": "Blender error codes\n\nCodeMeaningWhat to tell the customer\nE1Jar not detectedLock the jar onto the base until it clicks.\nE3Blade jammedUnplug, remove the jar, and clear food from around the blades.\nE4Motor overheatedUnplug for 30 minutes and let it cool; blend in shorter bursts with more liquid.\nE7Controller faultHold power for 5 seconds; if E7 returns, open a warranty claim."
+      "id": "troubleshooting/error codes.html#1",
+      "text": "Blender error codes\n\nCodeMeaningWhat to tell the customer\nE1Jar not detectedLock the jar onto the base until it clicks.\nE3Blade jammedUnplug, remove the jar, and clear food from around the blades.\nE4Motor overheatedUnplug for 30 minutes and let it cool; blend in shorter bursts with more liquid.\nE7Controller faultHold power for 5 seconds; if E7 returns, open a warranty claim.",
+      "document": "troubleshooting/error codes.html"
      },
      {
-      "id": "doc#2",
-      "text": "## 4. Is the blender jar dishwasher safe?\nYes, top rack only. The blade assembly should be hand-washed.\n\n## 5. How do I register my product?\nAt kestrelkitchen.com/register with the serial number from the bottom of the base."
+      "id": "faq.md#2",
+      "text": "## 4. Is the blender jar dishwasher safe?\nYes, top rack only. The blade assembly should be hand-washed.\n\n## 5. How do I register my product?\nAt kestrelkitchen.com/register with the serial number from the bottom of the base.",
+      "document": "faq.md"
      },
      {
-      "id": "doc#3",
-      "text": "## Blender or mixer won't turn on\n\n1. Check that the jar or bowl is locked onto the base. The safety switch keeps the motor off until it clicks.\n2. Try a different outlet. Kitchen outlets on a tripped GFCI are the most common cause.\n3. Hold the power button for 5 seconds to reset the controller.\n4. If the light blinks red three times, the motor overheated: unplug it for 30 minutes.\n\nIf none of this works, it is a warranty claim."
+      "id": "troubleshooting/Device won't turn on.md#3",
+      "text": "## Blender or mixer won't turn on\n\n1. Check that the jar or bowl is locked onto the base. The safety switch keeps the motor off until it clicks.\n2. Try a different outlet. Kitchen outlets on a tripped GFCI are the most common cause.\n3. Hold the power button for 5 seconds to reset the controller.\n4. If the light blinks red three times, the motor overheated: unplug it for 30 minutes.\n\nIf none of this works, it is a warranty claim.",
+      "document": "troubleshooting/Device won't turn on.md"
      }
     ],
     "query": "Can we give a customer a loaner blender while theirs is being repaired?"
    },
    "session_id": "level0",
-   "step_id": "465629fb20fe79f6",
-   "parent_step_id": "d2998b8959566152",
+   "step_id": "042901db65c39f22",
+   "parent_step_id": "687348c716508f10",
    "seq": 4
   }
  ],

@@ -9,35 +9,39 @@
  "bench_retrieval_events": [
   {
    "v": "bench/0",
-   "run_id": "da6962be8aff0aef710a44bab553911c",
-   "ts": 1791086140.99693,
+   "run_id": "03d552d9491c8ae852b5faed97d38994",
+   "ts": 1791132354.929146,
    "node": "retrieve",
    "event_type": "retrieval",
    "content_mode": "full",
    "data": {
     "hits": [
      {
-      "id": "doc#0",
-      "text": "Blender error codes\n\nCodeMeaningWhat to tell the customer\nE1Jar not detectedLock the jar onto the base until it clicks.\nE3Blade jammedUnplug, remove the jar, and clear food from around the blades.\nE4Motor overheatedUnplug for 30 minutes and let it cool; blend in shorter bursts with more liquid.\nE7Controller faultHold power for 5 seconds; if E7 returns, open a warranty claim."
+      "id": "troubleshooting/error codes.html#0",
+      "text": "Blender error codes\n\nCodeMeaningWhat to tell the customer\nE1Jar not detectedLock the jar onto the base until it clicks.\nE3Blade jammedUnplug, remove the jar, and clear food from around the blades.\nE4Motor overheatedUnplug for 30 minutes and let it cool; blend in shorter bursts with more liquid.\nE7Controller faultHold power for 5 seconds; if E7 returns, open a warranty claim.",
+      "document": "troubleshooting/error codes.html"
      },
      {
-      "id": "doc#1",
-      "text": "Kettle shows E2 or won't heat\nE2 means the kettle sensed it was empty. Fill above the MIN line and press start again.\nIf the kettle won't heat at all and shows no code, check the base is seated and the outlet works."
+      "id": "kb-article-1187.html#1",
+      "text": "Kettle shows E2 or won't heat\nE2 means the kettle sensed it was empty. Fill above the MIN line and press start again.\nIf the kettle won't heat at all and shows no code, check the base is seated and the outlet works.",
+      "document": "kb-article-1187.html"
      },
      {
-      "id": "doc#2",
-      "text": "## Exceptions\n\nLeads can approve a refund outside the window for a defective unit, a shipping error on our side, or a customer who was quoted the wrong policy by an agent. Note the reason in the ticket."
+      "id": "Copy of Refund Policy FINAL_v2.md#2",
+      "text": "## Exceptions\n\nLeads can approve a refund outside the window for a defective unit, a shipping error on our side, or a customer who was quoted the wrong policy by an agent. Note the reason in the ticket.",
+      "document": "Copy of Refund Policy FINAL_v2.md"
      },
      {
-      "id": "doc#3",
-      "text": "## Exceptions\n\nLeads can approve a refund outside the window for a defective unit, a shipping error on our side, or a customer who was quoted the wrong policy by an agent. Note the reason in the ticket."
+      "id": "Refund Policy FINAL_v2.md#3",
+      "text": "## Exceptions\n\nLeads can approve a refund outside the window for a defective unit, a shipping error on our side, or a customer who was quoted the wrong policy by an agent. Note the reason in the ticket.",
+      "document": "Refund Policy FINAL_v2.md"
      }
     ],
     "query": "The blender shows error E4, what does that mean?"
    },
    "session_id": "level0",
-   "step_id": "9080fbf12ef29ddd",
-   "parent_step_id": "465171d0664692a8",
+   "step_id": "626cdf3908e4f1fd",
+   "parent_step_id": "9aa6cbcbb4a8a8fa",
    "seq": 4
   }
  ],

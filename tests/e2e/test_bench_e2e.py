@@ -150,7 +150,7 @@ def test_open_a_source_shows_the_text_the_ai_was_given(page, site):
     p.click(".pres .gnode[data-node=retrieve]")
     tile = p.locator("[data-p=bubble] .bb-tile.st-given").first
     assert tile.count(), "no source item was given to the AI"
-    assert "given to the AI" in p.inner_text("[data-p=bubble] .bb-countline")
+    assert "given to the AI" in p.inner_text("[data-p=bubble] .bb-stats")   # the counts: searched → given → relied on
     tile.click()
     item = p.locator(".b-item")
     item.wait_for()

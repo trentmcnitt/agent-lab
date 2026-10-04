@@ -112,8 +112,12 @@ def files_in(docs: list[Document]) -> list[str]:
 
 def report_corpus(ps: list[Passage], files: list[str], title: str) -> None:
     """The corpus, from the index's own passages: one item per passage, titled by its document."""
+    # A file with no text the loader could read (a scanned PDF) is in the folder but yields no passage:
+    # say so, so the folder's count and the passages' files agree.
+    readable = len({p.file for p in ps})
+    files_words = f"{len(files)} files" + (f" ({readable} with text the search can read)" if readable < len(files) else "")
     lab.corpus(CORPUS_ID, title=title, items=[(p.id, p.title) for p in ps],
-               description=(f"A shared folder of {len(files)} files. For each question a keyword search hands the AI "
+               description=(f"A shared folder of {files_words}. For each question a keyword search hands the AI "
                             "the 4 best-matching passages; it never sees the rest."))
 
 

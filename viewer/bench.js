@@ -134,7 +134,7 @@
         // a line between them in that step's colour pointing at it, and a quiet footer.
         '<div class="ps-stage" data-p="stage">' +
           '<section class="ps-map"><div class="ps-flowhead" data-p="flowhead"></div><div class="graphwrap" data-p="graph"></div><div class="edgetip" data-p="tip" hidden></div></section>' +
-          '<section class="ps-side" data-p="side"><div class="ps-bubble" data-p="bubble" aria-live="polite"></div></section>' +
+          '<section class="ps-side" data-p="side"><div class="ps-bubble" data-p="bubble" aria-live="polite"></div><div class="ps-more" data-p="more" hidden><span>▾ more below</span></div></section>' +
           '<div class="ps-divider" data-p="divider" hidden></div><div class="ps-notch" data-p="notch" hidden></div>' +
           '<div class="ps-mk" data-p="mk" hidden><div class="wire"></div><div class="tab"></div></div>' +
         '</div>' +
@@ -155,6 +155,7 @@
     });
     // Delegated clicks for everything Presentation redraws.
     this.root.querySelector('.pres').addEventListener('click', function (e) { self._presClick(e); });
+    this.p.bubble.addEventListener('scroll', function () { self._moreCue(); });
     this.f.download.onclick = function () { self.downloadMap(); };
     // The event log is a drawer: shut, it is one line; open, it takes the bottom third.
     this.f.logtoggle.onclick = function () { self.logOpen = !self.logOpen; self._applyLog(); };
@@ -1347,6 +1348,14 @@
     } else p.overlay.hidden = true;
     if (this._fit) this._fit();
     this._placeMarker();
+    this._moreCue();
+  };
+  // The panel's "more below" cue: shown while its content runs past its foot (its scrollbar is hidden).
+  Bench.prototype._moreCue = function () {
+    var b = this.p.bubble, m = this.p.more;
+    if (!b || !m) return;
+    var hide = this._stacked() || b.scrollHeight - b.clientHeight - b.scrollTop < 6;
+    if (m.hidden !== hide) m.hidden = hide;
   };
 
   /* The divider between the map and the panel, its notch at the explained step's row, and the step's
@@ -1475,11 +1484,16 @@
           (pv.snippet ? '<div class="snip">' + esc(pv.snippet) + '</div>' : '') + '</div>' + tags(pv) + '</div>';
       }).join('');
     } else {
+      var rankOf = {};
+      m.documents.forEach(function (d) { rankOf[d.file] = d.best_rank; });
+      // Letters and digits only: "Refund Policy" is inside "Copy of Refund Policy FINAL_v2.md".
+      function squash(t) { return String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''); }
       rows = m.documents.map(function (d) {
-        var bare = String(d.file).replace(/^.*\//, '').replace(/\.[A-Za-z0-9]{1,5}$/, '').toLowerCase();
-        var showTitle = d.title && d.title.toLowerCase() !== bare && d.title !== d.file;
+        var showTitle = d.title && d.title !== d.file && squash(String(d.file).replace(/^.*\//, '')).indexOf(squash(d.title)) < 0;
         var best = d.passages[0];
-        var same = d.same_text_in.length ? '<span class="tg dup">same text in ' + esc(d.same_text_in.join(', ')) + '</span>' : '';
+        // A duplicate names its twin by the row it's on: "same text as #2" (the file name is on that row).
+        var same = d.same_text_in.length ? '<span class="tg dup" title="' + esc('same text in ' + d.same_text_in.join(', ')) + '">same text as ' +
+          d.same_text_in.map(function (f) { return rankOf[f] != null ? '#' + rankOf[f] : f; }).join(', ') + '</span>' : '';
         return '<div class="bb-row' + (d.relied ? ' relied' : '') + (best && best.state === 'found' ? ' found' : '') + '"><div class="rk">#' + d.best_rank + '</div><div><div class="loc"><span class="face">' + esc(d.file) + '</span>' +
           (showTitle ? '<span>' + esc(d.title) + '</span>' : '') + (d.passages.length === 1 && best.location ? '<span class="part">' + esc(best.location) + '</span>' : '') + '</div>' +
           d.passages.map(function (pv) {
@@ -1497,7 +1511,7 @@
         return '<button class="bb-tile st-' + esc(s.state) + (s.relied ? ' relied' : '') + (self.presItem === s.id ? ' sel' : '') + '" data-act="item" data-arg="' + esc(s.id) + '" title="' + esc(s.title) + '">' +
           esc(s.face) + (s.rank ? '<sup>#' + s.rank + '</sup>' : '') + '</button>';
       }).join('');
-      cap = '<b>Where these numbers come from:</b> each tile is a numbered part of ' + esc(m.source.title) + ' as the app split it, so the numbers are the document’s own. A file with no numbered headings is listed by file instead.';
+      cap = 'Each tile is a numbered part of the document as the app split it: the numbers are the document’s own.';
     } else if (m.documents) {
       head = 'The whole ' + (c.documents != null ? 'source · <span class="n">' + L.fmtNum(c.documents) + ' files</span>' : 'search');
       tiles = m.documents.map(function (d) {
@@ -1514,7 +1528,8 @@
     var sel = this.presItem && stItems[this.presItem];
     if (sel) out += '<div class="b-item"><b>' + esc(sel.title || sel.id) + '</b> <span class="muted">' + (sel.text ? (sel.state === 'given' ? '· given to the AI, word for word' : '· found by the search') : '· not read this run') + '</span>' +
       (sel.text ? '<pre class="io">' + esc(sel.text) + '</pre>' : '') + '</div>';
-    out += '<div class="bb-countline">' + esc(m.line) + '</div>';
+    // The counts line says what the three numbers on top say: only without them.
+    if (showStats === false) out += '<div class="bb-countline">' + esc(m.line) + '</div>';
     return out;
   };
   function numWord(n) { return ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'][n] || String(n); }
@@ -1607,6 +1622,10 @@
         .concat(nx ? [{ t: ', then next: ' }, { t: L.plainLabel(L.nodeOf(topo, nx), nx), next: true }, { t: '.' }] : [{ t: '.' }]);
       sub = 'Here the AI picks its own next move: each answer asks for a tool or finishes. In the order each call started.';
     }
+    // The sub-line says what the step does, not the picked branch's words again (its card says them).
+    if (sub && c.choices.some(function (x) { return x.chosen && x.description && x.description.trim() === String(sub).trim(); })) {
+      sub = node.description && node.description.length <= 180 ? node.description : null;
+    }
     var body = '<p class="bb-headline">' + para(headline) + '</p>' + (sub ? '<p class="bb-sub">' + esc(sub) + '</p>' : '');
     var evidence = 0;
     if (seq) {
@@ -1681,7 +1700,9 @@
     // The step's own description: always at a sign-off (who may sign), else when nothing else shows.
     if (c.about && (c.kind === 'gate' || !evidence) && !(!ran && finished)) body += sec(esc(c.about.label), '<p class="bb-about">' + esc(c.about.text) + '</p>', 'bb-aboutsec');
     body += this._storyHTML(run, events, id);
-    return '<div class="bb a-' + esc(c.actor) + ' s-' + esc(c.status) + '">' + head + strip + (acts ? '<div class="p-acts">' + acts + '</div>' : '') + '<div class="bb-body">' + body + '</div></div>';
+    // The numbers and the buttons on one row: a row of the panel's height saved for its evidence.
+    var row = strip || acts ? '<div class="bb-strip">' + strip + (acts ? '<div class="p-acts">' + acts + '</div>' : '') + '</div>' : '';
+    return '<div class="bb a-' + esc(c.actor) + ' s-' + esc(c.status) + '">' + head + row + '<div class="bb-body">' + body + '</div></div>';
   };
 
   // What a decision rests on, as rows (the passage's own sentence when the search found it).
