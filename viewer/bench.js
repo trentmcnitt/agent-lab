@@ -1097,9 +1097,9 @@
     svg += '</svg>';
     var boxes = topo.nodes.map(function (n) {
       var p = Lay.pos[n.id], actor = L.actorOf(n);
-      return '<div class="gnode snode a-' + esc(actor) + ' kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" title="' + esc(L.plainLabel(n)) + '" style="left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px">' +
+      return '<div class="gnode snode a-' + esc(actor) + ' kind-' + esc(n.kind || 'step') + '" data-node="' + esc(n.id) + '" tabindex="0" role="button" title="' + esc(L.plainLabel(n)) + '" style="left:' + p.x + 'px;top:' + p.y + 'px;width:' + G.w + 'px;height:' + G.h + 'px">' +
         '<span class="s-num"></span><div class="s-body"><div class="gl"><span class="gt">' + esc(L.plainLabel(n)) + '</span></div><div class="s-meta"></div></div>' +
-        '<span class="actor actor-' + esc(actor) + '">' + esc(ACTOR_CHIP[actor] || actor) + '</span></div>';
+        '<span class="actor actor-' + esc(actor) + '">' + esc(ACTOR_CHIP[actor] || actor) + '</span><span class="s-back" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4"/></svg></span></div>';
     }).join('');
     var tkey = (view === 'map' ? 'roomy' : 'compact') + (T === BOX_TYPE.roomyW || T === BOX_TYPE.compactW ? ' t-wide' : '') + (G.lines > 1 ? ' t-two' : '');
     var labels = this._edgeLabels(Lay, G, T);
@@ -1122,6 +1122,12 @@
     // keeping the step it's on in view.
     // The room is measured once here, before any glide: while the region's height animates, a fit
     // would read the wrong height. A resize (of the window, or of the stage) draws the map again.
+    // The line under the whole map takes its height now, not on the render after this draw: measured
+    // without it, the map coming back from a detail was fitted to room the line then took.
+    if (!E.eng && this.p.now) {
+      if (view === 'map' && !this.p.now.firstChild) { this.p.now.innerHTML = '<div class="now"></div>'; this.p.now._h = null; }
+      else if (view !== 'map' && this.p.now.firstChild) { this.p.now.innerHTML = ''; this.p.now._h = null; }
+    }
     var roomH = g.clientHeight - 4;
     function fit() {
       var availW = g.clientWidth - 8 || Lay.W, availH = roomH;
@@ -1155,13 +1161,23 @@
       if (Math.abs(hNow - before.h) > 2) sec.animate([{ height: before.h + 'px' }, { height: hNow + 'px' }], { duration: GLIDE_MS, easing: EASE });
     }
     this._instant = true;   // the lines lit on the new map were lit already
-    g.querySelectorAll('.gnode').forEach(function (n) {
-      n.onclick = function () {
-        var id = n.getAttribute('data-node');
-        if (self.mode === 'engineering') { self.selectedNode = self.selectedNode === id ? null : id; self.render(); return; }
+    /* A step opens its detail; the step the detail is already about (the ringed one) is the way back
+       to the whole map: click it again (or Enter on it). On hover or keyboard focus it says so in a
+       small tag inside its box (index.html: .s-back). */
+    function act(n, keyed) {
+      var id = n.getAttribute('data-node');
+      if (self.mode === 'engineering') { self.selectedNode = self.selectedNode === id ? null : id; self.render(); return; }
+      if (self.view === 'detail' && n.classList.contains('focus')) self.setView('map');
+      else {
         self.selectedNode = id; self.recapOpen = false; self.presItem = null; self.overlay = null; self.keysOpen = false;
         if (self.view !== 'detail') self.setView('detail'); else self.render();
-      };
+      }
+      // A keyboard user keeps their place: the same step, on the map just drawn.
+      if (keyed) { var again = E.graph.querySelector('.gnode[data-node="' + id.replace(/"/g, '\\"') + '"]'); if (again) again.focus({ preventScroll: true }); }
+    }
+    g.querySelectorAll('.gnode').forEach(function (n) {
+      n.onclick = function () { act(n, false); };
+      n.onkeydown = function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); act(n, true); } };
     });
     // A path's own words on hover or tap: on a dashed path, why it wasn't taken.
     var tip = E.tip;
@@ -1256,6 +1272,9 @@
   Bench.prototype._renderStage = function (run) {
     var self = this, E = this._E(), g = E.graph, L = lg(), topo = this.topo;
     var S = this._shown(run), now = S.now, ran = S.ran, finished = S.finished;
+    // A finished run's lit path breathes a little (index.html: .run-done).
+    var done = !!(run && finished);
+    if (g.classList.contains('run-done') !== done) g.classList.toggle('run-done', done);
     var taken = this._taken(S), nums = L.stepNumbers(S.seq);
     var order = topo.nodes.map(function (n) { return n.id; });
     if (this.layout) order.sort(function (a, b) { var pa = self.layout.pos[a], pb = self.layout.pos[b]; return pa && pb ? (pa.y - pb.y) || (pa.x - pb.x) : 0; });
@@ -1282,6 +1301,9 @@
       if (ring === id && !(whole && !self.selectedNode && (shownOpen || S.starting[id]))) cls += ' focus';
       if (self.selectedNode === id) cls += ' selected';
       if (n.className !== cls) n.className = cls;
+      // The ringed step in the detail is the way back to the whole map (a click, Enter or Space).
+      var back = !E.eng && !whole && ring === id, al = String(L.plainLabel(node)) + (back ? '. Shown below; activate for the whole map' : '');
+      if (n.getAttribute('aria-label') !== al) n.setAttribute('aria-label', al);
       var chip = n.querySelector('.actor'), cw = ACTOR_CHIP[actor] || actor;
       if (chip && chip.textContent !== cw) { chip.textContent = cw; chip.className = 'actor actor-' + actor; }
       var num = n.querySelector('.s-num');
@@ -1747,7 +1769,8 @@
     var have = {};
     topo.nodes.forEach(function (n) { have[L.actorOf(n)] = true; });
     var legend = ['ai', 'app', 'rule', 'person'].filter(function (a) { return have[a]; }).map(function (a) { return '<span class="a-' + a + '"><i></i>' + esc(ACTOR_CHIP[a]) + '</span>'; }).join('');
-    return left + '<span class="ps-legend">' + legend + '</span>' + (eng ? '' : '<button class="ps-mapbtn" data-act="mapview" title="The whole map (M or Esc)">⤢ whole map</button>');
+    var fid = this.selectedNode || (S && S.focus), fnum = S && fid ? (S.numbers && S.numbers[fid]) || (S.letters && S.letters[fid]) || '' : '';
+    return left + '<span class="ps-legend">' + legend + '</span>' + (eng ? '' : '<span class="fh-back" aria-hidden="true">Click ' + (fnum ? 'step ' + esc(fnum) + ' ' : 'it ') + 'again for the whole map <kbd>M</kbd></span>');
   };
 
   /* The line under the whole map: the step the run is on (its badge, name and headline), or how the run

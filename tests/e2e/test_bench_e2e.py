@@ -505,3 +505,31 @@ def test_the_pane_keeps_the_map_on_top_and_one_marker(page, site):
     p.keyboard.press("Escape")
     p.keyboard.press("Escape")
     bench.locator("#bench.v-map").wait_for()
+    # A finished run's lit path keeps a soft glow (untaken lines get none).
+    assert bench.locator(".pres .graphwrap.run-done").count() == 1
+    # The ringed step is the way back: no "whole map" button; on hover it says so, a click goes back.
+    bench.locator(".pres .gnode[data-node=classify]").click()
+    bench.locator("#bench.v-detail").wait_for()
+    assert bench.locator(".ps-mapbtn, [data-act=mapview]").count() == 0
+    p.wait_for_timeout(600)
+    ring = bench.locator(".pres .gnode.focus")
+    ring.hover()
+    assert "again for the whole map" in bench.locator("[data-p=flowhead] .fh-back").inner_text()
+    assert bench.locator("[data-p=flowhead] .fh-back").is_visible()
+    ring.click()
+    bench.locator("#bench.v-map").wait_for()
+    p.wait_for_timeout(600)
+    # Back on the whole map, every step is inside its region (fitted with the line under it in place).
+    m = bench.locator("[data-p=map]").bounding_box()
+    for i in range(boxes.count()):
+        b = boxes.nth(i).bounding_box()
+        assert b["y"] + b["height"] <= m["y"] + m["height"] + 1, (i, b, m)
+    # From the keyboard: Enter on a step opens it, Enter on it again goes back.
+    step = bench.locator(".pres .gnode[data-node=classify]")
+    step.focus()
+    p.keyboard.press("Enter")
+    bench.locator("#bench.v-detail").wait_for()
+    p.wait_for_timeout(500)
+    assert bench.locator(".pres .gnode.focus[data-node=classify]").evaluate("n => n === document.activeElement")
+    p.keyboard.press("Enter")
+    bench.locator("#bench.v-map").wait_for()

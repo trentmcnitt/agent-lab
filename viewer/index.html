@@ -293,8 +293,6 @@
   .ps-legend { display: flex; gap: 12px; margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
   .ps-legend span { display: flex; align-items: center; gap: 5px; color: var(--text-3); }
   .ps-legend i { width: 8px; height: 8px; border-radius: 2px; background: var(--ac); }
-  .ps-mapbtn { all: unset; cursor: pointer; flex: none; font: 400 13px/1 var(--mono); text-transform: none; letter-spacing: 0; color: var(--text-2); padding: 5px 9px; border: 1px solid var(--border-2); border-radius: 7px; background: var(--surface); }
-  .ps-mapbtn:hover { color: var(--text); border-color: var(--path); }
   .ps-map .graphwrap { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   .ps-map .graphwrap.scrolly { overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2A2F3B transparent; }
   .ps-side { position: relative; z-index: 2; flex: 0 0 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; container-type: inline-size; }
@@ -409,6 +407,22 @@
   .snode.focus .gl { color: var(--text); font-weight: 600; }
   .snode.untaken.focus { border: 1.5px dashed var(--ac); }
   .snode.selected { outline: none; }
+  .snode:focus { outline: none; }
+  .snode:focus-visible { outline: 2px solid color-mix(in srgb, var(--ac) 80%, white); outline-offset: 3px; }
+  /* In the detail, the ringed step is the way back to the whole map (bench.js: click it again). */
+  .v-detail .pres .snode.focus { cursor: zoom-out; }
+  .snode .s-back { display: none; }
+  .v-detail .pres .snode.focus:hover .s-back, .v-detail .pres .snode.focus:focus-visible .s-back {
+    display: grid; place-items: center; position: absolute; right: 7px; top: 50%; width: 22px; height: 22px; margin-top: -11px; pointer-events: none;
+    color: color-mix(in srgb, var(--ac) 80%, var(--text)); border-radius: 6px;
+    background: color-mix(in srgb, var(--ac) 16%, var(--surface-2)); border: 1px solid color-mix(in srgb, var(--ac) 40%, transparent); animation: sback .18s ease-out; }
+  .v-detail .pres .snode.focus:hover, .v-detail .pres .snode.focus:focus-visible { padding-right: 36px; }   /* the name ellipsizes before the icon */
+  /* ...and the map's heading says it in words, where the legend was (the legend comes back after). */
+  .fh-back { display: none; margin-left: auto; text-transform: none; letter-spacing: 0; font: 400 12.5px/1 var(--mono); color: var(--text-2); }
+  .fh-back kbd { font: 500 11px/1 var(--mono); color: var(--text-3); border: 1px solid var(--border-2); border-radius: 4px; padding: 2px 5px; margin-left: 6px; }
+  .v-detail .pres .ps-map:has(.snode.focus:hover, .snode.focus:focus-visible) .fh-back { display: inline-flex; align-items: center; animation: sback .18s ease-out; }
+  .v-detail .pres .ps-map:has(.snode.focus:hover, .snode.focus:focus-visible) .ps-legend { display: none; }
+  @keyframes sback { from { opacity: 0; } }
 
   /* Lines: this run's path solid and glowing in the path colour, running into its boxes (no arrowhead,
      no seam); the line into the step being shown running marches (draws on first, bench.js); every
@@ -419,10 +433,16 @@
   .ps-map .edge .glow, .ps-map .edge .flow { display: none; }
   .ps-map .edge.untaken path.ln { opacity: .8; }
   .ps-map .edge.taken path.ln { stroke: var(--path); stroke-width: 2.4; stroke-dasharray: none; marker-end: none; }
-  .ps-map .edge.taken .glow { display: inline; fill: none; stroke: var(--path); stroke-width: 6; opacity: .38; filter: url(#pglow); }
+  .ps-map .edge.taken .glow { display: inline; fill: none; stroke: var(--path); stroke-width: 6; opacity: .42; filter: url(#pglow); }
+  .t-compact .edge.taken .glow { stroke-width: 4.5; }
+  /* A finished run's path keeps a little energy: a soft halo in the path colour that breathes slowly,
+     and a faint bloom on the line itself. Untaken (dashed) lines get none. */
+  .run-done .edge.taken path.ln { filter: drop-shadow(0 0 2px rgba(62,240,200,.45)); }
+  .run-done .edge.taken .glow { opacity: .5; animation: pbreathe 4s ease-in-out infinite; }
+  @keyframes pbreathe { 0%, 100% { opacity: .34; } 50% { opacity: .62; } }
   /* The line being travelled reads as travel: the lit line under it dimmed, bright dashes marching on it. */
   .ps-map .edge.flowing path.ln { stroke-opacity: .4; }
-  .ps-map .edge.flowing .glow { opacity: .18; }
+  .ps-map .edge.flowing .glow { opacity: .26; }
   .ps-map .edge.flowing .flow { display: inline; fill: none; stroke: #E6FFF9; stroke-width: 2.8; stroke-linecap: round; stroke-dasharray: 6 8; opacity: 1; animation: pflow .5s linear infinite; filter: drop-shadow(0 0 3px rgba(62,240,200,.9)); }
   .ps-map .edge.flowing.to-person .flow { stroke: #FFE3A6; }
   @keyframes pflow { to { stroke-dashoffset: -14; } }
@@ -441,6 +461,8 @@
   @media (prefers-reduced-motion: reduce) {
     .ps-map .edge.flowing .flow { animation: none; stroke-dasharray: none; opacity: .45; }
     .ps-map .edge.flowing path.ln { stroke-opacity: 1; }
+    .run-done .edge.taken .glow { animation: none; opacity: .5; }
+    .v-detail .pres .snode.focus .s-back, .fh-back { animation: none !important; }
     .snode.active::after, .snode.starting::after { animation: none; display: none; }
     .snode.gatewait { animation: none; box-shadow: 0 0 0 1px rgba(255,200,87,.55), 0 0 22px rgba(255,200,87,.3); }
     .snode, .elabel, .ps-map .edge path.ln { transition: none; }
