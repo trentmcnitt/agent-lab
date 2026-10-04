@@ -2,8 +2,8 @@
 
 Fixtures: two of Oracle's own example flows (tests/fixtures/agentspec, Apache-2.0, see NOTICE.md)
 and the bench's example flow (examples/agentspec/helpdesk_triage.yaml). When the agent-spec
-clone named by AGENTSPEC_CLONE (or the build scratchpad's copy) exists, every example flow in it is
-read too; otherwise that sweep is skipped.
+clone named by AGENTSPEC_CLONE exists, every example flow in it is read too; otherwise that sweep
+is skipped.
 """
 import http.server
 import json
@@ -23,7 +23,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "agentspec"
 BRANCHING = FIXTURES / "example_serialized_flow_with_branching_node.yaml"
 NESTED = FIXTURES / "flow_with_multiple_levels_of_references.yaml"
 EXAMPLE = BENCH / "examples" / "agentspec" / "helpdesk_triage.yaml"
-CLONE = Path(os.environ.get("AGENTSPEC_CLONE", "/nonexistent/agent-spec"))
+CLONE = Path(os.environ["AGENTSPEC_CLONE"]) if os.environ.get("AGENTSPEC_CLONE") else None
 
 
 def nodes(m):
@@ -351,6 +351,8 @@ def test_cli_app_id_sets_the_maps_app_id(tmp_path):
 
 
 def _clone_flows():
+    if CLONE is None:
+        return []
     root = CLONE / "pyagentspec" / "tests" / "agentspec_configs"
     if not root.is_dir():
         return []
