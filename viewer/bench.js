@@ -42,6 +42,8 @@
      at least MIN_LIT_MS, and a step isn't shown starting until the one before it has been
      shown finishing. Only what's drawn is paced: every time and number shown is real. */
   var MIN_LIT_MS = 450;
+  // The pill for a run the app has gone quiet on (logic.quietRun): what the bench knows, nothing more.
+  var QUIET_PILL = { cls: 'paused', text: 'No word from the app', full: 'The app has sent nothing for this run for a while, so its clock is stopped where the app last spoke. It picks up if the app does.' };
   function wallNow() { return (global.performance && performance.now) ? performance.now() : Date.now(); }
 
   /* Stories: an app's own script, registered with its map, that draws custom panels
@@ -436,6 +438,8 @@
     // Out of order (OTLP exports the root span last; a late run_started): re-sort and rebuild.
     if (L.needsResort(run, ev)) this.runs[ev.run_id] = L.rebuildRun(run, ev, wallNow());
     else L.reduce(run, ev, wallNow());
+    // When the app last spoke about this run (quietRun): set after a rebuild, which replaces the run.
+    this.runs[ev.run_id].lastArr = wallNow();
     // Redraw the inferred map for a step it hasn't seen, or when a step first shows what kind it is.
     if (this.inferred && ev.node !== '_run') {
       var known = L.nodeOf(this.topo, ev.node);
@@ -511,7 +515,7 @@
     });
     this.f.waterfall = this.panelEls._timeline.body;
     // Before any run: one line saying so, not a column of empty folded panels.
-    box.appendChild(el('div', 'eng-wait', '<b>Waiting for a run.</b> ' + (this.source === 'parent' ? 'Pick a request in the app: every' : 'When the app runs, every') +
+    box.appendChild(el('div', 'eng-wait', '<b>Waiting for a run.</b> ' + (this.source === 'parent' ? 'Start a run in the app: every' : 'When the app runs, every') +
       ' model call, tool call and event it reports shows here, under the step it belongs to.'));
   };
 
@@ -540,8 +544,9 @@
     // The bar's status pill is the same in both modes (Engineering reads it from every event it has).
     var oc0 = run ? lg().outcome(this.topo, run.events) : null;
     var st0 = !run ? { cls: 'idle', text: 'Waiting for a request' }
-      : oc0.done ? { cls: /^Handed/.test(oc0.text) ? 'handed' : /^(Stopped|Something)/.test(oc0.text) ? 'bad' : 'ok', text: pillWords(oc0.text), full: oc0.text }
-      : /^Waiting/.test(oc0.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' } : { cls: 'running', text: 'Running' };
+      : oc0.done ? { cls: /^Handed/.test(oc0.text) ? 'handed' : /^Stopped before/.test(oc0.text) ? 'paused' : /^(Stopped|Something)/.test(oc0.text) ? 'bad' : 'ok', text: pillWords(oc0.text), full: oc0.text }
+      : /^Waiting/.test(oc0.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' }
+      : this._quiet(run) ? QUIET_PILL : { cls: 'running', text: 'Running' };
     setHTML(this.p.status, '<span class="ps-pill st-' + st0.cls + '" title="' + esc(st0.full || st0.text) + '"><i></i><b>' + esc(st0.text) + '</b></span>');
     var nSteps0 = this.topo.nodes.length;
     this.f.panels.classList.toggle('norun', !run);
@@ -561,8 +566,8 @@
       (run.cost.estimated ? m(fmtUsd(run.cost.estimated), 'estimated cost', 'Priced by the app from a price table') : '') +
       (ci.unpriced.length ? m('cost unknown', '(no price for ' + esc(ci.unpriced.join(', ')) + ')', 'These model calls carry tokens but no cost_usd, and the bench has no price for them. Unknown, not free.') : '') ||
       (ci.calls ? m('$0', 'cost') : '');
-    var st = run.status || (run.gate && run.gate.state === 'waiting' ? 'waiting' : 'running');
-    var stTxt = { ok: '✓ finished', error: '✕ error', aborted: 'aborted', waiting: '⏸ waiting for approval', running: '● running' }[st] || st;
+    var st = run.status || (run.gate && run.gate.state === 'waiting' ? 'waiting' : this._quiet(run) ? 'quiet' : 'running');
+    var stTxt = { ok: '✓ finished', error: '✕ error', aborted: 'aborted', waiting: '⏸ waiting for approval', running: '● running', quiet: '⏸ no word from the app' }[st] || st;
     var split = L.timeSplit(run.events), base = L.baselineOf(run.events, this.topo);
     this.f.meters.innerHTML = cost +
       m(fmtNum(run.tok.input), 'tokens in', run.tok.cache_read ? fmtNum(run.tok.cache_read) + ' of them read from the cache' : '') +
@@ -646,8 +651,16 @@
     var caught = !Object.keys(hidden).length;   // every step received is on screen
     if (!finished) events = events.filter(function (e) { return e.event_type !== 'run_finished'; });
     if (finished && lastNode) focusNode = lastNode;
-    return { now: now, shownEnd: shownEnd, ran: ran, seq: seq, nest: nest, openNode: openNode, lastNode: lastNode, focusNode: focusNode || lastNode,
+    var quiet = this._quiet(run, now);
+    return { quiet: quiet, now: now, shownEnd: shownEnd, ran: ran, seq: seq, nest: nest, openNode: openNode, lastNode: lastNode, focusNode: focusNode || lastNode,
              starting: starting, finished: finished, caught: caught, events: events };
+  };
+
+  /* Beside the app (embedded sync), a run the app has gone quiet on (logic.quietRun): its clock stops
+     where the app last spoke. Not while stepping through a run here (those pauses are the presenter's). */
+  Bench.prototype._quiet = function (run, now) {
+    if (this.source !== 'parent' || this._local || !run) return null;
+    return lg().quietRun(run, now != null ? now : wallNow());
   };
 
   // The edges this run is shown to have taken (a nested step lights the edge into it).
@@ -1295,11 +1308,19 @@
       else if (last.status === 'error' && !shownOpen) cls += ' error';
       else if (steps.every(function (s) { return s.status === 'skipped'; })) cls += ' skipped';
       else if (run.gate && run.gate.node === id && run.gate.state === 'waiting' && !(run.status && finished)) cls += ' gatewait';
+      else if (S.quiet && (S.starting[id] || shownOpen)) cls += ' stalled';
       else if (S.starting[id]) cls += ' starting';
       else if (shownOpen) cls += ' active';
       else cls += ' done';
       if (ring === id && !(whole && !self.selectedNode && (shownOpen || S.starting[id]))) cls += ' focus';
       if (self.selectedNode === id) cls += ' selected';
+      /* The running sweep keeps its phase from the step's own start, so a redraw of the map (the
+         stage resizing as the request arrives re-creates the boxes) never restarts it mid-pass.
+         Set once per step on each box: changing a running animation's delay would jump it. */
+      if (/ (active|starting)\b/.test(cls) && last && n._sweepFor !== last.id) {
+        n._sweepFor = last.id;
+        n.style.setProperty('--sweep-delay', -Math.max(0, Math.round(now - last.vs)) + 'ms');
+      }
       if (n.className !== cls) n.className = cls;
       // The ringed step in the detail is the way back to the whole map (a click, Enter or Space).
       var back = !E.eng && !whole && ring === id, al = String(L.plainLabel(node)) + (back ? '. Shown below; activate for the whole map' : '');
@@ -1311,7 +1332,8 @@
       if (num.textContent !== nv) num.textContent = nv;
       // The line under the name: its time, then what's worth a glance (logic.stepMeta).
       var running = !!(shownOpen || S.starting[id]);
-      var m = L.stepMeta(topo, S.events, id, steps, { finished: finished, running: running, runningMs: running && last.arr > 0 && last.arrEnd == null ? now - last.arr : null });
+      var m = L.stepMeta(topo, S.events, id, steps, { finished: finished, running: running, quiet: !!S.quiet,
+        runningMs: running && last.arr > 0 && last.arrEnd == null ? (S.quiet ? S.quiet.at : now) - last.arr : null });
       var html = (m.v ? '<span class="v">' + esc(m.v) + '</span>' : '') + m.rest.map(function (x) { return ' · ' + esc(x); }).join('') +
         (m.pips ? '<span class="pips">' + m.pips.map(function (k) { return '<i class="' + k + '"></i>'; }).join('') + '</span>' : '');
       setHTML(n.querySelector('.s-meta'), html);
@@ -1324,7 +1346,7 @@
       var k = ed.from + '>' + ed.to;
       var described = ((r && r.edges) || [i0]).some(function (j) { return topo.edges[j] && topo.edges[j].description; });
       var toPerson = L.actorOf(L.nodeOf(topo, ed.to) || {}, S.events) === 'person';
-      var flowing = taken[k] && (S.openNode === ed.to || S.starting[ed.to]) && !finished;
+      var flowing = taken[k] && (S.openNode === ed.to || S.starting[ed.to]) && !finished && !S.quiet;
       var c = 'edge' + (taken[k] ? ' taken' + (flowing ? ' flowing' + (toPerson ? ' to-person' : '') : '') : finished ? ' untaken' : '') + (described ? ' described' : '');
       if (e.getAttribute('class') !== c) e.setAttribute('class', c);
       if (taken[k]) { lit[i0] = true; if (!self._edgeLit[i0]) fresh.push(e); }
@@ -1356,7 +1378,8 @@
       });
     });
     this._placeCue(run, S, finished);
-    var busy = S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; });
+    // Quiet: nothing moves until the app speaks again (push renders then), so the clock stops ticking.
+    var busy = !S.quiet && (S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; }));
     clearTimeout(this._tick);
     if (busy) this._tick = setTimeout(function () { self.render(); }, 100);
     // A scrolling map keeps the step the panel is on in view when that step changes.
@@ -1500,13 +1523,14 @@
     // which request the map is about without looking across.
     if (beside) p.req.className += ' r-beside';
     p.req.title = beside && req.text ? req.text : '';
-    setHTML(p.req, req.text ? '“' + esc(req.text.replace(/\s+/g, ' ')) + '”' : '<span class="muted">' + (run ? '' : beside ? 'Pick a request in the app.' : 'Waiting for a request…') + '</span>');
+    setHTML(p.req, req.text ? '“' + esc(req.text.replace(/\s+/g, ' ')) + '”' : '<span class="muted">' + (run ? '' : beside ? 'Waiting for the app to run…' : 'Waiting for a request…') + '</span>');
     var who = String(req.who || '').split(' · ').filter(Boolean);
     setHTML(p.who, who.length ? '<b>' + esc(who[0]) + '</b>' + who.slice(1).map(function (x) { return ' · ' + esc(x); }).join('') : '');
     var oc = run ? L.outcome(topo, events) : { text: '', done: false };
     var st = !run ? { cls: 'idle', text: 'Waiting for a request' }
-      : oc.done ? { cls: /^Handed/.test(oc.text) ? 'handed' : /^(Stopped|Something)/.test(oc.text) ? 'bad' : 'ok', text: pillWords(oc.text), full: oc.text }
+      : oc.done ? { cls: /^Handed/.test(oc.text) ? 'handed' : /^Stopped before/.test(oc.text) ? 'paused' : /^(Stopped|Something)/.test(oc.text) ? 'bad' : 'ok', text: pillWords(oc.text), full: oc.text }
       : /^Waiting/.test(oc.text) ? { cls: 'waiting', text: 'Waiting for a person to approve' }
+      : S && S.quiet ? QUIET_PILL
       : (tstate === 'paused' || tstate === 'moment' || tstate === 'stepping') ? { cls: 'paused', text: 'Paused' + (S && S.focusNode && S.numbers && S.numbers[S.focusNode] ? ' at step ' + S.numbers[S.focusNode] : '') }
       : { cls: 'running', text: oc.text === 'Something went wrong' ? oc.text : 'Running' };
     setHTML(p.status, '<span class="ps-pill st-' + st.cls + '" title="' + esc(st.full || st.text) + '"><i></i><b>' + esc(st.text) + '</b></span>');
@@ -1525,7 +1549,7 @@
 
     // The panel (or the recap): the selected step, else the step the run is on.
     var html, focusActor = null;
-    if (!run) html = '<div class="bb bb-empty"><p class="bb-headline">' + (beside ? 'Nothing has run yet. Pick a request in the app, and this side shows what the AI does with it.' : 'Nothing has run yet.') + '</p></div>';
+    if (!run) html = '<div class="bb bb-empty"><p class="bb-headline">' + (beside ? 'Nothing has run yet. When the app runs, this side shows what the AI does.' : 'Nothing has run yet.') + '</p></div>';
     else if (this.recapOpen) html = this._recapHTML(run, events, finished, S);
     else if (S.focus) { html = this._bubbleHTML(run, events, S.focus, finished, S); focusActor = L.actorOf(L.nodeOf(topo, S.focus), events); }
     else html = '<div class="bb bb-empty"><p class="bb-headline">Starting…</p></div>';
@@ -1777,7 +1801,7 @@
      ended; a click opens the detail. */
   Bench.prototype._nowHTML = function (run, events, finished, S, tstate) {
     var L = lg(), topo = this.topo, beside = this.source === 'parent';
-    if (!run) return '<div class="now idle"><div class="now-t"><div class="now-h">' + (beside ? 'Pick a request in the app. The run plays here: each step lights up as it happens, and any step opens to show what it did.' : 'Waiting for a run.') + '</div></div></div>';
+    if (!run) return '<div class="now idle"><div class="now-t"><div class="now-h">' + (beside ? 'Waiting for the app to run. The run plays here: each step lights up as it happens, and any step opens to show what it did.' : 'Waiting for a run.') + '</div></div></div>';
     var cont = tstate === 'moment' && this.transport ? '<button class="p-btn primary" data-act="play">Continue ▸</button>' : '';
     if (finished) {
       var oc = L.outcome(topo, events), first = S.seq[0];
@@ -1788,7 +1812,7 @@
     if (!id) return '<div class="now"><div class="now-t"><div class="now-h">Starting…</div></div></div>';
     var c = L.callout(topo, events, id, { finished: finished, last: S.lastNode, numbers: S.numbers, reply: L.replyOf(run.output, topo) });
     var waiting = run.gate && run.gate.node === id && run.gate.state === 'waiting';
-    var st = waiting ? 'waiting for a person' : S.openNode === id || S.starting[id] ? 'running' : 'done';
+    var st = waiting ? 'waiting for a person' : S.openNode === id || S.starting[id] ? (S.quiet ? 'no word from the app' : 'running') : 'done';
     if (waiting) c.status = 'waiting'; else if (st === 'running') c.status = 'now';
     return '<div class="now a-' + esc(c.actor) + ' s-' + esc(c.status) + '"><span class="bb-num">' + esc(badgeOf(S, id) || '·') + '</span><div class="now-t"><div class="now-name">' + esc(c.title) +
       (st ? ' <span class="now-st">' + esc(st) + '</span>' : '') + '</div><div class="now-h">' + para(c.headline) + '</div></div>' + cont +

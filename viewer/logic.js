@@ -762,7 +762,7 @@ export function baselineOf(events, topo) {
 
 // ---- the outcome ------------------------------------------------------------------------------
 var OUTCOME = {
-  answered: 'Answered', answer: 'Answered', responded: 'Answered', replied: 'Answered',
+  ok: 'Finished', answered: 'Answered', answer: 'Answered', responded: 'Answered', replied: 'Answered',
   executed: 'Done', done: 'Done', completed: 'Done', created: 'Done',
   handed_off: 'Handed to a person', handoff: 'Handed to a person', escalated: 'Handed to a person', escalate: 'Handed to a person',
   needs_human: 'Handed to a person', denied: 'Stopped: a person said no', rejected: 'Stopped: a person said no',
@@ -794,6 +794,8 @@ export function outcome(topo, events) {
   var text;
   if (fd.status === 'error' || err) text = 'Something went wrong' + (err ? ': ' + err : '');
   else if (gate && gate.approved === false) text = 'Stopped: a person said no, so nothing was done';
+  // The app abandoned the run (e.g. the visitor stopped its replay): it didn't fail, it didn't finish.
+  else if (fd.status === 'aborted' && !(named && OUTCOME[named] !== OUTCOME.aborted)) text = OUTCOME.aborted;
   else if (named && OUTCOME[named] === 'Done' || (!named && gate && gate.approved)) {
     // The proposal may be nested ({proposed_action: {...}, ...}): read the object that has the title.
     var po = proposalObject(action) || action;
@@ -1841,9 +1843,13 @@ export function stepMeta(topo, events, id, steps, opts) {
   var mine = [];
   steps.forEach(function (s) { mine = mine.concat(s.events || []); });
   var ms = steps.reduce(function (a, s) { return a + (s.latency != null ? s.latency : s.end != null && s.start != null ? (s.end - s.start) * 1000 : 0); }, 0);
+  // A step the app has gone quiet on (quietRun): its time stops where the app last spoke, and says so.
+  if (opts.running && opts.quiet) return { v: opts.runningMs != null ? fmtMs(opts.runningMs) : '', rest: ['no word from the app'], quiet: true };
   var time = opts.running ? (opts.runningMs != null ? fmtMs(opts.runningMs) + '…' : 'running…') : fmtMs(ms) + (steps.length > 1 ? ' ×' + steps.length : '');
   var err = mine.filter(function (e) { return e.event_type === 'error'; })[0];
   if (err && !opts.running) return { v: '✕ error', rest: [time] };
+  // The app stopped the run during this step (SPEC section 3a): its time is how far it got.
+  if (!opts.running && steps[steps.length - 1].status === 'aborted') return { v: time, rest: ['stopped here'] };
   var resolved = mine.filter(function (e) { return e.event_type === 'gate_resolved'; }).pop();
   var waiting = mine.filter(function (e) { return e.event_type === 'gate_waiting'; })[0];
   if (resolved) { var rd = resolved.data || {}; return { v: rd.approved ? 'approved' : 'denied', rest: rd.by ? ['by ' + rd.by] : [] }; }
@@ -1892,4 +1898,19 @@ export function stepLetters(topo, numbers, order) {
     k++;
   });
   return out;
+}
+
+/* Beside an app that drives the bench by postMessage (SPEC section 3a), the app sets the pace and a
+   run is only over when the app says so. An app that stops talking mid-run (its replay stopped, the
+   visitor typed, the page went away) would otherwise leave a step "running" by the wall clock forever.
+   A run is quiet when it hasn't finished, isn't waiting for a person, and nothing has arrived for it
+   for quietMs: the bench then stops the clock where the app last spoke and says only what it knows.
+   run.lastArr is the wall time (ms) the run's last event arrived; nowMs the same clock. */
+export var QUIET_MS = 20000;
+export function quietRun(run, nowMs, opts) {
+  if (!run || run.status || run.lastArr == null) return null;
+  if (run.gate && run.gate.state === 'waiting') return null;
+  var q = opts && opts.quietMs != null ? opts.quietMs : QUIET_MS;
+  var since = nowMs - run.lastArr;
+  return since >= q ? { at: run.lastArr, sinceMs: since } : null;
 }

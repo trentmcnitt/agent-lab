@@ -24,6 +24,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 HELPDESK = ROOT.parent / "agent-lab/request-queue"
+BESPOKE_EXPORT = ROOT.parent / "bespoke-ai-vscode-ext/dist/playground"
 STATIC_PORT, LIVE_PORT = 8816, 8815
 
 sync_api = pytest.importorskip("playwright.sync_api", reason="playwright not installed (uv sync --dev)")
@@ -83,7 +84,8 @@ def browser():
 
 @pytest.fixture(scope="session")
 def site(tmp_path_factory):
-    """The lab's layout, static: /bench/ and /apps/slack-helpdesk/. Base URL."""
+    """The lab's layout, static: /bench/, /apps/slack-helpdesk/, /apps/stall/ and (when exported)
+    /apps/bespoke/. Base URL."""
     recs = HELPDESK / "demo/bench-recordings"
     if not recs.exists():
         pytest.skip("helpdesk checkout not beside the bench")
@@ -95,6 +97,11 @@ def site(tmp_path_factory):
     app = HELPDESK / "dist/slack-helpdesk"
     if app.exists():
         shutil.copytree(app, root / "apps/slack-helpdesk")
+    # A test app that opens a step and goes quiet (tests/fixtures/apps/stall).
+    shutil.copytree(ROOT / "tests/fixtures/apps/stall", root / "apps/stall")
+    # The Bespoke playground's static replay, when its export is beside the bench (npm run playground:export).
+    if BESPOKE_EXPORT.exists():
+        shutil.copytree(BESPOKE_EXPORT, root / "apps/bespoke")
     proc = subprocess.Popen([sys.executable, "-m", "http.server", str(STATIC_PORT), "--bind", "127.0.0.1", "--directory", str(root)],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

@@ -389,8 +389,15 @@
   .snode .s-num:empty::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); opacity: .7; }
   .snode.active, .snode.starting { border-color: var(--path); box-shadow: 0 0 0 1px rgba(62,240,200,.35), 0 0 28px rgba(62,240,200,.28), 0 8px 24px rgba(0,0,0,.35); }
   .snode.active::after, .snode.starting::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-                                                 background: linear-gradient(100deg, transparent 30%, rgba(62,240,200,.11) 50%, transparent 70%); background-size: 250% 100%; animation: sweep 1.3s linear infinite; }
-  @keyframes sweep { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+                                                 background: linear-gradient(100deg, transparent 30%, rgba(62,240,200,.11) 50%, transparent 70%); background-size: 250% 100%; background-repeat: no-repeat; animation: sweep 1.3s linear var(--sweep-delay, 0ms) infinite; }
+  /* One band, left to right, off the box at both ends. With the gradient 2.5× the box and repeating, the
+     next tile's band sat mid-box when a cycle ended, so each loop read as "halfway, back to 0, then all
+     the way" (Trent, 10-04). No repeat, and positions where the band (30–70% of the gradient) starts just
+     left of the box and ends just right of it. */
+  @keyframes sweep { from { background-position: 120% 0; } to { background-position: -20% 0; } }
+  /* The app went quiet mid-step (logic.quietRun): lit, no glow, no sweep, the clock stopped. */
+  .snode.stalled { border-color: color-mix(in srgb, var(--path) 45%, var(--border-2)); border-style: dashed; }
+  .snode.stalled .s-meta .v { color: var(--text-2); }
   .snode.gatewait { border-color: var(--person); animation: gatepulse 1.5s ease-in-out infinite; }
   .snode.gatewait .s-meta .v { color: var(--person); }
   @keyframes gatepulse { 0%, 100% { box-shadow: 0 0 0 1px rgba(255,200,87,.55), 0 0 30px rgba(255,200,87,.38), 0 8px 24px rgba(0,0,0,.35); } 50% { box-shadow: 0 0 0 1px rgba(255,200,87,.25), 0 0 8px rgba(255,200,87,.12), 0 8px 24px rgba(0,0,0,.35); } }

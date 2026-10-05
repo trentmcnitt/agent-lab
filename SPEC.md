@@ -139,8 +139,9 @@ For a static site, where there is no receiver: the app's own replay of its UI se
   - `{"type": "bench:register", "topology": <map>, "story": "<js>" | null}`: once, before any events. The same body as `PUT /apps/<id>`.
   - `{"type": "bench:events", "events": [<bench event>, ...]}`, or one at a time as `{"type": "bench:event", "event": <bench event>}`: as the app's replay produces them, with `ts` rewritten to now, so the bench's timings read like a live run.
   - `{"type": "bench:reset"}`: optional; clears the bench (the visitor started over).
+  - **A run the app abandons, it ends.** When the app stops a replay mid-run (the visitor typed, pressed Stop, picked another run), it sends `step_finished` with `status: "aborted"` for the open step and `run_finished` with `status: "aborted"`. The bench shows the run as stopped before it finished; nothing is left running.
 - **Shell → bench:** the shell relays exactly those messages, from its app iframe only (checked by window, not by origin), to its bench iframe at its own origin, and buffers them until the bench posts `bench:ready`.
-- **Bench:** opened as `?source=parent`, it accepts messages only from its parent window, draws the registered map and story, and treats events like a live stream.
+- **Bench:** opened as `?source=parent`, it accepts messages only from its parent window, draws the registered map and story, and treats events like a live stream. If nothing arrives for an unfinished run for 20 s (`logic.QUIET_MS`) and no gate is waiting, the run is *quiet*: the open step's clock stops where the app last spoke, the step and the status say "no word from the app", and the next event resumes it. The app's own gaps must stay under that (the replays cap theirs at 1.2-9 s).
 
 The shell accepts no other messages from the app; any other `type` is ignored. The shell has one layout, always side by side.
 

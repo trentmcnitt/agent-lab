@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import Watched
+
 ROOT = Path(__file__).resolve().parents[2]
 
 RECORDINGS = {
@@ -21,6 +23,7 @@ RECORDINGS = {
 }
 ANSWER = "recordings/req-005.recording.jsonl"                             # an answer: handbook text given to the AI
 HELPDESK_APP = ROOT.parent / "agent-lab/request-queue/dist/slack-helpdesk/index.html"
+BESPOKE_APP = ROOT.parent / "bespoke-ai-vscode-ext/dist/playground/index.html"
 MODES = ("presentation", "engineering")
 
 
@@ -551,3 +554,92 @@ def test_the_pane_keeps_the_map_on_top_and_one_marker(page, site):
         bench.locator("#bench.v-map").wait_for()
         p.wait_for_timeout(500)
         assert not bench.locator("[data-p=side] .ps-grab").is_visible()
+
+
+# ---- an app that stops talking, and the running sweep ---------------------------------------------
+STALL = "/bench/shell/?sync=1&mode=presentation&app=/apps/stall/&title=Stall"
+
+
+def _frame(p, sel):
+    """The shell's app (#appFrame) or bench (#benchFrame) iframe, as a Frame to evaluate in."""
+    p.wait_for_selector(sel, state="attached")
+    return p.query_selector(sel).content_frame()
+
+
+def test_a_run_the_app_goes_quiet_on_stops_its_clock(browser, site):
+    """The Bespoke bug (10-04): the app stopped mid-run without ending it, and the bench ticked the
+    open step by the wall clock forever ("debounce 303.1s…"). After QUIET_MS with no word, the clock
+    stops where the app last spoke, the step and the pill say so, and the next event resumes it."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    try:
+        ctx.clock.install()
+        w = Watched(ctx.new_page())
+        p = w.page
+        p.goto(site + STALL)
+        bench = p.frame_locator("#benchFrame")
+        node = bench.locator(".pres .gnode[data-node=wait]")
+        node.locator(".s-meta", has_text="…").wait_for(timeout=10_000)
+        assert "Running" in bench.locator("[data-p=status]").inner_text()
+        ctx.clock.run_for(25_000)
+        meta = node.locator(".s-meta").inner_text()
+        assert "…" not in meta and "no word from the app" in meta, meta
+        assert "stalled" in node.get_attribute("class")
+        assert "No word from the app" in bench.locator("[data-p=status]").inner_text()
+        ctx.clock.run_for(60_000)
+        assert node.locator(".s-meta").inner_text() == meta, "the clock must not move while the app is quiet"
+        _frame(p, "#appFrame").evaluate("resume()")
+        bench.locator("[data-p=status]", has_text=re.compile("^Finished")).wait_for(timeout=10_000)
+        assert not w.errors, "\n".join(w.errors)
+    finally:
+        ctx.close()
+
+
+def test_the_running_sweep_never_restarts_mid_step(page, site):
+    """Trent, 10-04: the sweep "gets like 50% of the way there, jumps back to 0, and then goes to 100%".
+    Two causes: the gradient repeated, so a second band sat mid-box as each pass ended (the CSS
+    geometry: tests/js/logic.test.js), and the map's redraw as the request arrives re-created the box,
+    restarting its sweep. The sweep now keeps its phase from the step's start, so what's on screen
+    (pass + progress) only ever moves forward while the step runs, redraw or not."""
+    p = page.page
+    p.goto(site + STALL)
+    bench = _frame(p, "#benchFrame")
+    bench.wait_for_selector(".pres .gnode[data-node=wait].starting")
+    seen = []
+    for _ in range(30):                                   # 3 s: the 1.3 s sweep loops twice
+        seen.append(bench.evaluate("""() => {
+            const a = document.getAnimations().filter((x) => x.animationName === 'sweep');
+            if (a.length !== 1) return null;
+            const c = a[0].effect.getComputedTiming();
+            return c.currentIteration + c.progress;
+        }"""))
+        p.wait_for_timeout(100)
+    assert all(x is not None for x in seen), seen
+    assert all(b2 >= a2 for a2, b2 in zip(seen, seen[1:])), seen
+    assert seen[-1] - seen[0] > 1.5, seen
+
+
+def test_bespoke_replay_ends_its_run_when_stopped_and_typing_never_edits(page, site):
+    """The Bespoke playground beside the bench: Stop ends the bench's run (aborted), its clock stays
+    put, and a keystroke in the recording is held back with a hint."""
+    if not BESPOKE_APP.exists():
+        pytest.skip("Bespoke playground not exported (bespoke-ai-vscode-ext: npm run playground:export)")
+    p = page.page
+    p.goto(f"{site}/bench/shell/?sync=1&mode=presentation&app=/apps/bespoke/&title=Bespoke")
+    app, bench = p.frame_locator("#appFrame"), p.frame_locator("#benchFrame")
+    app.locator("#bigPlay", has_text="Stop").wait_for(timeout=20_000)       # it plays on first load
+    app.locator("#auto").uncheck()
+    bench.locator(".pres .gnode[data-node=queue].starting, .pres .gnode[data-node=queue].active").wait_for(timeout=20_000)
+    app.locator("#bigPlay").click()
+    bench.locator("[data-p=status]", has_text="Stopped before it finished").wait_for(timeout=10_000)
+    b = _frame(p, "#benchFrame")
+    metas = "() => [...document.querySelectorAll('.pres .gnode .s-meta')].map((m) => m.textContent)"
+    before = b.evaluate(metas)
+    p.wait_for_timeout(1500)
+    assert b.evaluate(metas) == before
+    assert not any("…" in m for m in before), before
+    assert "Play" in app.locator("#bigPlay").inner_text()
+    text = app.locator(".view-lines").inner_text()
+    app.locator("#editor").click()
+    p.keyboard.type("zz")
+    assert app.locator(".view-lines").inner_text() == text, "a recording doesn't take typing"
+    assert "Typing is off" in app.locator("#bannerText").inner_text()

@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Stall (test app)</title>
+<!-- A test app for the shell (SPEC 3a): it starts a run, opens one step, then says nothing more,
+     like a replay the visitor stopped without the app ending its run. window.resume() finishes it. -->
+<p>Stall test app</p>
+<script>
+  var q = new URLSearchParams(location.search), origin = q.get('bench_origin'), sess = q.get('bench_session');
+  var topo = { v: 'bench-topology/0', app: { id: 'stall', name: 'Stall (test app)' },
+               nodes: [{ id: 'wait', label: 'wait', kind: 'step' }, { id: 'after', label: 'after', kind: 'step' }],
+               edges: [{ from: 'wait', to: 'after' }] };
+  var seq = 0;
+  function send(m) { parent.postMessage(m, origin); }
+  function ev(type, node, data) {
+    var e = { v: 'bench/0', run_id: 'r-stall', session_id: sess, seq: seq++, ts: Date.now() / 1000, node: node, event_type: type };
+    if (data) e.data = data;
+    return e;
+  }
+  send({ type: 'bench:register', topology: topo, story: null });
+  send({ type: 'bench:events', events: [ev('run_started', '_run', { label: 'stall', input: 'a run the app stops talking about' }), ev('step_started', 'wait')] });
+  window.resume = function () {
+    send({ type: 'bench:events', events: [ev('step_finished', 'wait', { status: 'ok' }), ev('step_started', 'after'),
+      ev('step_finished', 'after', { status: 'ok' }), ev('run_finished', '_run', { status: 'ok', outcome: 'ok' })] });
+  };
+</script>

@@ -457,3 +457,71 @@ test('inferred maps: Presentation names from the operation, the raw id stays the
   assert.equal(m.nodes[0].label, 'execute_tool search_handbook');
   assert.equal(m.nodes[0].plain_label, 'Tool: search handbook');
 });
+
+// ---- an app that stops talking (embedded sync) ------------------------------------------------------
+// The Bespoke replay used to stop mid-run (the visitor typed) and leave its first step open: the bench
+// ticked it by the wall clock forever ("debounce 303.1s…"). Two halves: the app ends what it abandons,
+// and the bench stops the clock on a run the app has gone quiet on.
+const QT0 = 1790000000;
+const qev = (event_type, node, dt, data) => ({ event_type, node, run_id: 'r1', ts: QT0 + dt, ...(data ? { data } : {}) });
+function quietRunOf(events, now) { const r = L.newRun('r1'); events.forEach((e) => L.reduce(r, L.normalizeEvent(e), now)); return r; }
+
+test('quietRun: a run with no word from the app for QUIET_MS is quiet; finished or gated runs never are', () => {
+  const r = quietRunOf([qev('run_started', '_run', 0), qev('step_started', 'queue', 0)], 1000);
+  r.lastArr = 1000;
+  assert.equal(L.quietRun(r, 1000 + L.QUIET_MS - 1), null);
+  assert.deepEqual(L.quietRun(r, 1000 + L.QUIET_MS), { at: 1000, sinceMs: L.QUIET_MS });
+  assert.ok(L.QUIET_MS >= 15000, 'well above the longest gap an app replay leaves (Bespoke 9 s, the helpdesk 1.2 s)');
+  const gated = quietRunOf([qev('run_started', '_run', 0), qev('gate_waiting', 'approve', 1)], 1000);
+  gated.lastArr = 1000;
+  assert.equal(L.quietRun(gated, 1e9), null, 'a person can take as long as they like');
+  const done = quietRunOf([qev('run_started', '_run', 0), qev('step_started', 'queue', 0), qev('run_finished', '_run', 1, { status: 'ok' })], 1000);
+  done.lastArr = 1000;
+  assert.equal(L.quietRun(done, 1e9), null);
+});
+
+test('stepMeta: a quiet step shows a stopped time and says so, never a ticking "…"', () => {
+  const events = [qev('run_started', '_run', 0), qev('step_started', 'queue', 0)];
+  const r = quietRunOf(events, 1000);
+  const steps = r.nodeSteps.queue.map((id) => r.steps[id]);
+  const ticking = L.stepMeta(null, events, 'queue', steps, { running: true, runningMs: 50900 });
+  assert.equal(ticking.v, '50.9s…');
+  const quiet = L.stepMeta(null, events, 'queue', steps, { running: true, quiet: true, runningMs: 800 });
+  assert.ok(!/…/.test(quiet.v), quiet.v);
+  assert.deepEqual(quiet.rest, ['no word from the app']);
+});
+
+test('an abandoned run (aborted boundaries) closes its open step and reads as stopped, not finished', () => {
+  const events = [qev('run_started', '_run', 0), qev('step_started', 'queue', 0),
+                  qev('step_finished', 'queue', 0.4, { status: 'aborted' }), qev('run_finished', '_run', 0.4, { status: 'aborted', outcome: 'aborted' })];
+  const r = quietRunOf(events, 1000);
+  assert.deepEqual(Object.keys(r.open), []);
+  assert.ok(r.stepOrder.every((id) => r.steps[id].arrEnd != null), 'nothing left for the clock to tick');
+  assert.equal(L.outcome(null, events).text, 'Stopped before it finished');
+  const steps = r.nodeSteps.queue.map((id) => r.steps[id]);
+  assert.deepEqual(L.stepMeta(null, events, 'queue', steps, { finished: true }).rest, ['stopped here']);
+  // Status alone (no outcome word) says the same.
+  const bare = events.slice(0, 3).concat([qev('run_finished', '_run', 0.4, { status: 'aborted' })]);
+  assert.equal(L.outcome(null, bare).text, 'Stopped before it finished');
+});
+
+test("an app's plain 'ok' outcome reads as Finished, not 'Ok'", () => {
+  const events = [qev('run_started', '_run', 0), qev('run_finished', '_run', 1, { status: 'ok', outcome: 'ok' })];
+  assert.equal(L.outcome(null, events).text, 'Finished');
+});
+
+test('the running sweep: one band, off the box at both ends, never a second band mid-box', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'viewer/index.html'), 'utf8');
+  const rule = css.match(/\.snode\.active::after[^{]*\{([^}]*)\}/)[1];
+  assert.match(rule, /background-repeat:\s*no-repeat/);
+  const size = Number(rule.match(/background-size:\s*([\d.]+)%/)[1]) / 100;
+  const stops = rule.match(/transparent\s+(\d+)%.*?transparent\s+(\d+)%/);
+  const band = [Number(stops[1]) / 100, Number(stops[2]) / 100];
+  const kf = css.match(/@keyframes sweep \{ from \{ background-position: (-?[\d.]+)% 0; \} to \{ background-position: (-?[\d.]+)% 0; \} \}/);
+  // A background-position p puts the image's left edge at (1 - size) * p (in box widths).
+  const at = (p) => band.map((b) => (1 - size) * (p / 100) + b * size);
+  const [s0, s1] = at(Number(kf[1])), [e0] = at(Number(kf[2]));
+  assert.ok(s1 <= 0, 'starts left of the box: ' + s1);
+  assert.ok(e0 >= 1, 'ends right of the box: ' + e0);
+  assert.ok(s0 < s1);
+});
