@@ -162,7 +162,7 @@ Nothing on the screen is typed twice. Each kind of information has one home:
 
 | | where it comes from | what you write | how drift is caught |
 |---|---|---|---|
-| **Structure**: steps, branches, branch names, subgraphs | **derived** from the compiled LangGraph graph, or from the Agent Spec file | nothing | Every run carries the map of the code that produced it, and the bench draws each run with its own map. A router with no path map and no `Literal` return type is a `verify` error (R3). |
+| **Structure**: steps, branches, branch names, subgraphs | **derived** from the compiled LangGraph graph, or from the Agent Spec file | nothing | Every run carries the map of the code that produced it, and the bench draws each run with its own map. A router with no path map and no `Literal` return type, or a node that routes with `Command(goto=...)` and no `Command[Literal[...]]` annotation or `destinations=`, is a `verify` error (R3). A run that moves along an edge its map lacks is flagged in Engineering (R16). |
 | **Runtime facts**: model calls, prompts, outputs, tokens, tool calls, timing, approval pauses | **derived** from LangGraph's callbacks, as OpenTelemetry spans | nothing | These are what happened, attributed to the step that ran them. |
 | **App facts**: documents, searches, decisions, checks, sign-offs, outcomes | **reported** by one line where each fact is produced: `lab.corpus`, `lab.retrieved`, `lab.decision`, `lab.check`, `lab.gate_resolved`, `lab.outcome`, `lab.event` | one line each | A document list comes from the index itself, so a renumbered handbook follows. The bench flags a fact naming a step, branch or document the map doesn't have (R7 to R9), in Engineering. |
 | **Words**: plain step names, descriptions, branch words, check words, the request and reply fields | **authored** on the code they describe: `@lab.step(...)`, `paths=`, `words=` on `lab.check`. The docstring is Engineering's description. | as much or as little as you like | `verify` fails on a word naming a step, branch or state field the code doesn't have (R1, R2, R15). After `lock`, it flags wording whose step's code changed (R6). |
@@ -172,7 +172,7 @@ The limits, stated plainly:
 - The lock fingerprints the node function (its decorator included) and, for a branching step, its router and path map. Code the node calls elsewhere (a retriever, a helper) isn't fingerprinted, so a change there doesn't flag the step's words.
 - Verification checks that every word names something real, and flags words whose code changed. It never claims the words are right.
 - A `@lab.step` on a function that is no longer added to the graph isn't reported. Its words never reach the map, so nothing wrong is shown.
-- A node that routes by returning `Command(goto=...)` without a `Command[Literal[...]]` return annotation isn't detected yet: it passes `verify` and is drawn with no exits. Annotate it.
+- `verify` finds `Command` routing in the node's own code and its return annotation. A node that returns a `Command(goto=...)` built in another function, with no `-> Command` annotation, isn't caught there; the bench still flags the run that takes the missing edge (R16).
 - Branch lighting is derived from which step ran next, so it's right even when your code overrides the model's pick. For a path map where several branches lead to one step, pass `lab.decision(branch=...)`.
 
 The full rule list is in [SPEC](SPEC.md) section 8.7; the library's guide (redaction, cost, sharing your app's OpenTelemetry provider, gates) is [`sdk/python`](sdk/python).

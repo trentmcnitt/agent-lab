@@ -118,6 +118,87 @@ def test_command_destinations_from_the_annotation_and_from_destinations():
     assert edges(m) == [("d", "b", "b"), ("d", "c", "c")]      # branch id = the target the code names
 
 
+def goto_unannotated(s):
+    if s.get("x"):
+        return Command(goto="c", update={"x": 0})
+    return Command(goto="b")
+
+
+def goto_bare_annotation(s) -> Command:
+    return handoff("b")
+
+
+def handoff(target):
+    return Command(goto=target)
+
+
+def only_updates(s) -> Command:
+    return Command(update={"x": 1})
+
+
+@lab.step("Hand off", actor="ai")
+def goto_worded(s):
+    return Command(goto="b")
+
+
+@pytest.mark.parametrize("node", [goto_unannotated, goto_bare_annotation, goto_worded,
+                                  lambda s: Command(goto="b")],
+                         ids=["unannotated", "bare-Command-annotation", "under-lab.step", "lambda"])
+def test_unannotated_command_routing_is_r3_not_a_dead_end(node):
+    """A node that moves on with Command(goto=...) and nothing LangGraph can read about where:
+    SPEC 8.7's R3, never a step drawn with no exits that passes verify."""
+    m = manifest(graph(first=("d", node)))
+    d = next(n for n in m["nodes"] if n["id"] == "d")
+    assert d["branches_unknown"] is True
+    assert [e for e in m["edges"] if e["from"] == "d"] == []
+    assert codes(m) == ["R3"]
+    r3 = next(w for w in m["derived"]["warnings"] if w["code"] == "R3")
+    assert r3["node"] == "d" and 'Command[Literal["a", "b"]]' in r3["message"] and "destinations=" in r3["message"]
+    with pytest.raises(lab.VerificationError, match="branches unknown"):
+        lab.verify(instrument(graph(first=("d", node)), app=APP))
+
+
+def test_command_routing_without_source_is_read_from_the_bytecode():
+    """A node defined where there's no source to read (a REPL, `python -`, exec'd code)."""
+    ns = {"Command": Command}
+    exec(compile("def routes(s):\n    return Command(goto='b')\n"
+                 "def updates(s):\n    return Command(update={'x': 1})\n", "<no source>", "exec"), ns)
+    m = manifest(graph(first=("d", ns["routes"])))
+    assert codes(m) == ["R3"]
+    g = StateGraph(S)
+    g.add_node("d", ns["updates"])
+    g.add_node("b", b)
+    g.add_edge(START, "d")
+    g.add_edge("d", "b")
+    assert codes(manifest(g.compile())) == []
+
+
+def test_annotated_command_routing_is_clean_and_drawn():
+    compiled = graph(first=("d", goto))
+    m = manifest(compiled)
+    assert edges(m) == [("d", "b", "b"), ("d", "c", "c")]
+    assert codes(m) == []
+    lab.verify(instrument(graph(first=("d", goto)), app=APP))      # raises on any error
+
+
+def test_a_command_that_only_updates_or_a_nested_helper_is_not_routing():
+    def with_inner_helper(s):
+        def later():
+            return Command(goto="c")       # a nested def is not this node's return
+        return {}
+
+    for node in (only_updates, with_inner_helper):
+        g = StateGraph(S)
+        g.add_node("d", node)
+        g.add_node("b", b)
+        g.add_edge(START, "d")
+        g.add_edge("d", "b")
+        m = manifest(g.compile())
+        assert codes(m) == [], node.__name__
+        assert ("d", "b", None) in edges(m)
+        assert "branches_unknown" not in next(n for n in m["nodes"] if n["id"] == "d")
+
+
 def test_many_to_one_and_end_branches():
     m = manifest(graph(router=lambda s: s["route"], path_map={"yes": "b", "maybe": "b", "no": "c", "stop": END}))
     assert edges(m) == [("a", "__end__", "stop"), ("a", "b", "maybe"), ("a", "b", "yes"), ("a", "c", "no")]

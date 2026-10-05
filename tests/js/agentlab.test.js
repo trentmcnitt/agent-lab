@@ -164,6 +164,44 @@ test('mapChecks R10: a many-to-one branch taken without saying which', () => {
   assert.ok(!L.mapChecks(MAP, oneToOne).some((f) => f.code === 'R10'));
 });
 
+test('mapChecks R16: a run that moves along an edge the map lacks (an unannotated Command router)', () => {
+  // The map an unannotated Command(goto=...) node gets: no exits from `route`, R3 from verify.
+  const topo = { v: 'bench-topology/0', app: { id: 'cmd', name: 'Cmd' },
+                 nodes: [{ id: 'route', branches_unknown: true }, { id: 'b' }, { id: 'c' }], edges: [{ from: 'b', to: 'c' }],
+                 derived: { warnings: [{ code: 'R3', severity: 'error', node: 'route', message: 'branches unknown: it routes with Command(goto=...)' }] } };
+  seq = 0;
+  const evs = [ev('route', 'step_started', {}, { step_id: 's1' }), ev('route', 'step_finished', { status: 'ok' }, { step_id: 's1' }),
+               ev('b', 'step_started', {}, { step_id: 's2' }), ev('b', 'step_finished', { status: 'ok' }, { step_id: 's2' }),
+               ev('c', 'step_started', {}, { step_id: 's3' }), ev('c', 'step_finished', { status: 'ok' }, { step_id: 's3' })];
+  const r16 = L.mapChecks(topo, evs).filter((f) => f.code === 'R16');
+  assert.equal(r16.length, 1, 'b>c is on the map; route>b is not');
+  assert.equal(r16[0].node, 'route');
+  assert.equal(r16[0].severity, 'warning');
+  assert.match(r16[0].message, /route went to b, which the map has no edge for \(its branches are unknown: R3\)/);
+  // Presentation: the step it went to still lights as run (the edge is taken in the run's own terms).
+  assert.ok(L.takenEdges(topo, evs)['route>b']);
+  assert.deepEqual(L.visits(evs).map((v) => v.node), ['route', 'b', 'c']);
+  // ... and its callout says where the run went next instead of reading as a dead end.
+  const co = L.callout(topo, evs, 'route', {});
+  assert.ok(co.headline.some((h) => h.next && /^b/i.test(h.t)), JSON.stringify(co.headline));
+  // A step whose map does have exits keeps the map's own words (no run-derived "next").
+  assert.ok(!L.callout(topo, evs.slice(0, 4), 'b', {}).headline.some((h) => h.next && /^route/i.test(h.t)));
+  // Parallel steps never pair up: c starts while b is still open.
+  seq = 0;
+  const par = [ev('route', 'step_started', {}, { step_id: 'p1' }), ev('route', 'step_finished', {}, { step_id: 'p1' }),
+               ev('b', 'step_started', {}, { step_id: 'p2' }), ev('c', 'step_started', {}, { step_id: 'p3' }),
+               ev('b', 'step_finished', {}, { step_id: 'p2' }), ev('c', 'step_finished', {}, { step_id: 'p3' })];
+  assert.deepEqual(L.mapChecks(Object.assign({}, topo, { edges: [{ from: 'route', to: 'b' }, { from: 'route', to: 'c' }] }), par).filter((f) => f.code === 'R16'), []);
+  // Siblings of one fan-out that happen to run one after the other aren't a handoff either.
+  seq = 0;
+  const fan = [ev('route', 'step_started', {}, { step_id: 'f1' }), ev('route', 'step_finished', {}, { step_id: 'f1' }),
+               ev('b', 'step_started', {}, { step_id: 'f2' }), ev('b', 'step_finished', {}, { step_id: 'f2' }),
+               ev('c', 'step_started', {}, { step_id: 'f3' }), ev('c', 'step_finished', {}, { step_id: 'f3' })];
+  assert.deepEqual(L.mapChecks({ app: topo.app, nodes: topo.nodes, edges: [{ from: 'route', to: 'b' }, { from: 'route', to: 'c' }] }, fan).filter((f) => f.code === 'R16'), []);
+  // An inferred map gets no run rules.
+  assert.deepEqual(L.mapChecks(Object.assign({}, topo, { inferred: true, derived: undefined }), evs), []);
+});
+
 test('mapChecks: an inferred map gets no run rules (it was made from these events), a clean run none', () => {
   seq = 0;
   const evs = [ev('chat', 'step_started'), ev('chat', 'llm_call', { model: 'm' })];

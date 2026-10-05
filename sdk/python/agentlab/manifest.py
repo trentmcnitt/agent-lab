@@ -68,10 +68,12 @@ class BranchSpec:
     """The branches out of `source`: `ends` maps each branch label to its target node id (END as
     "__end__"); every label kept, many-to-one included. `ends=None` means the framework can't
     say (an untyped router): R3. `router` is the function that picks, for fingerprints; a
-    `Command`-returning node passes `ends={target: target}` and no router."""
+    `Command`-returning node passes `ends={target: target}` and no router. `hint` (with
+    `ends=None`) says how to make the branches readable, in R3's message."""
     source: str
     ends: Mapping[Any, str] | None
     router: Callable[..., Any] | None = None
+    hint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -233,14 +235,14 @@ class Instrumentation:
             if a in exits:
                 exits[a].append(b)
         branches: dict[str, dict[str, str]] = {}
-        unknown: set[str] = set()
+        unknown: dict[str, str | None] = {}
         routers: dict[str, list[Any]] = {}
         many_to_one: set[str] = set()
         for br in s.branches:
             if br.source == START:
                 continue
             if br.ends is None:
-                unknown.add(br.source)
+                unknown[br.source] = unknown.get(br.source) or br.hint
                 continue
             mapping = branches.setdefault(br.source, {})
             targets: list[str] = []
@@ -325,7 +327,7 @@ class Instrumentation:
                 entry["parent"] = parents[nid]
             if nid in unknown:
                 entry["branches_unknown"] = True
-                findings.append(Finding("R3", "error", "branches unknown: add a path_map or a Literal return type", node=nid))
+                findings.append(Finding("R3", "error", "branches unknown: " + (unknown[nid] or "add a path_map or a Literal return type"), node=nid))
             nodes.append(entry)
 
         # edges

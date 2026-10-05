@@ -1091,7 +1091,7 @@ export function chooseMap(events, maps, registered, inferred) {
 
 var SEVERITY = { error: 0, warning: 1, info: 2 };
 /* "Checks on this map", for Engineering: the findings the app's own `agentlab.verify` wrote into the
-   map (derived.warnings, R0-R6 and R12), then what this run shows (R7-R11, R13). Every rule checks
+   map (derived.warnings, R0-R6 and R12), then what this run shows (R7-R11, R13, R16). Every rule checks
    that a hand-written or reported name exists in the structure the code produced; none of them
    judges whether the words are right. Returns [{code, severity, node?, branch?, message, from}],
    errors first. */
@@ -1171,6 +1171,31 @@ export function mapChecks(topo, events) {
       if (!said) add({ code: 'R10', severity: 'warning', node: seq[i - 1], from: 'run',
                       message: seq[i - 1] + ' went to ' + seq[i] + ', which more than one of its branches leads to, and didn’t report which: the path isn’t lit.' });
     }
+    // R16: the run moved from one step to the next along an edge the map doesn't have (a router
+    // the map can't read, e.g. an unannotated Command(goto=...), or a map that drifted). Only a
+    // handoff counts: the next step started with no other step open, so parallel steps never pair.
+    // Siblings of one fan-out (two exits of the same step) aren't a handoff either.
+    var hasEdge = {}, outsOf = {};
+    edges.forEach(function (ed) { hasEdge[ed.from + '>' + ed.to] = true; (outsOf[ed.from] = outsOf[ed.from] || {})[ed.to] = true; });
+    function siblings(a, b) { return Object.keys(outsOf).some(function (p) { return outsOf[p][a] && outsOf[p][b]; }); }
+    var open = {}, prev = null, warned = {};
+    topLevel(events).forEach(function (e) {
+      var key = e.step_id || e.node;
+      if (e.event_type === 'step_started') {
+        var b = e.node, a = prev;
+        if (a && a !== b && !Object.keys(open).length && nodes[a] && nodes[b] && !hasEdge[a + '>' + b] && !siblings(a, b) && !warned[a + '>' + b]) {
+          warned[a + '>' + b] = true;
+          add({ code: 'R16', severity: 'warning', node: a, from: 'run',
+                message: a + ' went to ' + b + ', which the map has no edge for' +
+                  (nodes[a].branches_unknown ? ' (its branches are unknown: R3)' : '') +
+                  ': ' + b + ' is lit as run, the way into it isn’t drawn.' });
+        }
+        open[key] = true;
+        prev = b;
+      } else if (e.event_type === 'step_finished') {
+        delete open[key];
+      }
+    });
   }
   return out.sort(function (a, b) { return (SEVERITY[a.severity] - SEVERITY[b.severity]) || String(a.code).localeCompare(String(b.code), 'en', { numeric: true }); });
 }
@@ -1280,6 +1305,16 @@ function nextOf(topo, id) {
   var outs = ((topo && topo.edges) || []).filter(function (e) { return e.from === id; });
   return outs.length === 1 && !outs[0].from_branch ? outs[0].to : null;
 }
+/* A step the map draws with no way out (its branches can't be read: R3, e.g. an unannotated
+   Command router) that the run left anyway: where it went, from the run, so the callout doesn't
+   read as a dead end (Engineering lists it as R16). Never used when the map has any exit. */
+function ranNextOffMap(topo, events, id) {
+  if (((topo && topo.edges) || []).some(function (e) { return e.from === id; })) return null;
+  var seq = [];
+  topLevel(events || []).forEach(function (e) { if (seq[seq.length - 1] !== e.node) seq.push(e.node); });
+  var i = seq.indexOf(id);
+  return i >= 0 && i + 1 < seq.length && nodeOf(topo, seq[i + 1]) ? seq[i + 1] : null;
+}
 function branchLabel(ed) { return ed.plain_label || human(ed.from_branch || ed.when || ''); }
 
 /* The branch cards for a node with two or more named paths: each path's own words, where it goes,
@@ -1373,7 +1408,7 @@ export function callout(topo, events, id, opts) {
   }
   // The step it goes to next, marked (Presentation colours it as the path), the sentence ended once.
   function nextSeg(label) { var e = endSentence(label); return [{ t: e.slice(0, e.length - (e.length > label.replace(/\s+$/, '').length ? 1 : 0)), next: true }, e.length > label.replace(/\s+$/, '').length ? '.' : '']; }
-  var nx = nextOf(topo, id), nextWords = nx ? plainLabel(nodeOf(topo, nx), nx) : null;
+  var nx = nextOf(topo, id) || ranNextOffMap(topo, events, id), nextWords = nx ? plainLabel(nodeOf(topo, nx), nx) : null;
 
   if (!evs.length) {
     out.status = opts.finished ? 'not_needed' : 'pending';

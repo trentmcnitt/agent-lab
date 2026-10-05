@@ -8,7 +8,8 @@
 What `instrument` derives, with nothing typed by hand (SPEC.md 8.5):
 - **Structure** from the graph: nodes from `compiled.get_graph()`, plain edges from it, branches from
   `compiled.builder.branches` (every path-map label, many-to-one included), `Command` destinations
-  from `builder.nodes[n].ends`, a subgraph's nodes from its own builder as `container/inner`.
+  from `builder.nodes[n].ends` (a node that routes with `Command(goto=...)` and no readable
+  destinations is R3), a subgraph's nodes from its own builder as `container/inner`.
 - **Words** from `@lab.step(...)` on each node function (and its docstring), read off the function
   LangGraph holds, so renaming a node carries its words along.
 - **Attribution** at runtime from LangGraph's own callback metadata (`langgraph_node`,
@@ -21,11 +22,17 @@ so `lab.verify(graph)` and `python -m agentlab verify` find the words to check.
 """
 from __future__ import annotations
 
+import ast
 import dataclasses
+import inspect
 import os
+import re
 import sys
+import textwrap
 import threading
 import time
+import types
+import typing
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version as _dist_version
 from pathlib import Path
@@ -75,6 +82,137 @@ def _subgraph(runnable: Any) -> Pregel | None:
     if isinstance(runnable, Pregel) and isinstance(getattr(runnable, "builder", None), StateGraph):
         return runnable
     return None
+
+
+COMMAND_HINT = ('it routes with Command(goto=...) and its destinations can\'t be read: annotate it '
+                '-> Command[Literal["a", "b"]] or pass add_node(..., destinations=("a", "b"))')
+
+
+def _returns_command(func: Any) -> bool | None:
+    """Whether the return annotation is a `Command` (bare, `Command[...]`, or in a Union); None if
+    there is none. A `Command[Literal[...]]` LangGraph could read never gets here (its ends are set)."""
+    try:
+        hints = typing.get_type_hints(func)
+        rtn = hints.get("return", inspect.Signature.empty)
+    except Exception:  # noqa: BLE001 - an unresolvable annotation (a forward ref, a string) is read raw
+        rtn = getattr(func, "__annotations__", {}).get("return", inspect.Signature.empty)
+    if rtn is inspect.Signature.empty or rtn is None:
+        return None
+    if isinstance(rtn, str):
+        return bool(re.search(r"\bCommand\b", rtn))
+    candidates = typing.get_args(rtn) if typing.get_origin(rtn) in (typing.Union, types.UnionType) else (rtn,)
+    return any(c is Command or typing.get_origin(c) is Command for c in candidates)
+
+
+def _command_calls(func: Any) -> list[bool] | None:
+    """For each `Command(...)` built in the function's own body (not in a nested def or lambda),
+    whether it can route: it passes `goto=` (or `**kwargs`, which can't be read). None when the
+    source can't be read or parsed."""
+    try:
+        src = textwrap.dedent(inspect.getsource(func))
+    except Exception:  # noqa: BLE001 - a REPL, `python -`, exec'd code: read the bytecode instead
+        return _command_calls_in_code(func)
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        tree = _lambda_tree(src) if func.__name__ == "<lambda>" else None
+        if tree is None:
+            return _command_calls_in_code(func)
+    root = next((n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))), None)
+    if root is None:
+        return None
+    scope = dict(getattr(func, "__globals__", {}) or {})
+    try:
+        scope.update(inspect.getclosurevars(func).nonlocals)
+    except Exception:  # noqa: BLE001
+        pass
+
+    def is_command(callee: ast.expr) -> bool:
+        parts: list[str] = []
+        while isinstance(callee, ast.Attribute):
+            parts.insert(0, callee.attr)
+            callee = callee.value
+        if not isinstance(callee, ast.Name):
+            return False
+        parts.insert(0, callee.id)
+        obj: Any = scope.get(parts[0], _UNRESOLVED)
+        for part in parts[1:]:
+            obj = getattr(obj, part, _UNRESOLVED) if obj is not _UNRESOLVED else obj
+        if obj is not _UNRESOLVED:
+            return obj is Command
+        return parts[-1] == "Command"
+
+    found: list[bool] = []
+    stack = list(ast.iter_child_nodes(root))
+    while stack:
+        n = stack.pop()
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue   # a nested helper's Command is not this node's return
+        if isinstance(n, ast.Call) and is_command(n.func):
+            found.append(any(k.arg in ("goto", None) for k in n.keywords))
+        stack.extend(ast.iter_child_nodes(n))
+    return found
+
+
+_UNRESOLVED = object()
+
+
+def _command_calls_in_code(func: Any) -> list[bool] | None:
+    """The same question from the compiled code when there is no source: does the function's own
+    code (nested functions are separate code objects, so not theirs) name `Command`, and does it
+    make a call with a `goto=` keyword (the keyword names are a constant tuple)? One entry, or []
+    when it never names `Command`."""
+    code = getattr(func, "__code__", None)
+    if code is None:
+        return None
+    scope = getattr(func, "__globals__", {}) or {}
+    cells = dict(zip(code.co_freevars, getattr(func, "__closure__", None) or ()))
+
+    def resolves(name: str) -> bool:
+        if name in cells:
+            try:
+                return cells[name].cell_contents is Command
+            except ValueError:
+                return False
+        obj = scope.get(name, _UNRESOLVED)
+        return obj is Command or (obj is _UNRESOLVED and name == "Command")
+
+    names = list(code.co_names) + list(code.co_freevars)
+    if not any(resolves(n) or n == "Command" for n in names):
+        return []
+    goto = any(isinstance(c, tuple) and "goto" in c for c in code.co_consts)
+    return [goto]
+
+
+def _lambda_tree(src: str) -> ast.AST | None:
+    """A lambda's source is the lines it sits on, often a fragment of a larger call
+    (`g.add_node("d", lambda s: ...)` split over lines): the first `lambda ...` in it that parses
+    as an expression on its own."""
+    start = src.find("lambda")
+    while start >= 0:
+        text = src[start:start + 2000]
+        for end in range(len(text), 0, -1):
+            try:
+                return ast.parse(text[:end].strip(), mode="eval")
+            except SyntaxError:
+                continue
+        start = src.find("lambda", start + 1)
+    return None
+
+
+def _routes_by_command(func: Any) -> bool:
+    """A node that moves on with `Command(goto=...)` and has no readable destinations (SPEC 8.7, R3):
+    its body builds a `Command` with `goto=`, or it is annotated `-> Command` and its body builds no
+    `Command` itself (it returns one made elsewhere). A body whose every `Command` only updates or
+    resumes doesn't route. Anything that can't be read (a subgraph, a runnable, no source) is no
+    claim: never a false error."""
+    if not (inspect.isfunction(func) or inspect.ismethod(func)):
+        return False
+    calls = _command_calls(func)
+    annotated = _returns_command(func)
+    if calls is None:
+        return bool(annotated)
+    return any(calls) or (bool(annotated) and not calls)
 
 
 def structure_from(compiled: Any) -> Structure:
@@ -142,6 +280,9 @@ def _read(compiled: Any, prefix: str, container: str | None, nodes: list[NodeSpe
     for name, spec in builder.nodes.items():
         if spec.ends:   # Command destinations: from `Command[Literal[...]]` or add_node(destinations=)
             branches.append(BranchSpec(source=nid(name), ends={t: nid(t) for t in spec.ends}, router=None))
+        elif _routes_by_command(_user_func(spec.runnable)):
+            # It moves on with `Command(goto=...)` and nothing says where: R3, never a guess.
+            branches.append(BranchSpec(source=nid(name), ends=None, router=None, hint=COMMAND_HINT))
 
 
 # ---------------------------------------------------------------- runtime: the callback handler

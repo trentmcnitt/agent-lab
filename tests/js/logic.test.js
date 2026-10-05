@@ -525,3 +525,18 @@ test('the running sweep: one band, off the box at both ends, never a second band
   assert.ok(e0 >= 1, 'ends right of the box: ' + e0);
   assert.ok(s0 < s1);
 });
+
+test('R16 on real recordings: none on the maps they carried, one when an edge they used is cut', () => {
+  const { topo, events } = hello('hello-answer');
+  assert.deepEqual(L.mapChecks(topo, events).filter((f) => f.code === 'R16'), []);
+  const cut = Object.assign({}, topo, { edges: topo.edges.filter((e) => !(e.from === 'lookup' && e.to === 'answer')) });
+  const r16 = L.mapChecks(cut, events).filter((f) => f.code === 'R16');
+  assert.equal(r16.length, 1);
+  assert.equal(r16[0].node, 'lookup');
+  assert.match(r16[0].message, /lookup went to answer/);
+  if (!haveDesk) return;
+  fs.readdirSync(HELPDESK).filter((f) => f.endsWith('.recording.jsonl')).forEach((f) => {
+    const r = desk(f.replace('.recording.jsonl', ''));
+    if (r.topo) assert.deepEqual(L.mapChecks(r.topo, r.events).filter((x) => x.code === 'R16'), [], f);
+  });
+});
