@@ -1914,3 +1914,45 @@ export function quietRun(run, nowMs, opts) {
   var since = nowMs - run.lastArr;
   return since >= q ? { at: run.lastArr, sinceMs: since } : null;
 }
+
+/* Presentation pacing (bench.js draws it). Some steps finish in well under a millisecond, so on
+   screen they'd go from dark to done in one frame and the flow would be invisible. Each step is held
+   lit for at least MIN_LIT_MS, and a step isn't shown starting until the one before it has been shown
+   finishing. Only what's drawn is paced: every time and number shown is real.
+   A run the app is feeding as it happens (run.followsApp: beside the app, or live) is never allowed to
+   trail the app by more than a beat, because the app shows its own result the moment it has it (a
+   ghost text, a reply): a step that had already finished when its first event arrived (its start and
+   end came together) is held CATCHUP_MS, not MIN_LIT_MS, and a step that arrived running is shown
+   finished no later than CATCHUP_MS after its end arrived. Recordings and Step through keep the full
+   pacing. Sets s.vs / s.ve (wall ms: shown starting / finishing) on each step and returns when the
+   last top-level step is shown finishing. arr / arrEnd are the wall times a step's start / end arrived. */
+export var MIN_LIT_MS = 450;
+export var SKIPPED_LIT_MS = 150;
+export var CATCHUP_MS = 100;
+// A step's start and end that arrive this close together came in one batch: it was already over.
+export var SAME_ARRIVAL_MS = 30;
+export function paceSchedule(run) {
+  var prevEnd = -Infinity, live = !!run.followsApp;
+  run.stepOrder.forEach(function (sid) {
+    var s = run.steps[sid];
+    if (s.parent) { s.vs = s.arr; s.ve = s.arrEnd == null ? Infinity : s.arrEnd; return; }
+    s.vs = Math.max(s.arr, prevEnd);
+    var hold = s.status === 'skipped' ? SKIPPED_LIT_MS : MIN_LIT_MS;
+    if (s.arrEnd == null) s.ve = Infinity;
+    else if (!live) s.ve = Math.max(s.arrEnd, s.vs + hold);
+    else if (s.arrEnd - s.arr <= SAME_ARRIVAL_MS) s.ve = Math.max(s.arrEnd, s.vs + Math.min(hold, CATCHUP_MS));
+    else s.ve = Math.max(s.arrEnd, Math.min(s.vs + hold, s.arrEnd + CATCHUP_MS));
+    prevEnd = s.ve;
+  });
+  return prevEnd;
+}
+// The next wall time after nowMs at which what paceSchedule shows changes (a step shown starting or
+// finishing), or null: the bench redraws then instead of on its next 100 ms tick.
+export function nextPaceChange(run, nowMs) {
+  var next = null;
+  run.stepOrder.forEach(function (sid) {
+    var s = run.steps[sid];
+    [s.vs, s.ve].forEach(function (t) { if (t != null && isFinite(t) && t > nowMs && (next == null || t < next)) next = t; });
+  });
+  return next;
+}

@@ -37,11 +37,8 @@
     return global.BenchLayout(topo, geom);
   }
 
-  /* Presentation pacing. Some steps finish in well under a millisecond, so on screen they'd go
-     from dark to done in one frame and the flow would be invisible. Each step is held lit for
-     at least MIN_LIT_MS, and a step isn't shown starting until the one before it has been
-     shown finishing. Only what's drawn is paced: every time and number shown is real. */
-  var MIN_LIT_MS = 450;
+  /* Presentation pacing: logic.paceSchedule (each step held lit a moment so the flow is visible;
+     a run the app feeds as it happens never trails the app by more than a beat). */
   // The pill for a run the app has gone quiet on (logic.quietRun): what the bench knows, nothing more.
   var QUIET_PILL = { cls: 'paused', text: 'No word from the app', full: 'The app has sent nothing for this run for a while, so its clock is stopped where the app last spoke. It picks up if the app does.' };
   function wallNow() { return (global.performance && performance.now) ? performance.now() : Date.now(); }
@@ -438,6 +435,8 @@
     // Out of order (OTLP exports the root span last; a late run_started): re-sort and rebuild.
     if (L.needsResort(run, ev)) this.runs[ev.run_id] = L.rebuildRun(run, ev, wallNow());
     else L.reduce(run, ev, wallNow());
+    // Fed by the app as it happens (not a recording, not Step through): paced to keep up with it.
+    if (this.source !== 'replay' && !this._localPush) this.runs[ev.run_id].followsApp = true;
     // When the app last spoke about this run (quietRun): set after a rebuild, which replaces the run.
     this.runs[ev.run_id].lastArr = wallNow();
     // Redraw the inferred map for a step it hasn't seen, or when a step first shows what kind it is.
@@ -602,18 +601,8 @@
     return 'Finished · ' + t;
   }
 
-  // When each top-level step is shown starting and finishing (see MIN_LIT_MS), in wall time.
-  function schedule(run) {
-    var prevEnd = -Infinity;
-    run.stepOrder.forEach(function (sid) {
-      var s = run.steps[sid];
-      if (s.parent) { s.vs = s.arr; s.ve = s.arrEnd == null ? Infinity : s.arrEnd; return; }
-      s.vs = Math.max(s.arr, prevEnd);
-      s.ve = s.arrEnd == null ? Infinity : Math.max(s.arrEnd, s.vs + (s.status === 'skipped' ? 150 : MIN_LIT_MS));
-      prevEnd = s.ve;
-    });
-    return prevEnd;
-  }
+  // When each top-level step is shown starting and finishing (logic.paceSchedule), in wall time.
+  function schedule(run) { return lg().paceSchedule(run); }
 
   /* What's shown right now, after pacing: the steps shown starting, by node; the node shown
      running; the node order (for lit edges); and whether the run is shown finished. */
@@ -1349,7 +1338,16 @@
       var flowing = taken[k] && (S.openNode === ed.to || S.starting[ed.to]) && !finished && !S.quiet;
       var c = 'edge' + (taken[k] ? ' taken' + (flowing ? ' flowing' + (toPerson ? ' to-person' : '') : '') : finished ? ' untaken' : '') + (described ? ' described' : '');
       if (e.getAttribute('class') !== c) e.setAttribute('class', c);
-      if (taken[k]) { lit[i0] = true; if (!self._edgeLit[i0]) fresh.push(e); }
+      if (taken[k]) {
+        lit[i0] = true;
+        if (!self._edgeLit[i0]) {
+          // Beside the app, a line into a step shown only for a beat (it was over when it arrived)
+          // draws on within that beat, so the line never trails the step it leads to.
+          var into = run.followsApp && (ran[ed.to] || []).slice(-1)[0], held = into && isFinite(into.ve) ? into.ve - into.vs : null;
+          e._drawMs = held != null && held < DRAW_MS ? Math.max(60, held) : DRAW_MS;
+          fresh.push(e);
+        }
+      }
     });
     var instant = this._instant || fresh.length > 2;
     this._instant = false;
@@ -1373,7 +1371,7 @@
       if (!len) return;
       e.querySelectorAll('path.ln, path.glow').forEach(function (pth) {
         pth.style.strokeDasharray = len + ' ' + len;
-        var a = pth.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: DRAW_MS, easing: 'cubic-bezier(.4,0,.2,1)' });
+        var a = pth.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }], { duration: e._drawMs || DRAW_MS, easing: 'cubic-bezier(.4,0,.2,1)' });
         a.onfinish = a.oncancel = function () { pth.style.strokeDasharray = ''; };
       });
     });
@@ -1381,7 +1379,10 @@
     // Quiet: nothing moves until the app speaks again (push renders then), so the clock stops ticking.
     var busy = !S.quiet && (S.shownEnd > now || run.stepOrder.some(function (sid) { return run.steps[sid].arrEnd == null; }));
     clearTimeout(this._tick);
-    if (busy) this._tick = setTimeout(function () { self.render(); }, 100);
+    // Redraw when the pacing next changes what's shown (so a step lights on time, not up to a tick
+    // late), and at least every 100 ms while a step's clock runs.
+    var change = busy ? L.nextPaceChange(run, now) : null;
+    if (busy) this._tick = setTimeout(function () { self.render(); }, change == null ? 100 : Math.max(8, Math.min(100, change - now + 1)));
     // A scrolling map keeps the step the panel is on in view when that step changes.
     if (focus !== this._focusShown) {
       this._focusShown = focus;
